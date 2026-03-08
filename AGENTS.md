@@ -1,4 +1,5 @@
-# Cyber-war AG AI Agent Guide
+# 赛博战争 AI 代理指南
+
 
 ## 项目概述
 
@@ -30,7 +31,8 @@
   - **ESLint**: `eslint.config.js`
   - **路径别名**: `@/`、 `@agents/`, `@game/`, `@utils/`, `@types/`
 
-## Build & Lint Commands
+## 构建与 Lint 命令
+
 ```bash
 # 开发
 pnpm dev
@@ -39,31 +41,48 @@ pnpm dev
 pnpm build
 # 预览构建
 pnpm preview
-# Lint all TS/ TSX files
+# Lint 所有 TS/TSX 文件
+
 pnpm lint
 # 运行测试
 pnpm test
 # 单个测试文件
 pnpm test src/utils/format-currency.ts
-pnpm test src/game/state-machine.ts --run in isolation
-pnpm test src/agents/command-parser.ts --run in isolation
+pnpm test src/game/state-machine.ts --run  # 隔离运行
+
+pnpm test src/agents/command-parser.ts --run  # 隔离运行
+
 ```
 
 ## 代码风格指南
-### Imports
+
+### Imports 导入规范
+
 - 使用 path aliases (`@/`, `@agents/`, `@game/`, `@utils/`, `@types`)
-- **Named exports**:**
-  - Prefer `export default function` for React components
-  - Use `export const` or named exports for utility functions
-  - Prefer `export type` for type definitions
-  - Place in `src/types/`
-            - Only one interface/type per file
-        - Export an `interface` as a barrel file
-    - Keep barrel files small and focused
-    - Use absolute imports for OPFS API, avoid deep nesting
-        - Use `const` or prefix for constants that state values
-    - Use PascalCase for state management
- use `const [state, useState] = useState<...}`
+- **命名导出**:
+
+  - React 组件优先使用 `export default function`
+
+  - 工具函数使用 `export const` 或命名导出
+
+  - 类型定义优先使用 `export type`
+
+  - 放置在 `src/types/`
+
+            - 每个文件一个接口/类型
+
+        - 导出 `interface` 作为 barrel 文件
+
+    - 保持 barrel 文件小巧且专注
+
+    - OPFS API 使用绝对导入，避免深层嵌套
+
+        - 使用 `const` 或前缀声明常量值
+
+    - 状态管理使用 PascalCase
+
+ 使用 `const [state, useState] = useState<...}`
+
  ```
         - Avoid magic numbers, state variables
  use `const` for constants that state variables
@@ -116,14 +135,23 @@ pnpm test src/agents/command-parser.ts --run in isolation
 ```
 
 ### TypeScript
-- **Strict mode**: Always enabled (`strict: true`)
-  - `noUnusedLocals`: true - catches unused local variables
-  - `noUnusedParameters`: true - catches unused function parameters (prefix with `_)
-  - `noFallthroughCasesInSwitch`: true - catches fallthrough cases in switch statements
-  - `jsx: react-jsx` (explicit `react-jsx` transform) is needed)
-  - Vite plugin handles JSX transformation
-  - use barrel file imports when the barrel file is simple
-- - However, we about barrel files vs. default imports (no barrel file for modern React codebase, we understand what components work.
+
+- **严格模式**: 始终启用 (`strict: true`)
+
+  - `noUnusedLocals`: true - 捕获未使用的局部变量
+
+  - `noUnusedParameters`: true - 捕获未使用的函数参数（使用 `_` 前缀）
+
+  - `noFallthroughCasesInSwitch`: true - 捕获 switch 穿透
+
+  - `jsx: react-jsx` (需要显式 `react-jsx` 转换)
+
+  - Vite 插件处理 JSX 转换
+
+  - barrel 文件简单时使用 barrel 文件导入
+
+- - 但是，关于 barrel 文件 vs 默认导入（现代 React 代码库不使用 barrel 文件，我们理解组件的工作方式
+
 
  keep imports organized at the top of the file, and:
  follow a clear and hierarchy.    - Barrel imports from parent directories go at the top
@@ -188,11 +216,16 @@ pnpm test src/agents/command-parser.ts --run in isolation
 }
 ```
 
-- **Naming conventions**
-    - **Components**:** PascalCase, file name (e.g., `GameState.tsx`, `UnitCard.tsx`)
-        - **utils**:** `format-currency.ts`, `utils/format-date.ts`
-        - `logger.ts` for logging
-    - **types**:** Use interface/type definitions; prefer direct `.d.ts` file imports. Avoid `import * from a library. Use `import type { ... } from 'library'` instead of `import { Component } from 'react'`        - `import { useState, useEffect } from 'react'`
+- **命名约定**
+
+    - **组件**:** PascalCase，文件名（如 `GameState.tsx`, `UnitCard.tsx`）
+
+        - **工具函数**:** `format-currency.ts`, `utils/format-date.ts`
+
+        - `logger.ts` 用于日志
+
+    - **类型**:** 使用 interface/type 定义；优先直接 `.d.ts` 文件导入。避免 `import * from a library`。使用 `import type { ... } from 'library'` 而不是 `import { Component } from 'react'`        - `import { useState, useEffect } from 'react'`
+
         - `import { GameState, Faction, Unit, GameMap, MapCell } from '../types'
 
         // Type definitions
@@ -256,33 +289,59 @@ pnpm test src/agents/command-parser.ts --run in isolation
     }
         ```
 
-    **Error handling**
-    - **Network errors**: Pause current operation, log to `diagnostics.log`, show user-friendly error message
-    - **API key errors**: Display clear message, guide user to check validity
-    - **LLM errors**: Retry with exponential backoff (max 3 retries, 30s timeout)
-    - **OPFS errors**: Handle gracefully, ensure data integrity
-    - **Use typed error results** when possible
-    - Provide meaningful error messages for UI
-    - **Validate inputs**: Validate all inputs at boundaries, validate types, check required fields
-    - **Logging**: Use appropriate logging levels (error, warn, info, debug)
-    - **Use `diagnostics.log` for errors and warnings
-    - **Use `event-log.jsonl` for game events
-    - **Use `console` in development mode
+    **错误处理**
 
-    - **Security**: Never expose API keys in logs, errors, or client-side state
-    - **Sanitize**: Sanitize all user inputs, file paths, and data before logging or processing
+    - **网络错误**: 暂停当前操作，记录到 `diagnostics.log`，显示用户友好的错误消息
 
-## Performance
-- **Rendering**: Maintain 60fps during interaction phase
-    - **Large lists**: Use virtual scrolling for long lists (logs, units, events)
-    - **OPFS**: Batch file operations where possible
-    - **Memory**: Clean up large objects when unmounting components
+    - **API Key 错误**: 显示清晰的消息，引导用户检查有效性
 
-## Browser Compatibility
+    - **LLM 错误**: 使用指数退避重试（最多 3 次，30s 超时）
+
+    - **OPFS 错误**: 优雅处理，确保数据完整性
+
+    - **使用类型化错误结果** 尽可能
+
+    - 为 UI 提供有意义的错误消息
+
+    - **验证输入**: 在边界验证所有输入，验证类型，检查必需字段
+
+    - **日志记录**: 使用适当的日志级别（error, warn, info, debug）
+
+    - 错误和警告使用 `diagnostics.log`
+
+    - 游戏事件使用 `event-log.jsonl`
+
+    - 开发模式使用 `console`
+
+
+    - **安全**: 永远不要在日志、错误或客户端状态中暴露 API keys
+
+    - **清理**: 在记录或处理之前清理所有用户输入、文件路径和数据
+
+
+## 性能
+
+- **渲染**: 在交互阶段保持 60fps
+
+    - **大型列表**: 对长列表使用虚拟滚动（日志、单位、事件）
+
+    - **OPFS**: 尽可能批量处理文件操作
+
+    - **内存**: 卸载组件时清理大对象
+
+
+## 浏览器兼容性
+
 - **Chrome 90+**, **Firefox 90+**, **Edge 90+**, **Safari 15.2+**
-- **Feature detection**: Detect browser capabilities, provide fallbacks for unsupported features
 
-## Documentation
-- **Comments**: Use JSDoc for all public interfaces, complex logic
-- **README**: Update this file when adding new commands or changing patterns
-- **PRD/TDD**: Reference `doc/prd-v1.0.md` and `doc/tech-design-v1.0.md` for architecture decisions
+- **特性检测**: 检测浏览器能力，为不支持的特性提供降级方案
+
+
+## 文档
+
+- **注释**: 为所有公共接口和复杂逻辑使用 JSDoc
+
+- **README**: 添加新命令或更改模式时更新此文件
+
+- **PRD/TDD**: 参考 `doc/prd-v1.0.md` 和 `doc/tech-design-v1.0.md` 了解架构决策
+
