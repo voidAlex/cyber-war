@@ -57,267 +57,47 @@ pnpm test src/agents/command-parser.ts --run  # 隔离运行
 ## 代码风格指南
 
 ### Imports 导入规范
-
 - 使用 path aliases (`@/`, `@agents/`, `@game/`, `@utils/`, `@types`)
 - **命名导出**:
-
   - React 组件优先使用 `export default function`
-
   - 工具函数使用 `export const` 或命名导出
-
   - 类型定义优先使用 `export type`
-
-  - 放置在 `src/types/`
-
-            - 每个文件一个接口/类型
-
-        - 导出 `interface` 作为 barrel 文件
-
-    - 保持 barrel 文件小巧且专注
-
-    - OPFS API 使用绝对导入，避免深层嵌套
-
-        - 使用 `const` 或前缀声明常量值
-
-    - 状态管理使用 PascalCase
-
- 使用 `const [state, useState] = useState<...}`
-
- ```
-        - Avoid magic numbers, state variables
- use `const` for constants that state variables
-        - Only declare constants outside of the hook, `useConst` prefix
- for action types, constants
-        - State variables, handle in a way that doesn't require external API
-     use `useState`, `useEffect`, `useCallback` for side effects
-     - Prefer writing custom hooks (e.g., `useEffect(() => { ... }`)
-            // Run once on mount
-            return () => {
-                ...}
-            }
- }
-        }
-    }
-        // ... existing code and patterns
-        return () => {
-            ...}
-        }
-    }
-    // ... existing state from previous render
-
- // Re-render with new props/dependencies on re-reendering
-//           prevDependencies, state && are in the code
-
- // ... new code should follow existing patterns
-        // ... existing state from `useState` is
- `prevState` variable
-        const newPrevState = useRef(prevState)
-    }, [prevState, ...newState]
- = newPrevState)
- return newPrevState
-        })
-        // ... other code
-        if (state is a 'loading', or 'loading...') state.
-            this.setState({ ...newState })
-        }
- newPrevState
-        })
-    } // ... new code
-        if (state is 'idle') {
-            this.setState({ phase: 'planning', ...newState })
-        return
-        } else (state.phase !== 'idle' && phase !== 'persist') {
-            throw new Error(`Invalid phase transition: ${phase}. Allowed: ${idle}, 'planning', 'handshake', 'locked', 'resolution', 'briefing', 'persist'.`)
-            return void
-        }
-    }
-}
-```
+  - 放置在 `src/types/` 中
+  - 每个文件一个接口/类型
+  - 导出 `interface` 作为 barrel 文件
+- 保持 barrel 文件小巧且专注
+- OPFS API 使用绝对导入，避免深层嵌套
 
 ### TypeScript
-
 - **严格模式**: 始终启用 (`strict: true`)
-
   - `noUnusedLocals`: true - 捕获未使用的局部变量
-
   - `noUnusedParameters`: true - 捕获未使用的函数参数（使用 `_` 前缀）
-
   - `noFallthroughCasesInSwitch`: true - 捕获 switch 穿透
-
   - `jsx: react-jsx` (需要显式 `react-jsx` 转换)
-
   - Vite 插件处理 JSX 转换
 
-  - barrel 文件简单时使用 barrel 文件导入
+- **命名约定**:
+  - **组件**: PascalCase，文件名（如 `GameState.tsx`, `UnitCard.tsx`）
+  - **工具函数**: kebab-case 文件名（如 `format-currency.ts`, `format-date.ts`）
+  - **类型**: 使用 interface/type 定义；优先在 `src/types/` 集中管理。
 
-- - 但是，关于 barrel 文件 vs 默认导入（现代 React 代码库不使用 barrel 文件，我们理解组件的工作方式
+- **状态管理**:
+  - 避免在状态变量中使用魔法数字
+  - 在文件顶部使用 `const` 声明常量
+  - 对于 action types，使用常量或者字符串字面量联合类型
 
-
- keep imports organized at the top of the file, and:
- follow a clear and hierarchy.    - Barrel imports from parent directories go at the top
- file first
- then alias them for logical clarity and understanding the. relationships.
-  - - All imports from a single file should go at the first (e.g., `@game/engine/physics-worker.ts`)
-        - use path aliases (`@/`, `@agents/`, `@game/`, `@utils/`) to utility files,        - Use PascalCase for state management (e.g., `useState` hook)
-            return an the state
-        }
-
- if (action.type === 'function') {
-                const prevPhase = gameState.phase
-                switch (phase) {
-                    case 'handshake':
-                        // Command needs confirmation before handshake
-                        const newCandidateCommand = {
-                            ...payload,
-                            confidence,
-                            requiresConfirmation
-                        }
-                    }
-                    case 'locked':
-                        // Both faction's orders are locked, no commands can be executed
-                    this.setState({ phase: 'resolution', ...newState })
-                    case 'briefing':
-                        // Show battle progress
-                        const newReport = reportStream to the
-                        this.setState({ phase: 'persist', ...newState })
-                        return newPrevState
-                    })
-                    // ... new state
-                    // ... existing patterns (for state management)
-                    // ... existing code
-        const [state, setCurrentState] = `updateGameState` takes a state and returns it
- - Use `const` prefix for constant values
-        - Add the/state management logic (e.g., `setCount`)
-`).
-    }
-  }
-            // Update UI
- states (e.g., battle progress, victory conditions)
-            // ... existing code patterns (like state management with `useState`)
-        // ... new code should follow existing patterns
-        - ... existing codebase patterns strictly
-    -  - Avoid magic numbers in state variables
-        - Use `const` for constants at the top of files
-            // Use `const` for action types
-            const ACTION_TYPE = 'move' | 'attack_node' | 'capture_node' | { ...payload, confidence, requiresConfirmation }
-            }
-        } | ACTION | AgentAction {
-        ...payload,
-        confidence,
-            requiresConfirmation
-            "action_id": string
-            "intent": string
-            // Action description (e.g., "capture_node")
-            "payload": { node: "C3", units: ["arm-1"] } // Array of unit IDs
-            "confidence": 0.78
-            "requiresConfirmation": false
-        }
-    }
-}
-```
-
-- **命名约定**
-
-    - **组件**:** PascalCase，文件名（如 `GameState.tsx`, `UnitCard.tsx`）
-
-        - **工具函数**:** `format-currency.ts`, `utils/format-date.ts`
-
-        - `logger.ts` 用于日志
-
-    - **类型**:** 使用 interface/type 定义；优先直接 `.d.ts` 文件导入。避免 `import * from a library`。使用 `import type { ... } from 'library'` 而不是 `import { Component } from 'react'`        - `import { useState, useEffect } from 'react'`
-
-        - `import { GameState, Faction, Unit, GameMap, MapCell } from '../types'
-
-        // Type definitions
-        export type GameState = {
-            turn: number
-            phase: 'idle' | 'planning' | 'handshake' | 'locked' | 'resolution' | 'briefing' | 'persist'
-            worldState: WorldState
-        }
-        export interface WorldState {
-            turnIndex: number
-            scenarioSeed: string
-            factions: Faction[]
-            units: Unit[]
-            map: GameMap
-        }
-        export interface Faction {
-            id: string
-            name: string
-            type: 'player' | 'enemy' | 'ally'
-            trust: number // 0-100, for allies
-        }
-        export interface Unit {
-            id: string
-            name: string
-            factionId: string
-            position: { x: number; y: number }
-            hp: number
-            maxHp: number
-        }
-        export interface GameMap {
-            width: number
-            height: number
-            cells: MapCell[][]
-        }
-        export interface MapCell {
-            x: number
-            y: number
-            terrain: 'plain' | 'mountain' | 'water' | 'urban' | 'forest'
-            fogLevel: 0 | 1 | 2 | 3
-        }
-        export interface AgentAction {
-            turn: number
-            faction: string
-            agentId: string
-            intent: string
-            payload: Record<string, unknown>
-            confidence: number
-            requiresConfirmation: boolean
-        }
-        // ... other types
-        export type {
-            GameState,
-            WorldState,
-            Faction,
-            Unit,
-            GameMap,
-            MapCell,
-            AgentAction,
-        }
-        ```
-    }
-        ```
-
-    **错误处理**
-
-    - **网络错误**: 暂停当前操作，记录到 `diagnostics.log`，显示用户友好的错误消息
-
-    - **API Key 错误**: 显示清晰的消息，引导用户检查有效性
-
-    - **LLM 错误**: 使用指数退避重试（最多 3 次，30s 超时）
-
-    - **OPFS 错误**: 优雅处理，确保数据完整性
-
-    - **使用类型化错误结果** 尽可能
-
-    - 为 UI 提供有意义的错误消息
-
-    - **验证输入**: 在边界验证所有输入，验证类型，检查必需字段
-
-    - **日志记录**: 使用适当的日志级别（error, warn, info, debug）
-
-    - 错误和警告使用 `diagnostics.log`
-
-    - 游戏事件使用 `event-log.jsonl`
-
-    - 开发模式使用 `console`
-
-
-    - **安全**: 永远不要在日志、错误或客户端状态中暴露 API keys
-
-    - **清理**: 在记录或处理之前清理所有用户输入、文件路径和数据
-
+### 错误处理
+- **网络错误**: 暂停当前操作，记录到 `diagnostics.log`，显示用户友好的错误消息
+- **API Key 错误**: 显示清晰的消息，引导用户检查有效性
+- **LLM 错误**: 使用指数退避重试（最多 3 次，30s 超时）
+- **OPFS 错误**: 优雅处理，确保数据完整性
+- **验证输入**: 在边界验证所有输入，验证类型，检查必需字段
+- **日志记录**: 使用适当的日志级别（error, warn, info, debug）
+  - 错误和警告使用 `diagnostics.log`
+  - 游戏事件使用 `event-log.jsonl`
+  - 开发模式使用 `console`
+- **安全**: 永远不要在日志、错误或客户端状态中暴露 API keys
+- **清理**: 在记录或处理之前清理所有用户输入、文件路径和数据
 
 ## 性能
 
