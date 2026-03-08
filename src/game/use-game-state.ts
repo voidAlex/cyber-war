@@ -1,0 +1,393 @@
+/**
+ * 游戏状态管理 Hook
+ * 
+ * 提供对游戏状态的访问和操作，包括：
+ * - 状态机驱动
+ * - OPFS 持久化
+ * - 错误处理
+ * - 状态恢复
+ * 
+ * @module game/use-game-state
+ */
+
+import { useReducer, useEffect, useCallback, useRef, useState } from 'react'
+import type { GameState, AgentAction } from '@/types'
+import {
+  wegoReducer,
+  createInitialContext,
+  type StateMachineContext,
+  type StateMachineAction,
+  type ResolutionResult,
+} from './state-machine'
+import {
+  createNewGame,
+  loadGame,
+  saveGame,
+  createTurnSnapshot,
+  logDiagnosticBySaveId,
+} from '@/storage'
+
+import { DEFAULT_GAME_STATE } from '@/types'
+
+import { createEmptyMap } from '@/types'
+
+/**
+ * Hook 返回类型
+ */
+export interface UseGameStateReturn {
+  /** 当前游戏状态 */
+  gameState: GameState | null
+  
+  /** 状态机上下文 */
+  context: StateMachineContext
+  
+  /** 是否加载中 */
+  isLoading: boolean
+  
+  /** 错误信息 */
+  error: string | null
+  
+  /** 创建新游戏 */
+  createGame: (name: string, initialState?: Partial<GameState>) => Promise<void>
+  
+  /** 加载游戏 */
+  loadSavedGame: (saveId: string) => Promise<void>
+  
+  /** 保存游戏 */
+  saveCurrentGame: () => Promise<void>
+  
+  /** 分发状态机动作 */
+  dispatch: (action: StateMachineAction) => void
+  
+  /** 开始规划阶段 */
+  startPlanning: () => void
+  
+  /** 提交命令 */
+  submitOrder: (order: AgentAction) => void
+  
+  /** 取消命令 */
+  cancelOrder: (orderId: string) => void
+  
+  /** 确认命令 */
+  confirmOrders: () => void
+  
+  /** 开始握手 */
+  startHandshake: () => void
+  
+  /** 确认握手 */
+  confirmHandshake: () => void
+  
+  /** 取消握手 */
+  cancelHandshake: () => void
+  
+  /** 锁定命令 */
+  lockOrders: () => void
+  
+  /** 开始结算 */
+  startResolution: () => void
+  
+  /** 结算完成 */
+  resolutionComplete: (results: ResolutionResult) => void
+  
+  /** 结算失败 */
+  resolutionFailed: (error: string) => void
+  
+  /** 显示战报 */
+  showBriefing: () => void
+  
+  /** 关闭战报 */
+  dismissBriefing: () => void
+  
+  /** 持久化状态 */
+  persistState: () => void
+  
+  /** 持久化完成 */
+  persistComplete: () => void
+  
+  /** 下一回合 */
+  nextTurn: () => void
+  
+  /** 重置到空闲 */
+  resetToIdle: () => void
+  
+  /** 暂停游戏 */
+  pauseGame: () => void
+  
+  /** 恢复游戏 */
+  resumeGame: () => void
+  
+  /** 清除错误 */
+  clearError: () => void
+}
+
+/**
+ * 游戏状态管理 Hook
+ * 
+ * @param autoSave 是否自动保存（默认 true）
+ * @param autoSaveInterval 自动保存间隔（毫秒，默认 10000）
+ * @returns 游戏状态和操作方法
+ */
+export function useGameState(
+  autoSave: boolean = true,
+  autoSaveInterval: number = 10000
+): UseGameStateReturn {
+  // 初始化 reducer
+  const [context, dispatch] = useReducer(
+    wegoReducer,
+    null,
+    () => {
+      const gameState: GameState = {
+        ...DEFAULT_GAME_STATE,
+        saveId: '',
+        scenarioSeed: '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        worldState: {
+          ...DEFAULT_GAME_STATE.worldState,
+          map: createEmptyMap(10, 10),
+        },
+      }
+      return createInitialContext(gameState)
+    }
+  )
+  
+  // 加载状态
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  
+  // 自动保存定时器
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+  
+  // 是否有未保存的更改
+  const hasUnsavedChangesRef = useRef(false)
+  
+  // 创建新游戏
+  const createGame = useCallback(async (
+    name: string,
+    initialState?: Partial<GameState>
+  ) => {
+    setIsLoading(true)
+    setError(null)
+    
+    try {
+      const gameState = await createNewGame(name, initialState)
+      dispatch({ type: 'LOAD_STATE', payload: { state: gameState } })
+      hasUnsavedChangesRef.current = false
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '创建游戏失败'
+      setError(errorMessage)
+      console.error('创建游戏失败:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+  
+  // 加载游戏
+  const loadSavedGame = useCallback(async (saveId: string) => {
+    setIsLoading(true)
+    setError(null)
+    
+    try {
+      const gameState = await loadGame(saveId)
+      if (gameState) {
+        dispatch({ type: 'LOAD_STATE', payload: { state: gameState } })
+        hasUnsavedChangesRef.current = false
+      } else {
+        setError(`存档不存在: ${saveId}`)
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '加载游戏失败'
+      setError(errorMessage)
+      console.error('加载游戏失败:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+  
+  // 保存游戏
+  const saveCurrentGame = useCallback(async () => {
+    if (!context.gameState.saveId) {
+      setError('无法保存：缺少存档 ID')
+      return
+    }
+    
+    try {
+      await saveGame(context.gameState)
+      hasUnsavedChangesRef.current = false
+      
+      // 记录诊断日志
+      await logDiagnosticBySaveId(
+        context.gameState.saveId,
+        'info',
+        '游戏已保存',
+        { turn: context.gameState.turn, phase: context.gameState.phase }
+      )
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '保存游戏失败'
+      setError(errorMessage)
+      console.error('保存游戏失败:', err)
+    }
+  }, [context.gameState])
+  
+  // 在关键阶段前创建快照
+  useEffect(() => {
+    if (context.gameState.saveId && context.gameState.phase === 'locked') {
+      createTurnSnapshot(context.gameState, 'pre-resolution').catch(err => {
+        console.error('创建快照失败:', err)
+      })
+    }
+  }, [context.gameState.phase, context.gameState.saveId, context.gameState])
+  
+  // 自动保存
+  useEffect(() => {
+    if (!autoSave || !context.gameState.saveId) return
+    
+    const runAutoSave = async () => {
+      if (hasUnsavedChangesRef.current) {
+        await saveCurrentGame()
+      }
+    }
+    
+    autoSaveTimerRef.current = setInterval(runAutoSave, autoSaveInterval)
+    
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearInterval(autoSaveTimerRef.current)
+      }
+    }
+  }, [autoSave, autoSaveInterval, saveCurrentGame, context.gameState.saveId])
+  
+  // 标记有未保存的更改
+  useEffect(() => {
+    hasUnsavedChangesRef.current = true
+  }, [context.gameState])
+  
+  // 页面卸载前保存
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChangesRef.current) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [])
+  
+  // 清除错误
+  const clearError = useCallback(() => {
+    setError(null)
+  }, [])
+  
+  // 便捷方法
+  const startPlanning = useCallback(() => {
+    dispatch({ type: 'START_PLANNING' })
+  }, [])
+  
+  const submitOrder = useCallback((order: AgentAction) => {
+    dispatch({ type: 'SUBMIT_ORDER', payload: { order } })
+  }, [])
+  
+  const cancelOrder = useCallback((orderId: string) => {
+    dispatch({ type: 'CANCEL_ORDER', payload: { orderId } })
+  }, [])
+  
+  const confirmOrders = useCallback(() => {
+    dispatch({ type: 'CONFIRM_ORDERS' })
+  }, [])
+  
+  const startHandshake = useCallback(() => {
+    dispatch({ type: 'START_HANDSHAKE' })
+  }, [])
+  
+  const confirmHandshake = useCallback(() => {
+    dispatch({ type: 'CONFIRM_HANDSHAKE' })
+  }, [])
+  
+  const cancelHandshake = useCallback(() => {
+    dispatch({ type: 'CANCEL_HANDSHAKE' })
+  }, [])
+  
+  const lockOrders = useCallback(() => {
+    dispatch({ type: 'LOCK_ORDERS' })
+  }, [])
+  
+  const startResolution = useCallback(() => {
+    dispatch({ type: 'START_RESOLUTION' })
+  }, [])
+  
+  const resolutionComplete = useCallback((results: ResolutionResult) => {
+    dispatch({ type: 'RESOLUTION_COMPLETE', payload: { results } })
+  }, [])
+  
+  const resolutionFailed = useCallback((error: string) => {
+    dispatch({ type: 'RESOLUTION_FAILED', payload: { error } })
+  }, [])
+  
+  const showBriefing = useCallback(() => {
+    dispatch({ type: 'SHOW_BRIEFING' })
+  }, [])
+  
+  const dismissBriefing = useCallback(() => {
+    dispatch({ type: 'DISMISS_BRIEFING' })
+  }, [])
+  
+  const persistState = useCallback(() => {
+    dispatch({ type: 'PERSIST_STATE' })
+  }, [])
+  
+  const persistComplete = useCallback(() => {
+    dispatch({ type: 'PERSIST_COMPLETE' })
+  }, [])
+  
+  const nextTurn = useCallback(() => {
+    dispatch({ type: 'NEXT_TURN' })
+  }, [])
+  
+  const resetToIdle = useCallback(() => {
+    dispatch({ type: 'RESET_TO_IDLE' })
+  }, [])
+  
+  const pauseGame = useCallback(() => {
+    dispatch({ type: 'PAUSE_GAME' })
+  }, [])
+  
+  const resumeGame = useCallback(() => {
+    dispatch({ type: 'RESUME_GAME' })
+  }, [])
+  
+  return {
+    gameState: context.gameState.saveId ? context.gameState : null,
+    context,
+    isLoading,
+    error: error ?? context.error,
+    createGame,
+    loadSavedGame,
+    saveCurrentGame,
+    dispatch,
+    startPlanning,
+    submitOrder,
+    cancelOrder,
+    confirmOrders,
+    startHandshake,
+    confirmHandshake,
+    cancelHandshake,
+    lockOrders,
+    startResolution,
+    resolutionComplete,
+    resolutionFailed,
+    showBriefing,
+    dismissBriefing,
+    persistState,
+    persistComplete,
+    nextTurn,
+    resetToIdle,
+    pauseGame,
+    resumeGame,
+    clearError,
+  }
+}
