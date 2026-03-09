@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "dev:server": "npx tsx server/api-forwarder.ts"
   },
   "keywords": [
     "game",
