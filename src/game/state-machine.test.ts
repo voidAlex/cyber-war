@@ -275,6 +275,77 @@ describe('错误处理', () => {
   });
 });
 
+describe('M3 编排状态扩展', () => {
+  it('应该接收并记录 Agent Envelope', () => {
+    const gameState = createMockGameState({ phase: 'resolution' });
+    const context = createInitialContext(gameState);
+
+    const newState = wegoReducer(context, {
+      type: 'AGENT_ENVELOPE_EMIT',
+      payload: {
+        envelope: {
+          envelopeId: 'envelope-1',
+          sequence: 1,
+          turn: 1,
+          factionId: 'player',
+          role: 'chief_of_staff',
+          agentId: 'chief_of_staff',
+          kind: 'agent_status',
+          state: 'running',
+          payload: { phase: 'started' },
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
+    expect(newState.liveEnvelopes).toHaveLength(1);
+    expect(newState.agentProgressById.chief_of_staff).toBe('running');
+  });
+
+  it('应该加载持久化事件并恢复回放结果', () => {
+    const gameState = createMockGameState({ phase: 'idle' });
+    let context = createInitialContext(gameState);
+
+    context = wegoReducer(context, {
+      type: 'LOAD_PERSISTED_EVENTS',
+      payload: {
+        events: [
+          {
+            id: 'event-1',
+            type: 'envelope_director_final',
+            description: '导演部最终裁定',
+            data: {},
+          },
+        ],
+      },
+    });
+
+    expect(context.persistedEvents).toHaveLength(1);
+
+    context = wegoReducer(context, {
+      type: 'REPLAY_RESOLUTION_RESTORED',
+      payload: {
+        results: {
+          turn: 1,
+          success: true,
+          events: [
+            {
+              id: 'replay-event-1',
+              type: 'replay',
+              description: '回放恢复事件',
+              data: {},
+            },
+          ],
+          stateChanges: { source: 'event-log' },
+        },
+      },
+    });
+
+    expect(context.resolutionResult?.success).toBe(true);
+    expect(context.persistedEvents[0].id).toBe('replay-event-1');
+  });
+});
+
 describe('完整回合流程', () => {
   it('应该正确执行完整回合', () => {
     const gameState = createMockGameState();

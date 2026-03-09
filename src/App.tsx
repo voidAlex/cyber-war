@@ -85,7 +85,7 @@ export default function App() {
       <header className="app-header">
         <h1>赛博战争模拟器</h1>
         <p>Cyber War Simulator</p>
-        <span className="version">M1 - 项目底座</span>
+        <span className="version">M3 - 多 Agent 编排与导演部裁定</span>
       </header>
       
       {/* 主内容区 */}
@@ -101,13 +101,13 @@ export default function App() {
           
           {/* 开发说明 */}
           <div className="dev-notes">
-            <h3>M2 里程碑进度</h3>
+            <h3>M3 里程碑进度</h3>
             <ul>
-              <li>✅ 命令握手（LLM解析）</li>
-              <li>✅ 网格沙盘基础渲染</li>
-              <li>✅ 路径预演虚线</li>
-              <li>✅ 事件日志台</li>
-              <li>✅ Worker 扩展规则</li>
+              <li>✅ Action Envelope 协议与执行器</li>
+              <li>✅ 多 Agent 编排（参谋/司令/统帅/导演部）</li>
+              <li>✅ 分 Agent 进度状态与流式战报片段</li>
+              <li>✅ 导演部最终裁定写入 event-log.jsonl</li>
+              <li>✅ 基于 event-log 的回放恢复基线</li>
             </ul>
           </div>
         </section>
@@ -123,7 +123,7 @@ export default function App() {
       
       {/* 页脚 */}
       <footer className="app-footer">
-        <p>MVP 开发阶段 - 状态机 + OPFS 底座</p>
+        <p>MVP 开发阶段 - M3 多 Agent 结算闭环</p>
       </footer>
     </div>
   );

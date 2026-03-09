@@ -12,7 +12,13 @@
  * @module game/state-machine
  */
 
-import type { GameState, GamePhase, AgentAction } from '@/types'
+import type {
+  GameState,
+  GamePhase,
+  AgentAction,
+  ActionEnvelope,
+  AgentProgressState,
+} from '@/types'
 
 /**
  * 状态机动作类型
@@ -36,6 +42,9 @@ export type StateMachineAction =
   | { type: 'NEXT_TURN' }
   | { type: 'RESET_TO_IDLE' }
   | { type: 'LOAD_STATE'; payload: { state: GameState } }
+  | { type: 'AGENT_ENVELOPE_EMIT'; payload: { envelope: ActionEnvelope } }
+  | { type: 'LOAD_PERSISTED_EVENTS'; payload: { events: ResolutionEvent[] } }
+  | { type: 'REPLAY_RESOLUTION_RESTORED'; payload: { results: ResolutionResult } }
   | { type: 'PAUSE_GAME' }
   | { type: 'RESUME_GAME' }
 
@@ -97,6 +106,12 @@ export interface StateMachineContext {
   
   /** 状态历史（用于调试和回放） */
   history: StateMachineAction[]
+
+  liveEnvelopes: ActionEnvelope[]
+
+  agentProgressById: Record<string, AgentProgressState>
+
+  persistedEvents: ResolutionEvent[]
 }
 
 /**
@@ -138,6 +153,9 @@ export function createInitialContext(gameState: GameState): StateMachineContext 
     error: null,
     isPaused: false,
     history: [],
+    liveEnvelopes: [],
+    agentProgressById: {},
+    persistedEvents: [],
   }
 }
 
@@ -346,6 +364,9 @@ export function wegoReducer(
           updatedAt: new Date().toISOString(),
         },
         resolutionResult: action.payload.results,
+        persistedEvents: action.payload.results.events,
+        liveEnvelopes: [],
+        agentProgressById: {},
         error: null,
         history: newHistory,
       }
@@ -445,6 +466,8 @@ export function wegoReducer(
         },
         confirmedOrders: [],
         resolutionResult: null,
+        liveEnvelopes: [],
+        agentProgressById: {},
         error: null,
         history: newHistory,
       }
@@ -466,6 +489,8 @@ export function wegoReducer(
         pendingOrders: [],
         confirmedOrders: [],
         resolutionResult: null,
+        liveEnvelopes: [],
+        agentProgressById: {},
         error: null,
         history: newHistory,
       }
@@ -481,6 +506,8 @@ export function wegoReducer(
         },
         pendingOrders: [],
         confirmedOrders: [],
+        liveEnvelopes: [],
+        agentProgressById: {},
         error: null,
         history: newHistory,
       }
@@ -489,6 +516,36 @@ export function wegoReducer(
     case 'LOAD_STATE': {
       return {
         ...createInitialContext(action.payload.state),
+        history: newHistory,
+      }
+    }
+
+    case 'AGENT_ENVELOPE_EMIT': {
+      const { envelope } = action.payload
+      return {
+        ...context,
+        liveEnvelopes: [...context.liveEnvelopes, envelope],
+        agentProgressById: {
+          ...context.agentProgressById,
+          [envelope.agentId]: envelope.state,
+        },
+        history: newHistory,
+      }
+    }
+
+    case 'LOAD_PERSISTED_EVENTS': {
+      return {
+        ...context,
+        persistedEvents: action.payload.events,
+        history: newHistory,
+      }
+    }
+
+    case 'REPLAY_RESOLUTION_RESTORED': {
+      return {
+        ...context,
+        resolutionResult: action.payload.results,
+        persistedEvents: action.payload.results.events,
         history: newHistory,
       }
     }

@@ -120,6 +120,18 @@ export function GameStateDisplay({ className }: GameStateDisplayProps) {
           </span>
         </div>
       )}
+
+      {Object.keys(context.agentProgressById).length > 0 && (
+        <div className="agent-progress">
+          <span className="orders-label">Agent 进度</span>
+          {Object.entries(context.agentProgressById).map(([agentId, status]) => (
+            <div key={agentId} className="summary-item">
+              <span className="summary-label">{agentId}</span>
+              <span className="summary-value">{status}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

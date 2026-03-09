@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateSaveId, generateScenarioSeed } from './opfs';
+import { appendActionEnvelope } from './game-storage';
 
 describe('Game Storage Utilities', () => {
   it('should generate a valid save ID', () => {
@@ -11,5 +12,9 @@ describe('Game Storage Utilities', () => {
     const seed = generateScenarioSeed();
     expect(seed).toHaveLength(32);
     expect(seed).toMatch(/^[0-9a-f]+$/);
+  });
+
+  it('should expose appendActionEnvelope function', () => {
+    expect(typeof appendActionEnvelope).toBe('function');
   });
 });

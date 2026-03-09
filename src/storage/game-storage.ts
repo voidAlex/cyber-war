@@ -12,11 +12,13 @@
 
 import type { GameState } from '@/types'
 import type { AgentAction } from '@/types'
+import type { ActionEnvelope } from '@/types'
 import type { Faction } from '@/types'
 import {
   getSaveDirectory,
   initializeSaveDirectory,
   readJSONFile,
+  readFile,
   writeJSONFile,
   appendToFile,
   deleteSave,
@@ -288,6 +290,67 @@ export async function appendEventLog(
   const worldDir = await saveDir.getDirectoryHandle('world', { create: false })
   const line = JSON.stringify(entry) + '\n'
   await appendToFile(worldDir, 'event-log.jsonl', line)
+}
+
+export async function appendActionEnvelope(
+  saveId: string,
+  envelope: ActionEnvelope
+): Promise<void> {
+  await appendEventLog(saveId, {
+    id: envelope.envelopeId,
+    timestamp: envelope.timestamp,
+    type: `envelope_${envelope.kind}`,
+    data: {
+      envelope,
+    },
+  })
+}
+
+export async function loadEventLog(saveId: string): Promise<EventLogEntry[]> {
+  const saveDir = await getSaveDirectory(saveId)
+  if (!saveDir) {
+    return []
+  }
+
+  const worldDir = await saveDir.getDirectoryHandle('world', { create: false })
+  const content = await readFile(worldDir, 'event-log.jsonl')
+  if (!content) {
+    return []
+  }
+
+  const lines = content
+    .split('\n')
+    .map((line: string) => line.trim())
+    .filter((line: string) => line.length > 0)
+
+  const entries: EventLogEntry[] = []
+  for (const line of lines) {
+    try {
+      const parsed: unknown = JSON.parse(line)
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        typeof (parsed as Record<string, unknown>).id === 'string' &&
+        typeof (parsed as Record<string, unknown>).timestamp === 'string' &&
+        typeof (parsed as Record<string, unknown>).type === 'string'
+      ) {
+        const candidate = parsed as Record<string, unknown>
+        entries.push({
+          id: candidate.id as string,
+          timestamp: candidate.timestamp as string,
+          type: candidate.type as string,
+          data:
+            candidate.data && typeof candidate.data === 'object'
+              ? (candidate.data as Record<string, unknown>)
+              : {},
+        })
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return entries
 }
 
 /**

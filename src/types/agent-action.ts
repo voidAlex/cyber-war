@@ -144,8 +144,52 @@ export interface AgentInfo {
 }
 
 /**
+ * Agent 进度状态
+ */
+export type AgentProgressState =
+  | 'queued'
+  | 'running'
+  | 'streaming'
+  | 'completed'
+  | 'failed'
+
+export type EnvelopeKind =
+  | 'agent_status'
+  | 'battle_report_chunk'
+  | 'director_final'
+
+export interface DirectorVerdictPayload {
+  turn: number
+  summary: string
+  events: Array<{
+    id: string
+    type: string
+    description: string
+    data: Record<string, unknown>
+  }>
+  stateChanges: Record<string, unknown>
+}
+
+export interface ActionEnvelope {
+  envelopeId: string
+  sequence: number
+  turn: number
+  factionId: string
+  role: AgentRole
+  agentId: string
+  kind: EnvelopeKind
+  state: AgentProgressState
+  payload: Record<string, unknown> | DirectorVerdictPayload
+  timestamp: string
+}
+
+/**
  * 生成唯一行动 ID
  */
 export function generateActionId(): string {
   return `action_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+export function generateEnvelopeId(): string {
+  return `envelope_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }

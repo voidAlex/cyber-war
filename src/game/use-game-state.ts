@@ -11,13 +11,19 @@
  */
 
 import { useReducer, useEffect, useCallback, useRef, useState } from 'react'
-import type { GameState, AgentAction } from '@/types'
+import type {
+  GameState,
+  AgentAction,
+  ActionEnvelope,
+  DirectorVerdictPayload,
+} from '@/types'
 import {
   wegoReducer,
   createInitialContext,
   type StateMachineContext,
   type StateMachineAction,
   type ResolutionResult,
+  type ResolutionEvent,
 } from './state-machine'
 import {
   createNewGame,
@@ -27,9 +33,12 @@ import {
   logDiagnosticBySaveId,
   savePendingOrdersByFaction,
   loadPendingOrdersByFaction,
+  appendActionEnvelope,
+  loadEventLog,
 } from '@/storage'
 import { useLLMClient } from './use-llm-client'
 import { PhysicsEngineClient } from './engine/worker-client'
+import { orchestrateTurnResolution } from './agent-orchestrator'
 
 import { DEFAULT_GAME_STATE } from '@/types'
 
@@ -97,23 +106,43 @@ function createFallbackResolutionResult(turn: number): ResolutionResult {
   }
 }
 
-function createResolutionResultFromLLM(turn: number, llmResult: unknown): ResolutionResult {
-  const eventData = llmResult && typeof llmResult === 'object'
-    ? (llmResult as Record<string, unknown>)
-    : { raw: llmResult }
+function isDirectorVerdictPayload(value: unknown): value is DirectorVerdictPayload {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.turn === 'number' &&
+    typeof candidate.summary === 'string' &&
+    Array.isArray(candidate.events) &&
+    !!candidate.stateChanges &&
+    typeof candidate.stateChanges === 'object'
+  )
+}
+
+function createResolutionResultFromEventLog(events: ResolutionEvent[]): ResolutionResult | null {
+  const directorEntries = events.filter(event => event.type === 'envelope_director_final')
+  if (directorEntries.length === 0) {
+    return null
+  }
+
+  const latestDirectorEntry = directorEntries[directorEntries.length - 1]
+  const envelope = latestDirectorEntry.data.envelope
+  if (!envelope || typeof envelope !== 'object') {
+    return null
+  }
+
+  const payload = (envelope as Record<string, unknown>).payload
+  if (!isDirectorVerdictPayload(payload)) {
+    return null
+  }
 
   return {
-    turn,
+    turn: payload.turn,
     success: true,
-    events: [
-      {
-        id: `llm-resolution-${turn}`,
-        type: 'llm_resolution',
-        description: '导演部完成本回合结算',
-        data: eventData,
-      },
-    ],
-    stateChanges: eventData,
+    events: payload.events,
+    stateChanges: payload.stateChanges,
   }
 }
 
@@ -285,6 +314,23 @@ export function useGameState(
         for (const order of playerOrders) {
           dispatch({ type: 'SUBMIT_ORDER', payload: { order } })
         }
+
+        const persistedLogEntries = await loadEventLog(saveId)
+        const persistedEvents = persistedLogEntries.map(entry => ({
+          id: entry.id,
+          type: entry.type,
+          description: typeof entry.data.description === 'string'
+            ? entry.data.description
+            : entry.type,
+          data: entry.data,
+        }))
+        dispatch({ type: 'LOAD_PERSISTED_EVENTS', payload: { events: persistedEvents } })
+
+        const replayResult = createResolutionResultFromEventLog(persistedEvents)
+        if (replayResult) {
+          dispatch({ type: 'REPLAY_RESOLUTION_RESTORED', payload: { results: replayResult } })
+        }
+
         hasUnsavedChangesRef.current = false
       } else {
         setError(`存档不存在: ${saveId}`)
@@ -367,35 +413,38 @@ export function useGameState(
           context.confirmedOrders
         )
 
-        const response = await sendRequest({
-          provider: runtimeConfig.provider,
-          endpoint: runtimeConfig.endpoint,
-          apiKey: runtimeConfig.apiKey,
-          payload: {
-            turn: context.gameState.turn,
-            phase: context.gameState.phase,
-            worldState: context.gameState.worldState,
-            pendingOrders: context.pendingOrders,
-            confirmedOrders: context.confirmedOrders,
-          },
-        })
-
-        const resultPayload: unknown = await response.json()
         if (cancelled) {
           return
         }
 
-        const llmResult = createResolutionResultFromLLM(context.gameState.turn, resultPayload)
+        const orchestrated = await orchestrateTurnResolution({
+          turn: context.gameState.turn,
+          saveId: context.gameState.saveId,
+          scenarioSeed: context.gameState.scenarioSeed,
+          worldState: context.gameState.worldState,
+          pendingOrders: context.pendingOrders,
+          confirmedOrders: context.confirmedOrders,
+          workerResult,
+          runtimeConfig,
+          sendRequest,
+          onEnvelope: (envelope: ActionEnvelope) => {
+            dispatch({ type: 'AGENT_ENVELOPE_EMIT', payload: { envelope } })
+          },
+        })
+
+        if (cancelled) {
+          return
+        }
+
+        for (const envelope of orchestrated.envelopes) {
+          await appendActionEnvelope(context.gameState.saveId, envelope)
+        }
+
         dispatch({
           type: 'RESOLUTION_COMPLETE',
           payload: {
             results: {
-              ...llmResult,
-              events: [...workerResult.events, ...llmResult.events],
-              stateChanges: {
-                worker: workerResult.stateChanges,
-                llm: llmResult.stateChanges,
-              },
+              ...orchestrated.result,
             },
           },
         })

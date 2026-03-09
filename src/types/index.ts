@@ -44,12 +44,16 @@ export type {
 export { createEmptyMap } from './map'
 
 // Agent 类型
-export type { 
+export type {
   AgentIntent,
   AgentActionPayload,
   AgentAction,
+  ActionEnvelope,
+  EnvelopeKind,
+  AgentProgressState,
+  DirectorVerdictPayload,
   AgentRole,
   AgentStatus,
   AgentInfo
 } from './agent-action'
-export { generateActionId } from './agent-action'
+export { generateActionId, generateEnvelopeId } from './agent-action'

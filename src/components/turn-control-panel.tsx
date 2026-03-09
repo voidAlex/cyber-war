@@ -10,6 +10,7 @@ interface TurnControlPanelProps {
 export function TurnControlPanel({ className }: TurnControlPanelProps) {
   const {
     gameState,
+    context,
     startPlanning,
     confirmHandshake,
     lockOrders,
@@ -69,13 +70,19 @@ export function TurnControlPanel({ className }: TurnControlPanelProps) {
             <span className="hint">双方计划已锁定，准备结算</span>
           </>
         );
-      case 'resolution':
+      case 'resolution': {
+        const completedAgentCount = Object.values(context.agentProgressById).filter(
+          status => status === 'completed'
+        ).length
+        const totalAgentCount = Object.keys(context.agentProgressById).length
         return (
           <div className="resolution-status">
             <span className="spinner">⏳</span>
             <span>结算进行中...</span>
+            <span className="hint">Agent 完成度：{completedAgentCount}/{totalAgentCount}</span>
           </div>
         );
+      }
       case 'briefing':
         return (
           <>

@@ -77,7 +77,7 @@ export async function parseNaturalLanguageCommand(input: ParseCommandInput): Pro
   return {
     turn: input.turn,
     faction: input.faction,
-    agentId: 'chief-of-staff',
+    agentId: 'chief_of_staff',
     intent: normalizeIntent(parsed?.intent),
     payload: {
       units,

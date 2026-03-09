@@ -31,6 +31,8 @@ export {
   createTurnSnapshot,
   loadTurnSnapshot,
   appendEventLog,
+  appendActionEnvelope,
+  loadEventLog,
   logDiagnostic,
   logDiagnosticBySaveId,
   getSaveManifest,
