@@ -83,9 +83,9 @@
   - [x] 底部日志台（事件滚动）（依据：`src/components/event-log-panel.tsx`）
 
 ### 验收门槛
-- 命令不经确认不可执行
-- 固定 seed 回放同输入可复现同结果
-- 沙盘交互阶段达到可用帧率目标（接近 60fps）
+- [x] 命令不经确认不可执行（依据：`src/game/state-machine.test.ts` 新增用例“命令未确认时不可进入结算阶段”，验证未确认命令仍停留在 `pendingOrders`）
+- [x] 固定 seed 回放同输入可复现同结果（依据：`src/game/engine/deterministic-random.test.ts`，验证同 seed+turnIndex 序列一致、不同 turnIndex 序列差异）
+- [ ] 沙盘交互阶段达到可用帧率目标（接近 60fps）（待补充性能基准测试与测量报告）
 
 ---
 

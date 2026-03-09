@@ -136,6 +136,22 @@ describe('SUBMIT_ORDER 动作', () => {
     
     expect(newState.error).toBeDefined();
   });
+
+  it('命令未确认时不可进入结算阶段', () => {
+    const gameState = createMockGameState({ phase: 'planning' });
+    let context = createInitialContext(gameState);
+    const order = createMockOrder({ actionId: 'order-unconfirmed-1' });
+
+    context = wegoReducer(context, { type: 'SUBMIT_ORDER', payload: { order } });
+    context = wegoReducer(context, { type: 'START_HANDSHAKE' });
+    context = wegoReducer(context, { type: 'CONFIRM_HANDSHAKE' });
+    context = wegoReducer(context, { type: 'START_RESOLUTION' });
+
+    expect(context.gameState.phase).toBe('resolution');
+    expect(context.confirmedOrders).toHaveLength(0);
+    expect(context.pendingOrders).toHaveLength(1);
+    expect(context.pendingOrders[0].actionId).toBe('order-unconfirmed-1');
+  });
 });
 
 describe('LOCK_ORDERS 动作', () => {
