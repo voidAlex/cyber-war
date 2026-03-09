@@ -38,32 +38,142 @@ body {
 }
 
 .app-header {
-  padding: 2rem;
+  padding: 1rem 2rem;
   text-align: center;
   background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
   border-bottom: 1px solid #0f3460;
 }
 
 .app-header h1 {
-  font-size: 2.5rem;
+  font-size: 1.8rem;
   font-weight: 700;
   color: #e94560;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
 }
 
 .app-header p {
-  font-size: 1rem;
+  font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.6);
   text-transform: uppercase;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.15em;
+}
+
+.app-header .version {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  background: rgba(233, 69, 96, 0.15);
+  color: #e94560;
+  border-radius: 4px;
 }
 
 .app-main {
   flex: 1;
   display: flex;
-  justify-content: center;
+  gap: 1rem;
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.left-panel {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto;
+}
+
+.center-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.right-panel {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto;
+}
+
+.app-log-area {
+  height: 200px;
+  flex-shrink: 0;
+  border-top: 1px solid #0f3460;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.app-footer {
+  padding: 0.75rem 2rem;
+  text-align: center;
+  background: linear-gradient(180deg, #16213e 0%, #1a1a2e 100%);
+  border-top: 1px solid #0f3460;
+}
+
+.app-footer p {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  padding: 2rem;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.loading .spinner {
+  font-size: 3rem;
+}
+
+.loading .error-text {
+  color: #e94560;
+}
+
+.dev-notes {
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.dev-notes h3 {
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dev-notes ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.dev-notes li {
+  font-size: 0.8rem;
+  margin-bottom: 0.4rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 通用面板样式 */
+.panel {
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.panel-header {
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 600;
 }
 
 .placeholder {
@@ -113,4 +223,407 @@ body {
   font-size: 1.5rem;
   font-weight: 600;
   min-width: 3rem;
+}
+/* 按钮样式 */
+.btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #e94560;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #d63d56;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* 提示文字 */
+.hint {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+}
+
+/* 游戏沙盘面板 */
+.game-board-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.game-board-panel h3 {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 0.75rem;
+}
+
+.game-board-stage {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.panel-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.9rem;
+}
+
+/* 命令终端 */
+.command-terminal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.command-terminal h3 {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.terminal-input {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.terminal-input textarea {
+  width: 100%;
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+  min-height: 80px;
+}
+
+.terminal-input textarea:focus {
+  outline: none;
+  border-color: #e94560;
+}
+
+.terminal-input textarea::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.terminal-preview {
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  min-height: 60px;
+}
+
+.candidate-card {
+  padding: 0.75rem;
+  background: rgba(233, 69, 96, 0.1);
+  border: 1px solid rgba(233, 69, 96, 0.3);
+  border-radius: 6px;
+}
+
+/* 事件日志 */
+.event-log-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.event-log-panel h3 {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 0.5rem;
+  flex-shrink: 0;
+}
+
+.log-list {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 0.8rem;
+}
+
+.log-item {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.log-item:last-child {
+  border-bottom: none;
+}
+
+.log-item-title {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.log-item-data {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 0.25rem;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+/* 游戏状态显示 */
+.turn-info {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.turn-label {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.turn-number {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #e94560;
+}
+
+.phase-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-left: 3px solid;
+  border-radius: 0 4px 4px 0;
+  margin-bottom: 1rem;
+}
+
+.phase-icon {
+  font-size: 1rem;
+}
+
+.phase-details {
+  display: flex;
+  flex-direction: column;
+}
+
+.phase-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.phase-description {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.state-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.summary-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0;
+}
+
+.summary-label {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.summary-value {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-family: monospace;
+}
+
+.pending-orders,
+.confirmed-orders {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.orders-label {
+  display: block;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 0.25rem;
+}
+
+.agent-progress {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.error-icon {
+  color: #e94560;
+}
+
+.error-message {
+  color: #e94560;
+  font-size: 0.8rem;
+}
+
+/* 回合控制面板 */
+.resolution-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(233, 69, 96, 0.1);
+  border-radius: 6px;
+  margin: 0.5rem 0;
+}
+
+.resolution-status .spinner {
+  font-size: 1rem;
+}
+
+.unknown-phase {
+  color: #e94560;
+  font-size: 0.85rem;
+}
+
+.zip-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.zip-controls input[type="file"] {
+  display: none;
+}
+
+/* Agent 检查器 */
+.agent-inspector {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.inspector-item {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.inspector-item summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* 运行时配置面板 */
+.runtime-config-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.runtime-config-panel h3 {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.runtime-config-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.runtime-config-grid label {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.runtime-config-grid input,
+.runtime-config-grid select {
+  width: 100%;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.85rem;
+}
+
+.runtime-config-grid input:focus,
+.runtime-config-grid select:focus {
+  outline: none;
+  border-color: #e94560;
+}
+
+.runtime-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* 响应式调整 */
+@media (max-width: 1200px) {
+  .app-main {
+    flex-wrap: wrap;
+  }
+  
+  .left-panel,
+  .right-panel {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  
+  .left-panel > *,
+  .right-panel > * {
+    flex: 1;
+    min-width: 250px;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-header h1 {
+    font-size: 1.4rem;
+  }
+  
+  .app-main {
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+  
+  .app-log-area {
+    height: 150px;
+  }
 }
