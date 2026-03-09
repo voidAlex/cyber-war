@@ -1,4 +1,4 @@
-import { useGameState } from '@/game';
+import { useGameStateContext } from '@/game';
 import { getPhaseDisplayName, getPhaseDescription } from '@/game';
 import type { GamePhase } from '@/types';
 
@@ -36,7 +36,7 @@ interface GameStateDisplayProps {
  * 游戏状态显示组件
  */
 export function GameStateDisplay({ className }: GameStateDisplayProps) {
-  const { gameState, context, isLoading, error } = useGameState();
+  const { gameState, context, isLoading, error } = useGameStateContext();
 
   if (isLoading) {
     return (

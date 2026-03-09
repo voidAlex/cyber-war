@@ -1,4 +1,4 @@
-import { useGameState } from '@/game';
+import { useGameStateContext } from '@/game';
 
 interface TurnControlPanelProps {
   className?: string;
@@ -17,7 +17,7 @@ export function TurnControlPanel({ className }: TurnControlPanelProps) {
     dismissBriefing,
     nextTurn,
     createGame,
-  } = useGameState();
+  } = useGameStateContext();
 
   const handleCreateGame = () => {
     createGame('新游戏');

@@ -70,17 +70,17 @@
 - 建立“玩家可下令且可被结算”的最小可玩闭环
 
 ### 交付项
-- 命令握手协议：
-  - 自然语言输入 -> 候选结构化命令
-  - 沙盘预演虚线
-  - `[确认执行]` 写入 `pending-orders.json`
-- 最小物理引擎（Worker）：
-  - 基础机动/接敌/损耗计算
-  - 确定性随机：`scenarioSeed + turnIndex`
-- UI 基础版：
-  - 中央网格沙盘（高亮、路径预演）
-  - 右侧通信终端（指令确认）
-  - 底部日志台（事件滚动）
+- [x] 命令握手协议：
+  - [x] 自然语言输入 -> 候选结构化命令（依据：`src/agents/command-parser.ts#parseNaturalLanguageCommand`）
+  - [x] 沙盘预演虚线（依据：`src/components/game-board.tsx` 中 `Line` 路径预演层）
+  - [x] `[确认执行]` 写入 `pending-orders.json`（依据：`src/storage/game-storage.ts#savePendingOrdersByFaction` + `src/game/use-game-state.ts#saveCurrentGame`）
+- [x] 最小物理引擎（Worker）：
+  - [x] 基础机动/接敌/损耗计算（依据：`src/game/engine/physics-worker.ts#simulateTurn`）
+  - [x] 确定性随机：`scenarioSeed + turnIndex`（依据：`src/game/engine/deterministic-random.ts` + `physics-worker.ts`）
+- [x] UI 基础版：
+  - [x] 中央网格沙盘（高亮、路径预演）（依据：`src/components/game-board.tsx`）
+  - [x] 右侧通信终端（指令确认）（依据：`src/components/command-terminal.tsx`）
+  - [x] 底部日志台（事件滚动）（依据：`src/components/event-log-panel.tsx`）
 
 ### 验收门槛
 - 命令不经确认不可执行

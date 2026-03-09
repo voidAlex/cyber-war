@@ -11,6 +11,8 @@
  */
 
 import type { GameState } from '@/types'
+import type { AgentAction } from '@/types'
+import type { Faction } from '@/types'
 import {
   getSaveDirectory,
   initializeSaveDirectory,
@@ -84,6 +86,10 @@ export interface EventLogEntry {
   
   /** 事件数据 */
   data: Record<string, unknown>
+}
+
+export interface PendingOrdersByFaction {
+  [factionId: string]: AgentAction[]
 }
 
 /**
@@ -344,6 +350,45 @@ export async function getSaveManifest(saveId: string): Promise<SaveManifest | nu
   if (!saveDir) return null
   
   return await readJSONFile<SaveManifest>(saveDir, 'manifest.json')
+}
+
+export async function savePendingOrdersByFaction(
+  saveId: string,
+  ordersByFaction: PendingOrdersByFaction
+): Promise<void> {
+  const saveDir = await getSaveDirectory(saveId)
+  if (!saveDir) {
+    throw new OPFSError(`存档不存在: ${saveId}`, 'NOT_FOUND')
+  }
+
+  const factionsDir = await saveDir.getDirectoryHandle('factions', { create: false })
+  const factionEntries = Object.entries(ordersByFaction)
+
+  for (const [factionId, orders] of factionEntries) {
+    const factionDir = await factionsDir.getDirectoryHandle(factionId, { create: true })
+    await writeJSONFile(factionDir, 'pending-orders.json', orders)
+  }
+}
+
+export async function loadPendingOrdersByFaction(saveId: string): Promise<PendingOrdersByFaction> {
+  const saveDir = await getSaveDirectory(saveId)
+  if (!saveDir) {
+    return {}
+  }
+
+  const factionsDir = await saveDir.getDirectoryHandle('factions', { create: false })
+  const worldDir = await saveDir.getDirectoryHandle('world', { create: false })
+  const gameState = await readJSONFile<GameState>(worldDir, 'world-state.json')
+  const factions: Faction[] = gameState?.worldState.factions ?? []
+  const result: PendingOrdersByFaction = {}
+
+  for (const faction of factions) {
+    const factionDir = await factionsDir.getDirectoryHandle(faction.id, { create: true })
+    const pendingOrders = await readJSONFile<AgentAction[]>(factionDir, 'pending-orders.json')
+    result[faction.id] = pendingOrders ?? []
+  }
+
+  return result
 }
 
 /**

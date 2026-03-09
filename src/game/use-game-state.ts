@@ -25,8 +25,11 @@ import {
   saveGame,
   createTurnSnapshot,
   logDiagnosticBySaveId,
+  savePendingOrdersByFaction,
+  loadPendingOrdersByFaction,
 } from '@/storage'
 import { useLLMClient } from './use-llm-client'
+import { PhysicsEngineClient } from './engine/worker-client'
 
 import { DEFAULT_GAME_STATE } from '@/types'
 
@@ -237,6 +240,7 @@ export function useGameState(
   // 加载状态
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const physicsEngineClientRef = useRef<PhysicsEngineClient | null>(null)
   
   // 自动保存定时器
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -276,6 +280,11 @@ export function useGameState(
       const gameState = await loadGame(saveId)
       if (gameState) {
         dispatch({ type: 'LOAD_STATE', payload: { state: gameState } })
+        const pendingOrdersByFaction = await loadPendingOrdersByFaction(saveId)
+        const playerOrders = pendingOrdersByFaction.player ?? []
+        for (const order of playerOrders) {
+          dispatch({ type: 'SUBMIT_ORDER', payload: { order } })
+        }
         hasUnsavedChangesRef.current = false
       } else {
         setError(`存档不存在: ${saveId}`)
@@ -307,12 +316,16 @@ export function useGameState(
         '游戏已保存',
         { turn: context.gameState.turn, phase: context.gameState.phase }
       )
+
+      await savePendingOrdersByFaction(context.gameState.saveId, {
+        player: context.pendingOrders,
+      })
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '保存游戏失败'
       setError(errorMessage)
       console.error('保存游戏失败:', err)
     }
-  }, [context.gameState])
+  }, [context.gameState, context.pendingOrders])
   
   // 在关键阶段前创建快照
   useEffect(() => {
@@ -344,6 +357,16 @@ export function useGameState(
       }
 
       try {
+        if (!physicsEngineClientRef.current) {
+          physicsEngineClientRef.current = new PhysicsEngineClient()
+          await physicsEngineClientRef.current.init(context.gameState.scenarioSeed)
+        }
+
+        const workerResult = await physicsEngineClientRef.current.simulateTurn(
+          context.gameState,
+          context.confirmedOrders
+        )
+
         const response = await sendRequest({
           provider: runtimeConfig.provider,
           endpoint: runtimeConfig.endpoint,
@@ -362,9 +385,19 @@ export function useGameState(
           return
         }
 
+        const llmResult = createResolutionResultFromLLM(context.gameState.turn, resultPayload)
         dispatch({
           type: 'RESOLUTION_COMPLETE',
-          payload: { results: createResolutionResultFromLLM(context.gameState.turn, resultPayload) },
+          payload: {
+            results: {
+              ...llmResult,
+              events: [...workerResult.events, ...llmResult.events],
+              stateChanges: {
+                worker: workerResult.stateChanges,
+                llm: llmResult.stateChanges,
+              },
+            },
+          },
         })
 
         if (context.gameState.saveId) {
@@ -400,10 +433,7 @@ export function useGameState(
       cancelled = true
     }
   }, [
-    context.gameState.phase,
-    context.gameState.turn,
-    context.gameState.worldState,
-    context.gameState.saveId,
+    context.gameState,
     context.pendingOrders,
     context.confirmedOrders,
     dispatch,
@@ -411,6 +441,13 @@ export function useGameState(
   ])
   
   // 自动保存
+  useEffect(() => {
+    return () => {
+      physicsEngineClientRef.current?.destroy()
+      physicsEngineClientRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     if (!autoSave || !context.gameState.saveId) return
     

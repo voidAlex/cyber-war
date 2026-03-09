@@ -23,5 +23,7 @@ export type {
 // Hook
 export { useGameState } from './use-game-state'
 export type { UseGameStateReturn } from './use-game-state'
+export { GameStateProvider } from './game-state-context'
+export { useGameStateContext } from './use-game-state-context'
 
 export * from './engine'

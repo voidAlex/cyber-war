@@ -14,6 +14,7 @@
 import type { GameState, AgentAction } from '@/types'
 import type { ResolutionResult, ResolutionEvent } from '@/game/state-machine'
 import { generateEventId } from '@/storage/game-storage'
+import { DeterministicRandom } from './deterministic-random'
 // 确保 TS 识别这是 Worker 线程
 declare const self: DedicatedWorkerGlobalScope
 
@@ -27,14 +28,14 @@ export type EngineResponse =
   | { type: 'SIMULATE_COMPLETE'; payload: { result: ResolutionResult } }
   | { type: 'ERROR'; payload: { message: string } }
 
-// let currentSeed = ''
+let currentSeed = ''
 
 self.onmessage = (event: MessageEvent<EngineMessage>) => {
   const { type, payload } = event.data
 
   switch (type) {
     case 'INIT': {
-      // currentSeed = payload.seed
+      currentSeed = payload.seed
       self.postMessage({ type: 'INIT_ACK' } as EngineResponse)
       break
     }
@@ -55,18 +56,65 @@ self.onmessage = (event: MessageEvent<EngineMessage>) => {
  * 最小物理引擎骨架 - 模拟当前回合结算
  */
 function simulateTurn(state: GameState, actions: AgentAction[]): ResolutionResult {
-  // 仅作为骨架，实际将包含具体的路网与机动计算
-  const events: ResolutionEvent[] = actions.map(action => ({
-    id: generateEventId(),
-    type: 'action_executed',
-    description: `Action ${action.intent} executed by ${action.agentId}`,
-    data: { action }
-  }))
+  const random = new DeterministicRandom(currentSeed || state.scenarioSeed, state.worldState.turnIndex)
+  const events: ResolutionEvent[] = []
+  const stateChanges: Record<string, unknown> = {
+    unitUpdates: [] as Array<Record<string, unknown>>,
+  }
+
+  const unitUpdates = stateChanges.unitUpdates as Array<Record<string, unknown>>
+
+  for (const action of actions) {
+    if (action.intent === 'move') {
+      const moveSuccess = random.chance(0.9)
+      events.push({
+        id: generateEventId(),
+        type: 'movement',
+        description: moveSuccess
+          ? `${action.agentId} 机动至 ${String(action.payload.node ?? '目标区域')}`
+          : `${action.agentId} 机动受阻`,
+        data: { actionId: action.actionId, success: moveSuccess, node: action.payload.node },
+      })
+      unitUpdates.push({ actionId: action.actionId, intent: action.intent, success: moveSuccess })
+      continue
+    }
+
+    if (action.intent === 'attack' || action.intent === 'attack_node' || action.intent === 'capture_node') {
+      const engagement = random.nextInt(0, 100)
+      const loss = random.nextInt(5, 30)
+      const critical = random.chance(0.15)
+      const finalLoss = critical ? loss + random.nextInt(5, 15) : loss
+
+      events.push({
+        id: generateEventId(),
+        type: 'engagement',
+        description: critical
+          ? `${action.agentId} 发动强袭，敌方损耗 ${finalLoss}%`
+          : `${action.agentId} 接敌，敌方损耗 ${finalLoss}%`,
+        data: {
+          actionId: action.actionId,
+          score: engagement,
+          loss: finalLoss,
+          critical,
+          node: action.payload.node,
+        },
+      })
+      unitUpdates.push({ actionId: action.actionId, intent: action.intent, score: engagement, loss: finalLoss })
+      continue
+    }
+
+    events.push({
+      id: generateEventId(),
+      type: 'action_executed',
+      description: `Action ${action.intent} executed by ${action.agentId}`,
+      data: { action },
+    })
+  }
 
   return {
     turn: state.turn,
     events,
-    stateChanges: {},
-    success: true
+    stateChanges,
+    success: true,
   }
 }

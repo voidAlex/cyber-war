@@ -1,12 +1,73 @@
+import { useCallback, useState } from 'react';
 import { GameStateDisplay } from '@/components/game-state-display';
 import { TurnControlPanel } from '@/components/turn-control-panel';
+import { GameBoard, CommandTerminal, EventLogPanel } from '@/components';
 import { useGameRecovery } from '@/game/use-game-recovery';
+import { useGameStateContext } from '@/game';
+import { parseNaturalLanguageCommand } from '@agents/command-parser';
+
+interface RuntimeLLMConfig {
+  provider: 'openai' | 'anthropic' | 'deepseek' | 'custom'
+  endpoint: string
+  apiKey: string
+}
+
+const LLM_RUNTIME_CONFIG_KEY = 'cyberwar.llm.runtime-config'
+
+function readRuntimeLLMConfig(): RuntimeLLMConfig | null {
+  const raw = window.localStorage.getItem(LLM_RUNTIME_CONFIG_KEY)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as RuntimeLLMConfig
+    if (!parsed.provider || !parsed.endpoint || !parsed.apiKey) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+const FALLBACK_COMMAND_CONFIG: RuntimeLLMConfig = {
+  provider: 'custom',
+  endpoint: 'https://example.com/command-parser',
+  apiKey: 'dev-placeholder-key',
+}
 
 /**
  * 主应用组件
  */
 export default function App() {
   const { isRecovering, recoveryError } = useGameRecovery();
+  const { gameState, submitOrder } = useGameStateContext();
+  const [isParsing, setIsParsing] = useState(false);
+
+  const handleParseCommand = useCallback(async (command: string) => {
+    if (!gameState) {
+      return;
+    }
+
+    const config = readRuntimeLLMConfig();
+    const runtimeConfig = config ?? FALLBACK_COMMAND_CONFIG
+
+    setIsParsing(true);
+    try {
+      const action = await parseNaturalLanguageCommand({
+        command,
+        turn: gameState.turn,
+        faction: 'player',
+        provider: runtimeConfig.provider,
+        endpoint: runtimeConfig.endpoint,
+        apiKey: runtimeConfig.apiKey,
+      });
+      submitOrder(action);
+    } finally {
+      setIsParsing(false);
+    }
+  }, [gameState, submitOrder]);
 
   if (isRecovering) {
     return (
@@ -32,46 +93,33 @@ export default function App() {
         {/* 左侧：游戏状态显示 */}
         <aside className="left-panel">
           <GameStateDisplay />
+          <TurnControlPanel />
         </aside>
         
-        {/* 中央：回合控制面板 */}
         <section className="center-panel">
-          <TurnControlPanel />
+          <GameBoard />
           
           {/* 开发说明 */}
           <div className="dev-notes">
-            <h3>M1 里程碑进度</h3>
+            <h3>M2 里程碑进度</h3>
             <ul>
-              <li>✅ 核心类型系统</li>
-              <li>✅ OPFS 存储层</li>
-              <li>✅ WEGO 状态机</li>
-              <li>✅ 错误处理基线</li>
-              <li>✅ 基础 UI 组件</li>
-              <li>✅ 单元测试</li>
-              <li>✅ 验收测试</li>
+              <li>✅ 命令握手（LLM解析）</li>
+              <li>✅ 网格沙盘基础渲染</li>
+              <li>✅ 路径预演虚线</li>
+              <li>✅ 事件日志台</li>
+              <li>✅ Worker 扩展规则</li>
             </ul>
           </div>
         </section>
         
-        {/* 右侧：开发工具 */}
         <aside className="right-panel">
-          <div className="dev-tools">
-            <h3>开发工具</h3>
-            <div className="tool-item">
-              <span>📋</span>
-              <span>状态检查</span>
-            </div>
-            <div className="tool-item">
-              <span>💾</span>
-              <span>存储管理</span>
-            </div>
-            <div className="tool-item">
-              <span>📊</span>
-              <span>日志查看</span>
-            </div>
-          </div>
+          <CommandTerminal onParseCommand={handleParseCommand} isParsing={isParsing} />
         </aside>
       </main>
+
+      <section className="app-log-area">
+        <EventLogPanel />
+      </section>
       
       {/* 页脚 */}
       <footer className="app-footer">

@@ -34,6 +34,8 @@ export {
   logDiagnostic,
   logDiagnosticBySaveId,
   getSaveManifest,
+  savePendingOrdersByFaction,
+  loadPendingOrdersByFaction,
   deleteGame,
   generateEventId,
 } from './game-storage'
@@ -42,6 +44,7 @@ export type {
   SaveManifest,
   TurnSnapshot,
   EventLogEntry,
+  PendingOrdersByFaction,
   DiagnosticLogLevel,
   DiagnosticLogEntry,
 } from './game-storage'
