@@ -49,18 +49,18 @@
 - 建立可运行的项目骨架与最小闭环（无完整玩法，但可“跑一回合并落盘”）
 
 ### 交付项
-- 工程基础：前端主应用 + Worker 管线 + 后端转发最小接口
-- WEGO 状态机骨架：`idle -> planning -> handshake -> locked -> resolution -> briefing -> persist`
-- OPFS 存储层：
-  - 目录初始化（`/saves/{saveId}/...`）
-  - `world-state.json` 原子写入（tmp + rename）
-  - `turn-snapshot.json` 与 `diagnostics.log`
-- 错误处理基线：网络异常暂停回合，状态一致性保障
+- [x] 工程基础：前端主应用 + Worker 管线 + 后端转发最小接口（依据：`src/App.tsx`、`src/game/engine/physics-worker.ts`、`server/api-forwarder.ts`；`vite.config.ts` 已按 `server.proxy` 结构配置 `/api` 代理至 `localhost:3001`；`package.json` 新增 `dev:server` 脚本启动后端）
+- [x] WEGO 状态机骨架：`idle -> planning -> handshake -> locked -> resolution -> briefing -> persist`（依据：`src/game/state-machine.ts`、`src/game/state-machine.test.ts`）
+- [x] OPFS 存储层：
+  - [x] 目录初始化（`/saves/{saveId}/...`）（依据：`src/storage/opfs.ts#initializeSaveDirectory`）
+  - [x] `world-state.json` 原子写入（tmp + rename）（依据：`src/storage/opfs.ts#atomicWriteFile` + `writeJSONFile`）
+  - [x] `turn-snapshot.json` 与 `diagnostics.log`（依据：`src/storage/game-storage.ts#createTurnSnapshot`、`logDiagnostic`）
+- [x] 错误处理基线：网络异常暂停回合，状态一致性保障（依据：`src/game/use-game-state.ts` 已接入 `useLLMClient(dispatch)` 并在 `resolution` 阶段调用 `sendRequest`；`src/utils/api-client.ts#fetchLLM` 网络异常触发 `onNetworkError`，由 `src/game/use-llm-client.ts` 映射到 `dispatch({ type: 'PAUSE_GAME' })`，运行时闭环已形成）
 
 ### 验收门槛（Exit Criteria）
-- 刷新页面后可恢复最近状态
-- 状态机可完整走通 1 个空回合
-- 日志可记录异常与阶段切换
+- [x] 刷新页面后可恢复最近状态（依据：`src/game/use-game-recovery.ts` 并在 `src/App.tsx` 中完成接入）
+- [x] 状态机可完整走通 1 个空回合（依据：`src/game/state-machine.test.ts`“完整回合流程”）
+- [x] 日志可记录异常与阶段切换（依据：`src/storage/game-storage.ts#logDiagnostic`；`src/game/state-machine.ts` 通过 `history` 记录阶段动作）
 
 ---
 
