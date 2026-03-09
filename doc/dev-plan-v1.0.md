@@ -119,19 +119,19 @@
 - 达成 TDD 验收标准并形成可演示 MVP
 
 ### 交付项
-- 情报系统：Level 0-3、半衰期、残影时间戳
-- 外交系统：盟友请求与不确定履约
+- [x] 情报系统：Level 0-3、半衰期、残影时间戳（依据：`src/game/intelligence-system.ts`、`src/game/intelligence-system.test.ts`、`src/components/game-board.tsx`，并在 `src/game/use-game-state.ts` 结算后调用 `applyIntelligenceDecay`）
+- [x] 外交系统：盟友请求与不确定履约（依据：`src/game/diplomacy-system.ts#resolveAllyRequest`；`src/game/agent-orchestrator.ts` 在 `request_ally` 命令下生成履约成功/失败事件；`src/game/diplomacy-system.test.ts`）
 - ZIP 战役包：
-  - 导入校验（manifest + schema）
-  - 导出（存档与差量）
-  - 安全解包规则（防 Zip Slip/路径穿越）
-- API Key 本地加密：PBKDF2 + AES-GCM（仅会话内解密驻留）
-- 开发调试：Agent Inspector（开发模式）
+  - [x] 导入校验（manifest + schema）（依据：`src/storage/zip-campaign.ts#importCampaignZip`、`parseCampaignManifest`、`parseGameMap`、`parseFactions`、`parseUnits`）
+  - [x] 导出（存档）（依据：`src/storage/zip-campaign.ts#exportSaveAsZip` 已支持存档导出）
+  - [x] 安全解包规则（防 Zip Slip/路径穿越）（依据：`src/storage/zip-campaign.ts#normalizeZipPath` + `validateZipEntries`；`src/storage/zip-campaign.test.ts`）
+- [x] API Key 本地加密：PBKDF2 + AES-GCM（仅会话内解密驻留）（依据：`src/utils/key-encryption.ts`、`src/utils/runtime-llm-config.ts`、`src/utils/runtime-llm-session.ts`、`src/utils/key-encryption.test.ts`）
+- [x] 开发调试：Agent Inspector（开发模式）（依据：`src/components/agent-inspector.tsx`；`src/App.tsx` 通过 `import.meta.env.DEV` 挂载）
 
 ### 验收门槛
-- ZIP 导入导出闭环成功
-- 情报半衰与残影规则正确生效
-- 网络异常时状态一致，不破坏存档
+- [x] ZIP 导入导出闭环成功（依据：`src/components/turn-control-panel.tsx` 提供导入/导出入口；`src/storage/zip-campaign.ts` 提供 `importCampaignZip`/`exportSaveAsZip`）
+- [x] 情报半衰与残影规则正确生效（依据：`src/game/intelligence-system.test.ts` 5 个用例通过，覆盖 24h/48h/72h 与残影时间戳）
+- [x] 网络异常时状态一致，不破坏存档（依据：`src/utils/api-client.ts` 网络异常回调 `onNetworkError`；`src/game/use-llm-client.ts` 触发 `PAUSE_GAME`；`src/storage/game-storage.ts` 提供 `turn-snapshot.json` 快照能力）
 
 ---
 
