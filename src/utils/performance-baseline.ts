@@ -5,6 +5,24 @@ export interface FrameMetrics {
   droppedFrameRatio: number
 }
 
+export interface ResolutionTimingMetrics {
+  totalResolutionMs: number
+  firstChunkMs: number
+  agentTimingMs: Record<string, number>
+}
+
+export interface PerformanceReport {
+  scenario: string
+  turn: number
+  measuredAt: string
+  frameMetrics: FrameMetrics
+  resolutionTiming: ResolutionTimingMetrics
+  acceptance: {
+    frameRatePass: boolean
+    settlementWindowPass: boolean
+  }
+}
+
 function computePercentile(values: number[], percentile: number): number {
   if (values.length === 0) {
     return 0
@@ -57,4 +75,42 @@ export function isFrameRateAcceptable(
     metrics.droppedFrameRatio <= maxDroppedFrameRatio &&
     metrics.p95FrameTimeMs <= maxP95FrameTimeMs
   )
+}
+
+export function isSettlementWindowAcceptable(
+  totalResolutionMs: number,
+  options?: {
+    minMs?: number
+    maxMs?: number
+  }
+): boolean {
+  const minMs = options?.minMs ?? 11000
+  const maxMs = options?.maxMs ?? 15000
+  return totalResolutionMs >= minMs && totalResolutionMs <= maxMs
+}
+
+export function formatPerformanceReport(report: PerformanceReport): string {
+  return [
+    `# 性能测量报告`,
+    ``,
+    `- 场景：${report.scenario}`,
+    `- 回合：${report.turn}`,
+    `- 测量时间：${report.measuredAt}`,
+    ``,
+    `## 沙盘渲染`,
+    `- 平均帧时：${report.frameMetrics.averageFrameTimeMs.toFixed(2)} ms`,
+    `- P95 帧时：${report.frameMetrics.p95FrameTimeMs.toFixed(2)} ms`,
+    `- 估算 FPS：${report.frameMetrics.estimatedFps.toFixed(2)}`,
+    `- 掉帧比：${(report.frameMetrics.droppedFrameRatio * 100).toFixed(2)}%`,
+    ``,
+    `## 结算时序`,
+    `- 总结算耗时：${report.resolutionTiming.totalResolutionMs.toFixed(0)} ms`,
+    `- 首个战报分片：${report.resolutionTiming.firstChunkMs.toFixed(0)} ms`,
+    `- Agent 耗时：${JSON.stringify(report.resolutionTiming.agentTimingMs)}`,
+    ``,
+    `## 验收判定`,
+    `- 60fps 指标：${report.acceptance.frameRatePass ? '通过' : '不通过'}`,
+    `- 11-15s 结算窗口：${report.acceptance.settlementWindowPass ? '通过' : '不通过'}`,
+    ``,
+  ].join('\n')
 }

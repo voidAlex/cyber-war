@@ -19,6 +19,9 @@ interface OrchestrateTurnResolutionInput {
   turn: number
   saveId: string
   scenarioSeed: string
+  settlementBudgetMs?: number
+  settlementMaxMs?: number
+  contextSummaryByFaction?: Record<string, string>
   worldState: WorldState
   pendingOrders: AgentAction[]
   confirmedOrders: AgentAction[]
@@ -31,6 +34,38 @@ interface OrchestrateTurnResolutionInput {
     payload: Record<string, unknown>
   }) => Promise<Response>
   onEnvelope: (envelope: ActionEnvelope) => void
+}
+
+function wait(ms: number): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve()
+  }
+  return new Promise(resolve => {
+    setTimeout(resolve, ms)
+  })
+}
+
+async function executeAgentStepWithTimeout(input: {
+  timeoutMs: number
+  fallbackOutput: Record<string, unknown>
+  execute: (onEnvelope: (envelope: ActionEnvelope) => void) => Promise<{ output: Record<string, unknown> }>
+  pushEnvelope: (envelope: ActionEnvelope) => void
+}): Promise<{ output: Record<string, unknown> }> {
+  let acceptEnvelope = true
+  const guardedOnEnvelope = (envelope: ActionEnvelope) => {
+    if (!acceptEnvelope) {
+      return
+    }
+    input.pushEnvelope(envelope)
+  }
+
+  const executePromise = input.execute(guardedOnEnvelope)
+  const timeoutPromise = wait(input.timeoutMs).then(() => ({ output: input.fallbackOutput }))
+  const result = await Promise.race([executePromise, timeoutPromise])
+  if (result.output === input.fallbackOutput) {
+    acceptEnvelope = false
+  }
+  return result
 }
 
 function splitReportChunks(text: string): string[] {
@@ -70,86 +105,129 @@ export async function orchestrateTurnResolution(input: OrchestrateTurnResolution
   const alliedAndEnemyFactions = input.worldState.factions.filter(
     faction => faction.type === 'enemy' || faction.type === 'ally'
   )
+  const contextSummaryByFaction = input.contextSummaryByFaction ?? {}
 
-  const chiefResult = await executeAgentStep({
-    turn: input.turn,
-    factionId: 'player',
-    role: 'chief_of_staff',
-    agentId: 'chief_of_staff',
-    systemInstruction: '你是参谋长。请根据玩家已确认命令生成风险摘要 JSON，字段：summary, risks。',
-    payload: {
-      turn: input.turn,
-      confirmedOrders: input.confirmedOrders,
-      pendingOrders: input.pendingOrders,
-      scenarioSeed: input.scenarioSeed,
+  const startTimeMs = Date.now()
+
+  const chiefPromise = executeAgentStepWithTimeout({
+    timeoutMs: 3500,
+    fallbackOutput: {
+      summary: '参谋长超时，采用默认风险摘要。',
+      risks: ['通信延迟'],
     },
-    runtimeConfig: input.runtimeConfig,
-    sendRequest: input.sendRequest,
-    allocateSequence,
-    onEnvelope: pushEnvelope,
-  })
-
-  const theaterResult = await executeAgentStep({
-    turn: input.turn,
-    factionId: 'player',
-    role: 'theater_commander',
-    agentId: 'theater_commander_player',
-    systemInstruction: '你是战区司令。请输出 JSON：summary, keyActions, logistics。',
-    payload: {
+    pushEnvelope,
+    execute: onEnvelope => executeAgentStep({
       turn: input.turn,
-      confirmedOrders: input.confirmedOrders,
-      chiefSummary: chiefResult.output,
-      workerEvents: input.workerResult.events,
-    },
-    runtimeConfig: input.runtimeConfig,
-    sendRequest: input.sendRequest,
-    allocateSequence,
-    onEnvelope: pushEnvelope,
-  })
-
-  const supremeResults: Array<{ factionId: string; output: Record<string, unknown> }> = []
-  for (const faction of alliedAndEnemyFactions) {
-    const supremeResult = await executeAgentStep({
-      turn: input.turn,
-      factionId: faction.id,
-      role: 'supreme_commander',
-      agentId: `supreme_commander_${faction.id}`,
-      systemInstruction: '你是阵营统帅。请输出 JSON：summary, intent, confidence。',
+      factionId: 'player',
+      role: 'chief_of_staff',
+      agentId: 'chief_of_staff',
+      systemInstruction: '你是参谋长。请根据玩家已确认命令生成风险摘要 JSON，字段：summary, risks。',
       payload: {
         turn: input.turn,
-        faction,
-        workerEvents: input.workerResult.events,
+        confirmedOrders: input.confirmedOrders,
+        pendingOrders: input.pendingOrders,
+        scenarioSeed: input.scenarioSeed,
+        contextSummary: contextSummaryByFaction.player ?? '',
       },
       runtimeConfig: input.runtimeConfig,
       sendRequest: input.sendRequest,
       allocateSequence,
-      onEnvelope: pushEnvelope,
+      onEnvelope,
+    }),
+  })
+
+  const theaterPromise = executeAgentStepWithTimeout({
+    timeoutMs: 3500,
+    fallbackOutput: {
+      summary: '战区司令超时，采用默认战术计划。',
+      keyActions: [],
+      logistics: 'unknown',
+    },
+    pushEnvelope,
+    execute: onEnvelope => executeAgentStep({
+      turn: input.turn,
+      factionId: 'player',
+      role: 'theater_commander',
+      agentId: 'theater_commander_player',
+      systemInstruction: '你是战区司令。请输出 JSON：summary, keyActions, logistics。',
+      payload: {
+        turn: input.turn,
+        confirmedOrders: input.confirmedOrders,
+        chiefSummary: null,
+        workerEvents: input.workerResult.events,
+        contextSummary: contextSummaryByFaction.player ?? '',
+      },
+      runtimeConfig: input.runtimeConfig,
+      sendRequest: input.sendRequest,
+      allocateSequence,
+      onEnvelope,
+    }),
+  })
+
+  const [chiefResult, theaterResult] = await Promise.all([chiefPromise, theaterPromise])
+
+  const supremeResultPairs = await Promise.all(alliedAndEnemyFactions.map(async faction => {
+    const supremeResult = await executeAgentStepWithTimeout({
+      timeoutMs: 3500,
+      fallbackOutput: {
+        summary: `统帅超时(${faction.id})，采用保守策略。`,
+        intent: 'hold',
+        confidence: 0.5,
+      },
+      pushEnvelope,
+      execute: onEnvelope => executeAgentStep({
+        turn: input.turn,
+        factionId: faction.id,
+        role: 'supreme_commander',
+        agentId: `supreme_commander_${faction.id}`,
+        systemInstruction: '你是阵营统帅。请输出 JSON：summary, intent, confidence。',
+        payload: {
+          turn: input.turn,
+          faction,
+          workerEvents: input.workerResult.events,
+          contextSummary: contextSummaryByFaction[faction.id] ?? '',
+        },
+        runtimeConfig: input.runtimeConfig,
+        sendRequest: input.sendRequest,
+        allocateSequence,
+        onEnvelope,
+      }),
     })
 
-    supremeResults.push({
+    return {
       factionId: faction.id,
       output: supremeResult.output,
-    })
-  }
+    }
+  }))
+  const supremeResults: Array<{ factionId: string; output: Record<string, unknown> }> = supremeResultPairs
 
-  const directorResult = await executeAgentStep({
-    turn: input.turn,
-    factionId: 'directorate',
-    role: 'director',
-    agentId: 'directorate',
-    systemInstruction:
-      '你是导演部。请输出最终裁定 JSON：summary, additionalEvents（数组，每项含 type/description/data）。',
-    payload: {
-      turn: input.turn,
-      workerResult: input.workerResult,
-      chiefSummary: chiefResult.output,
-      theaterSummary: theaterResult.output,
-      supremeSummaries: supremeResults,
+  const directorResult = await executeAgentStepWithTimeout({
+    timeoutMs: 4000,
+    fallbackOutput: {
+      summary: '导演部超时，采用默认终裁。',
+      additionalEvents: [],
     },
-    runtimeConfig: input.runtimeConfig,
-    sendRequest: input.sendRequest,
-    allocateSequence,
-    onEnvelope: pushEnvelope,
+    pushEnvelope,
+    execute: onEnvelope => executeAgentStep({
+      turn: input.turn,
+      factionId: 'directorate',
+      role: 'director',
+      agentId: 'directorate',
+      systemInstruction:
+        '你是导演部。请输出最终裁定 JSON：summary, additionalEvents（数组，每项含 type/description/data）。',
+      payload: {
+        turn: input.turn,
+        workerResult: input.workerResult,
+        chiefSummary: chiefResult.output,
+        theaterSummary: theaterResult.output,
+        supremeSummaries: supremeResults,
+        contextSummary: contextSummaryByFaction.directorate ?? '',
+      },
+      runtimeConfig: input.runtimeConfig,
+      sendRequest: input.sendRequest,
+      allocateSequence,
+      onEnvelope,
+    }),
   })
 
   const directorSummary = extractSummary(
@@ -271,6 +349,14 @@ export async function orchestrateTurnResolution(input: OrchestrateTurnResolution
     payload: verdictPayload,
     timestamp: new Date().toISOString(),
   })
+
+  const elapsedMs = Date.now() - startTimeMs
+  const settlementBudgetMs = input.settlementBudgetMs ?? 11000
+  const settlementMaxMs = input.settlementMaxMs ?? 15000
+  const targetBudgetMs = Math.min(settlementBudgetMs, settlementMaxMs)
+  if (elapsedMs < targetBudgetMs) {
+    await wait(targetBudgetMs - elapsedMs)
+  }
 
   return {
     envelopes,

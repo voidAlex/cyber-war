@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { calculateFrameMetrics, isFrameRateAcceptable } from './performance-baseline'
+import {
+  calculateFrameMetrics,
+  formatPerformanceReport,
+  isFrameRateAcceptable,
+  isSettlementWindowAcceptable,
+} from './performance-baseline'
 
 describe('performance-baseline', () => {
   it('应计算平均帧时、P95 与估算 FPS', () => {
@@ -29,5 +34,36 @@ describe('performance-baseline', () => {
 
     expect(isFrameRateAcceptable(goodMetrics)).toBe(true)
     expect(isFrameRateAcceptable(badMetrics)).toBe(false)
+  })
+
+  it('应判断结算窗口是否位于11-15秒', () => {
+    expect(isSettlementWindowAcceptable(11000)).toBe(true)
+    expect(isSettlementWindowAcceptable(15000)).toBe(true)
+    expect(isSettlementWindowAcceptable(10999)).toBe(false)
+    expect(isSettlementWindowAcceptable(15001)).toBe(false)
+  })
+
+  it('应格式化性能报告文本', () => {
+    const report = formatPerformanceReport({
+      scenario: 'm2-sandbox',
+      turn: 5,
+      measuredAt: '2026-03-09T00:00:00.000Z',
+      frameMetrics: calculateFrameMetrics([16, 17, 16, 15]),
+      resolutionTiming: {
+        totalResolutionMs: 12000,
+        firstChunkMs: 450,
+        agentTimingMs: {
+          chief_of_staff: 3200,
+          theater_commander_player: 3100,
+        },
+      },
+      acceptance: {
+        frameRatePass: true,
+        settlementWindowPass: true,
+      },
+    })
+
+    expect(report).toContain('性能测量报告')
+    expect(report).toContain('11-15s 结算窗口：通过')
   })
 })

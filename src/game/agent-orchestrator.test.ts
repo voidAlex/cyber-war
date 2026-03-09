@@ -113,5 +113,5 @@ describe('agent-orchestrator', () => {
       event => event.type === 'ally_support_fulfilled' || event.type === 'ally_support_failed'
     )
     expect(allySupportEvent).toBeDefined()
-  })
+  }, 12000)
 })

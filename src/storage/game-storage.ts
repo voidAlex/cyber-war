@@ -15,6 +15,7 @@ import type { AgentAction } from '@/types'
 import type { ActionEnvelope } from '@/types'
 import type { Faction } from '@/types'
 import {
+  atomicWriteFile,
   getSaveDirectory,
   initializeSaveDirectory,
   readJSONFile,
@@ -92,6 +93,10 @@ export interface EventLogEntry {
 
 export interface PendingOrdersByFaction {
   [factionId: string]: AgentAction[]
+}
+
+export interface ContextSummaryByFaction {
+  [factionId: string]: string
 }
 
 /**
@@ -450,6 +455,51 @@ export async function loadPendingOrdersByFaction(saveId: string): Promise<Pendin
     const pendingOrders = await readJSONFile<AgentAction[]>(factionDir, 'pending-orders.json')
     result[faction.id] = pendingOrders ?? []
   }
+
+  return result
+}
+
+export async function saveContextSummaryByFaction(
+  saveId: string,
+  summaryByFaction: ContextSummaryByFaction
+): Promise<void> {
+  const saveDir = await getSaveDirectory(saveId)
+  if (!saveDir) {
+    throw new OPFSError(`存档不存在: ${saveId}`, 'NOT_FOUND')
+  }
+
+  const factionsDir = await saveDir.getDirectoryHandle('factions', { create: false })
+  const entries = Object.entries(summaryByFaction)
+
+  await Promise.all(
+    entries.map(async ([factionId, summary]) => {
+      const factionDir = await factionsDir.getDirectoryHandle(factionId, { create: true })
+      await atomicWriteFile(factionDir, 'context-summary.md', summary)
+    })
+  )
+}
+
+export async function loadContextSummaryByFaction(saveId: string): Promise<ContextSummaryByFaction> {
+  const saveDir = await getSaveDirectory(saveId)
+  if (!saveDir) {
+    return {}
+  }
+
+  const factionsDir = await saveDir.getDirectoryHandle('factions', { create: false })
+  const worldDir = await saveDir.getDirectoryHandle('world', { create: false })
+  const gameState = await readJSONFile<GameState>(worldDir, 'world-state.json')
+  const factions: Faction[] = gameState?.worldState.factions ?? []
+  const result: ContextSummaryByFaction = {}
+
+  await Promise.all(
+    factions.map(async faction => {
+      const factionDir = await factionsDir.getDirectoryHandle(faction.id, { create: true })
+      const summary = await readFile(factionDir, 'context-summary.md')
+      if (summary && summary.trim().length > 0) {
+        result[faction.id] = summary
+      }
+    })
+  )
 
   return result
 }

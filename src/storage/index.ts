@@ -38,6 +38,8 @@ export {
   getSaveManifest,
   savePendingOrdersByFaction,
   loadPendingOrdersByFaction,
+  saveContextSummaryByFaction,
+  loadContextSummaryByFaction,
   deleteGame,
   generateEventId,
 } from './game-storage'
@@ -47,6 +49,7 @@ export type {
   TurnSnapshot,
   EventLogEntry,
   PendingOrdersByFaction,
+  ContextSummaryByFaction,
   DiagnosticLogLevel,
   DiagnosticLogEntry,
 } from './game-storage'

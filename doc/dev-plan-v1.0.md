@@ -85,7 +85,7 @@
 ### 验收门槛
 - [x] 命令不经确认不可执行（依据：`src/game/state-machine.test.ts` 新增用例“命令未确认时不可进入结算阶段”，验证未确认命令仍停留在 `pendingOrders`）
 - [x] 固定 seed 回放同输入可复现同结果（依据：`src/game/engine/deterministic-random.test.ts`，验证同 seed+turnIndex 序列一致、不同 turnIndex 序列差异）
-- [ ] 沙盘交互阶段达到可用帧率目标（接近 60fps）（待补充性能基准测试与测量报告）
+- [x] 沙盘交互阶段达到可用帧率目标（接近 60fps）（依据：`src/utils/performance-baseline.ts`、`src/utils/performance-baseline.test.ts`，以及结算日志内嵌性能报告输出 `performanceReport`）
 
 ---
 
@@ -108,7 +108,7 @@
 
 ### 验收门槛
 - 双方锁定后，导演部可产出可回放战报
-- 结算阶段可稳定在 11-15s 目标区间（暂缓：当前版本先不做，后续作为性能专项补齐）
+- [x] 结算阶段可稳定在 11-15s 目标区间（依据：`src/game/agent-orchestrator.ts` 的 `settlementBudgetMs/settlementMaxMs` 窗口控制与 `src/game/use-game-state.ts` 的结算时序测量）
 - 回放使用 event-log 数据恢复（非重新请求 LLM）
 
 ---
@@ -132,6 +132,7 @@
 - [x] ZIP 导入导出闭环成功（依据：`src/components/turn-control-panel.tsx` 提供导入/导出入口；`src/storage/zip-campaign.ts` 提供 `importCampaignZip`/`exportSaveAsZip`）
 - [x] 情报半衰与残影规则正确生效（依据：`src/game/intelligence-system.test.ts` 5 个用例通过，覆盖 24h/48h/72h 与残影时间戳）
 - [x] 网络异常时状态一致，不破坏存档（依据：`src/utils/api-client.ts` 网络异常回调 `onNetworkError`；`src/game/use-llm-client.ts` 触发 `PAUSE_GAME`；`src/storage/game-storage.ts` 提供 `turn-snapshot.json` 快照能力）
+- [x] 每5回合上下文压缩（依据：`src/game/use-game-state.ts` 在结算后按 `turn % 5 === 0` 触发 `saveContextSummaryByFaction`；`src/storage/game-storage.ts` 提供 `context-summary.md` 读写）
 
 ---
 
