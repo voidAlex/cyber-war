@@ -39,55 +39,15 @@ import {
 import { useLLMClient } from './use-llm-client'
 import { PhysicsEngineClient } from './engine/worker-client'
 import { orchestrateTurnResolution } from './agent-orchestrator'
+import { applyIntelligenceDecay } from './intelligence-system'
+import { readRuntimeConfigFromSession, type RuntimeLLMConfig } from '@/utils'
 
 import { DEFAULT_GAME_STATE } from '@/types'
 
 import { createEmptyMap } from '@/types'
 
-const LLM_RUNTIME_CONFIG_KEY = 'cyberwar.llm.runtime-config'
-
-interface LLMRuntimeConfig {
-  provider: 'openai' | 'anthropic' | 'deepseek' | 'custom'
-  endpoint: string
-  apiKey: string
-}
-
-function isLLMRuntimeConfig(value: unknown): value is LLMRuntimeConfig {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  const config = value as Record<string, unknown>
-  const validProviders: LLMRuntimeConfig['provider'][] = ['openai', 'anthropic', 'deepseek', 'custom']
-
-  return (
-    typeof config.endpoint === 'string' &&
-    typeof config.apiKey === 'string' &&
-    typeof config.provider === 'string' &&
-    validProviders.includes(config.provider as LLMRuntimeConfig['provider'])
-  )
-}
-
-function readLLMRuntimeConfig(): LLMRuntimeConfig | null {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  const raw = window.localStorage.getItem(LLM_RUNTIME_CONFIG_KEY)
-  if (!raw) {
-    return null
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!isLLMRuntimeConfig(parsed)) {
-      return null
-    }
-
-    return parsed
-  } catch {
-    return null
-  }
+function readLLMRuntimeConfig(): RuntimeLLMConfig | null {
+  return readRuntimeConfigFromSession()
 }
 
 function createFallbackResolutionResult(turn: number): ResolutionResult {
@@ -121,7 +81,7 @@ function isDirectorVerdictPayload(value: unknown): value is DirectorVerdictPaylo
   )
 }
 
-function createResolutionResultFromEventLog(events: ResolutionEvent[]): ResolutionResult | null {
+export function createResolutionResultFromEventLog(events: ResolutionEvent[]): ResolutionResult | null {
   const directorEntries = events.filter(event => event.type === 'envelope_director_final')
   if (directorEntries.length === 0) {
     return null
@@ -440,12 +400,15 @@ export function useGameState(
           await appendActionEnvelope(context.gameState.saveId, envelope)
         }
 
+        const nextWorldState = applyIntelligenceDecay(context.gameState.worldState)
+
         dispatch({
           type: 'RESOLUTION_COMPLETE',
           payload: {
             results: {
               ...orchestrated.result,
             },
+            worldState: nextWorldState,
           },
         })
 
@@ -579,8 +542,8 @@ export function useGameState(
   }, [])
   
   const resolutionComplete = useCallback((results: ResolutionResult) => {
-    dispatch({ type: 'RESOLUTION_COMPLETE', payload: { results } })
-  }, [])
+    dispatch({ type: 'RESOLUTION_COMPLETE', payload: { results, worldState: context.gameState.worldState } })
+  }, [context.gameState.worldState])
   
   const resolutionFailed = useCallback((error: string) => {
     dispatch({ type: 'RESOLUTION_FAILED', payload: { error } })

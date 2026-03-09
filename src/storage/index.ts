@@ -50,3 +50,12 @@ export type {
   DiagnosticLogLevel,
   DiagnosticLogEntry,
 } from './game-storage'
+
+export {
+  exportSaveAsZip,
+  importCampaignZip,
+} from './zip-campaign'
+
+export type {
+  ImportCampaignResult,
+} from './zip-campaign'

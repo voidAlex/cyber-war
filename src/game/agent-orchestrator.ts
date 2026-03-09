@@ -2,11 +2,12 @@ import type {
   AgentAction,
   ActionEnvelope,
   DirectorVerdictPayload,
-  Faction,
+  WorldState,
 } from '@/types'
 import { generateEventId } from '@/storage'
 import type { ResolutionEvent, ResolutionResult } from './state-machine'
 import { executeAgentStep } from './action-envelope-executor'
+import { resolveAllyRequest } from './diplomacy-system'
 
 interface RuntimeLLMConfig {
   provider: 'openai' | 'anthropic' | 'deepseek' | 'custom'
@@ -18,9 +19,7 @@ interface OrchestrateTurnResolutionInput {
   turn: number
   saveId: string
   scenarioSeed: string
-  worldState: {
-    factions: Faction[]
-  }
+  worldState: WorldState
   pendingOrders: AgentAction[]
   confirmedOrders: AgentAction[]
   workerResult: ResolutionResult
@@ -199,6 +198,37 @@ export async function orchestrateTurnResolution(input: OrchestrateTurnResolution
       },
     },
   ]
+
+  const allyRequests = input.confirmedOrders.filter(order => order.intent === 'request_ally')
+  for (const request of allyRequests) {
+    const targetFactionId = typeof request.payload.targetFactionId === 'string'
+      ? request.payload.targetFactionId
+      : ''
+    if (!targetFactionId) {
+      continue
+    }
+
+    const diplomacy = resolveAllyRequest(
+      {
+        targetFactionId,
+        requestType: 'reinforcement',
+        urgency: 'medium',
+      },
+      input.worldState,
+      input.scenarioSeed
+    )
+
+    mergedEvents.push({
+      id: generateEventId(),
+      type: diplomacy.fulfilled ? 'ally_support_fulfilled' : 'ally_support_failed',
+      description: diplomacy.reason,
+      data: {
+        actionId: request.actionId,
+        targetFactionId,
+        probability: diplomacy.probability,
+      },
+    })
+  }
 
   const reportChunks = splitReportChunks(directorSummary)
   for (const chunk of reportChunks) {

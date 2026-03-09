@@ -18,6 +18,7 @@ import type {
   AgentAction,
   ActionEnvelope,
   AgentProgressState,
+  WorldState,
 } from '@/types'
 
 /**
@@ -33,7 +34,7 @@ export type StateMachineAction =
   | { type: 'CANCEL_HANDSHAKE' }
   | { type: 'LOCK_ORDERS' }
   | { type: 'START_RESOLUTION' }
-  | { type: 'RESOLUTION_COMPLETE'; payload: { results: ResolutionResult } }
+  | { type: 'RESOLUTION_COMPLETE'; payload: { results: ResolutionResult; worldState?: WorldState } }
   | { type: 'RESOLUTION_FAILED'; payload: { error: string } }
   | { type: 'SHOW_BRIEFING' }
   | { type: 'DISMISS_BRIEFING' }
@@ -361,6 +362,7 @@ export function wegoReducer(
         gameState: {
           ...context.gameState,
           phase: 'briefing',
+          worldState: action.payload.worldState ?? context.gameState.worldState,
           updatedAt: new Date().toISOString(),
         },
         resolutionResult: action.payload.results,

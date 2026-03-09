@@ -135,6 +135,27 @@
 
 ---
 
+## M5（质量专项）测试与质量基线（启动）
+
+### 目标
+- 在不改变核心玩法逻辑的前提下，补齐集成测试与质量基线，形成可持续回归能力。
+
+### 交付项
+- [x] 集成测试补齐：
+  - [x] `agent-orchestrator` 编排链路（依据：`src/game/agent-orchestrator.test.ts`）
+  - [x] `use-game-state` 回放恢复链路（依据：`src/game/use-game-state.test.ts` + `src/game/use-game-state.ts#createResolutionResultFromEventLog` 导出）
+- [x] 回归基线：确定性回放指纹（依据：`src/game/engine/replay-regression.test.ts`）
+- [x] 性能基线工具：帧时间统计与阈值判断（依据：`src/utils/performance-baseline.ts` + `src/utils/performance-baseline.test.ts`）
+- [x] 验收报告模板（依据：`doc/m5-test-quality-report-template.md`）
+
+### 验收门槛
+- [x] M5 新增测试全部通过
+- [x] 全量测试通过
+- [x] 构建通过（允许非阻断体积告警）
+- [x] Lint 通过
+
+---
+
 ## 4. 关键路径（Critical Path）
 
 1. **状态机 + OPFS 真相源（M1）**  
@@ -160,6 +181,7 @@
 5. ZIP 导入导出闭环成功 → **M4**  
 6. 网络异常状态一致性 → **M1-M4（持续）**  
 7. 导演部输出写入 event-log，回放不重调 LLM → **M3-M4**
+8. M5 测试与质量基线（集成 + 回归 + 性能指标工具）→ **M5**
 
 ---
 

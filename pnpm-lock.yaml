@@ -8,6 +8,9 @@ dependencies:
   '@types/seedrandom':
     specifier: ^3.0.8
     version: 3.0.8
+  fflate:
+    specifier: ^0.8.2
+    version: 0.8.2
   konva:
     specifier: ^10.2.0
     version: 10.2.0
@@ -1494,6 +1497,10 @@ packages:
     dependencies:
       picomatch: 4.0.3
     dev: true
+
+  /fflate@0.8.2:
+    resolution: {integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==}
+    dev: false
 
   /file-entry-cache@6.0.1:
     resolution: {integrity: sha512-7Gps/XWymbLk2QLYK4NzpMOrYjMhdIxXuIvy2QBsLE6ljuodKvdkWs/cpyJJ3CVIVpH0Oi1Hvg1ovbMzLdFBBg==}

@@ -84,7 +84,18 @@ export async function executeAgentStep(input: ExecuteAgentStepInput): Promise<Ex
 
     const rawText = await response.text()
     const output = safeParseJSON(rawText)
-    emit('completed', { phase: 'completed' })
+    emit('running', {
+      phase: 'prompt_prepared',
+      prompt: {
+        system: input.systemInstruction,
+        userPayload: input.payload,
+      },
+    })
+    emit('completed', {
+      phase: 'completed',
+      rawText,
+      parsedOutput: output,
+    })
     return { output, rawText }
   } catch (error) {
     emit('failed', {

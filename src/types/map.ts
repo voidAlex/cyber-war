@@ -51,6 +51,12 @@ export interface MapCell {
    * 记录最后一次获得该格子情报的时间
    */
   intelligenceTimestamp?: number
+
+  /** 残影单位 ID（用于迷雾残影展示） */
+  ghostUnitId?: string
+
+  /** 残影情报时间戳（Unix 时间戳） */
+  ghostTimestamp?: number
   
   /** 该格子上的单位 ID（如果有） */
   unitId?: string

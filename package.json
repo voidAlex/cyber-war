@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest",
+    "test:m5": "vitest --run src/game/agent-orchestrator.test.ts src/game/use-game-state.test.ts src/game/engine/replay-regression.test.ts src/utils/performance-baseline.test.ts",
     "test:coverage": "vitest run --coverage",
     "dev:server": "npx tsx server/api-forwarder.ts"
   },
@@ -51,6 +52,7 @@
   },
   "dependencies": {
     "@types/seedrandom": "^3.0.8",
+    "fflate": "^0.8.2",
     "konva": "^10.2.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

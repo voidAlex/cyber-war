@@ -1,6 +1,7 @@
 import { Stage, Layer, Rect, Line, Circle, Text } from 'react-konva'
 import { useMemo, useState } from 'react'
 import { useGameStateContext } from '@/game'
+import { getGhostTimestampLabel } from '@/game/intelligence-system'
 
 const CELL_SIZE = 40
 
@@ -53,6 +54,7 @@ export function GameBoard() {
               const fog = cell?.fogLevel ?? 3
               const fill = fog >= 3 ? '#1a1f2a' : fog === 2 ? '#223046' : '#2f4b6f'
               const isHover = hoverCell?.x === col && hoverCell?.y === row
+              const hasGhost = !!cell?.ghostUnitId
 
               return (
                 <Rect
@@ -64,6 +66,7 @@ export function GameBoard() {
                   fill={fill}
                   stroke={isHover ? '#ffd166' : '#3f4c66'}
                   strokeWidth={isHover ? 2 : 1}
+                  opacity={hasGhost ? 0.65 : 1}
                   onMouseEnter={() => setHoverCell({ x: col, y: row })}
                   onMouseLeave={() => setHoverCell(null)}
                 />
@@ -97,6 +100,23 @@ export function GameBoard() {
         </Layer>
 
         <Layer>
+          {map.cells.flatMap(row => row).map(cell => {
+            if (!cell.ghostUnitId || !cell.ghostTimestamp) {
+              return null
+            }
+
+            return (
+              <Text
+                key={`ghost-${cell.x}-${cell.y}`}
+                x={cell.x * CELL_SIZE + 6}
+                y={cell.y * CELL_SIZE + CELL_SIZE - 14}
+                text={getGhostTimestampLabel(cell.ghostTimestamp)}
+                fill="#93c5fd"
+                fontSize={10}
+              />
+            )
+          })}
+
           {hoverCell && (
             <Text
               x={hoverCell.x * CELL_SIZE + 4}

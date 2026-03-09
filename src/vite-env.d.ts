@@ -69,6 +69,16 @@ interface FileSystemDirectoryHandle extends FileSystemHandle {
 }
 
 declare global {
+  interface ImportMetaEnv {
+    readonly DEV: boolean
+    readonly PROD: boolean
+    readonly MODE: string
+  }
+
+  interface ImportMeta {
+    readonly env: ImportMetaEnv
+  }
+
   interface Window {
     showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>
   }

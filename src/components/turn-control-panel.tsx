@@ -1,4 +1,6 @@
+import type { ChangeEvent } from 'react';
 import { useGameStateContext } from '@/game';
+import { exportSaveAsZip, importCampaignZip } from '@/storage';
 
 interface TurnControlPanelProps {
   className?: string;
@@ -18,7 +20,35 @@ export function TurnControlPanel({ className }: TurnControlPanelProps) {
     dismissBriefing,
     nextTurn,
     createGame,
+    loadSavedGame,
   } = useGameStateContext();
+
+  const handleExportZip = async () => {
+    if (!gameState?.saveId) {
+      return
+    }
+
+    const zipBytes = await exportSaveAsZip(gameState.saveId)
+    const blob = new Blob([new Uint8Array(zipBytes)], { type: 'application/zip' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${gameState.saveId}.zip`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImportZip = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file || !gameState?.saveId) {
+      return
+    }
+
+    const arrayBuffer = await file.arrayBuffer()
+    const bytes = new Uint8Array(arrayBuffer)
+    await importCampaignZip(gameState.saveId, bytes)
+    await loadSavedGame(gameState.saveId)
+  }
 
   const handleCreateGame = () => {
     createGame('新游戏');
@@ -111,6 +141,15 @@ export function TurnControlPanel({ className }: TurnControlPanelProps) {
       </div>
       <div className="panel-content">
         {renderControls()}
+        <div className="zip-controls">
+          <button onClick={handleExportZip} className="btn btn-secondary" disabled={!gameState?.saveId}>
+            📦 导出 ZIP
+          </button>
+          <label className="btn btn-secondary">
+            📥 导入 ZIP
+            <input type="file" accept=".zip,application/zip" style={{ display: 'none' }} onChange={handleImportZip} />
+          </label>
+        </div>
       </div>
     </div>
   );

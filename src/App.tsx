@@ -1,41 +1,11 @@
 import { useCallback, useState } from 'react';
 import { GameStateDisplay } from '@/components/game-state-display';
 import { TurnControlPanel } from '@/components/turn-control-panel';
-import { GameBoard, CommandTerminal, EventLogPanel } from '@/components';
+import { GameBoard, CommandTerminal, EventLogPanel, AgentInspector, RuntimeConfigUnlockPanel } from '@/components';
 import { useGameRecovery } from '@/game/use-game-recovery';
 import { useGameStateContext } from '@/game';
 import { parseNaturalLanguageCommand } from '@agents/command-parser';
-
-interface RuntimeLLMConfig {
-  provider: 'openai' | 'anthropic' | 'deepseek' | 'custom'
-  endpoint: string
-  apiKey: string
-}
-
-const LLM_RUNTIME_CONFIG_KEY = 'cyberwar.llm.runtime-config'
-
-function readRuntimeLLMConfig(): RuntimeLLMConfig | null {
-  const raw = window.localStorage.getItem(LLM_RUNTIME_CONFIG_KEY)
-  if (!raw) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as RuntimeLLMConfig
-    if (!parsed.provider || !parsed.endpoint || !parsed.apiKey) {
-      return null
-    }
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-const FALLBACK_COMMAND_CONFIG: RuntimeLLMConfig = {
-  provider: 'custom',
-  endpoint: 'https://example.com/command-parser',
-  apiKey: 'dev-placeholder-key',
-}
+import { readRuntimeConfigFromSession } from '@/utils';
 
 /**
  * 主应用组件
@@ -50,8 +20,10 @@ export default function App() {
       return;
     }
 
-    const config = readRuntimeLLMConfig();
-    const runtimeConfig = config ?? FALLBACK_COMMAND_CONFIG
+    const runtimeConfig = readRuntimeConfigFromSession();
+    if (!runtimeConfig) {
+      return;
+    }
 
     setIsParsing(true);
     try {
@@ -85,7 +57,7 @@ export default function App() {
       <header className="app-header">
         <h1>赛博战争模拟器</h1>
         <p>Cyber War Simulator</p>
-        <span className="version">M3 - 多 Agent 编排与导演部裁定</span>
+        <span className="version">M4 - 情报/外交/ZIP/加密/Inspector</span>
       </header>
       
       {/* 主内容区 */}
@@ -101,19 +73,21 @@ export default function App() {
           
           {/* 开发说明 */}
           <div className="dev-notes">
-            <h3>M3 里程碑进度</h3>
+            <h3>M4 里程碑进度</h3>
             <ul>
-              <li>✅ Action Envelope 协议与执行器</li>
-              <li>✅ 多 Agent 编排（参谋/司令/统帅/导演部）</li>
-              <li>✅ 分 Agent 进度状态与流式战报片段</li>
-              <li>✅ 导演部最终裁定写入 event-log.jsonl</li>
-              <li>✅ 基于 event-log 的回放恢复基线</li>
+              <li>✅ 情报半衰期 + 残影时间戳显示</li>
+              <li>✅ 外交请求不确定履约（盟友信任度驱动）</li>
+              <li>✅ ZIP 战役包导入导出与安全解包</li>
+              <li>✅ API Key 本地加密（PBKDF2 + AES-GCM）</li>
+              <li>✅ Agent Inspector（开发模式）</li>
             </ul>
           </div>
         </section>
         
         <aside className="right-panel">
           <CommandTerminal onParseCommand={handleParseCommand} isParsing={isParsing} />
+          <RuntimeConfigUnlockPanel />
+          {import.meta.env.DEV && <AgentInspector />}
         </aside>
       </main>
 
@@ -123,7 +97,7 @@ export default function App() {
       
       {/* 页脚 */}
       <footer className="app-footer">
-        <p>MVP 开发阶段 - M3 多 Agent 结算闭环</p>
+        <p>MVP 开发阶段 - M4 验收项开发完成</p>
       </footer>
     </div>
   );
