@@ -26,10 +26,93 @@ import {
   createTurnSnapshot,
   logDiagnosticBySaveId,
 } from '@/storage'
+import { useLLMClient } from './use-llm-client'
 
 import { DEFAULT_GAME_STATE } from '@/types'
 
 import { createEmptyMap } from '@/types'
+
+const LLM_RUNTIME_CONFIG_KEY = 'cyberwar.llm.runtime-config'
+
+interface LLMRuntimeConfig {
+  provider: 'openai' | 'anthropic' | 'deepseek' | 'custom'
+  endpoint: string
+  apiKey: string
+}
+
+function isLLMRuntimeConfig(value: unknown): value is LLMRuntimeConfig {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const config = value as Record<string, unknown>
+  const validProviders: LLMRuntimeConfig['provider'][] = ['openai', 'anthropic', 'deepseek', 'custom']
+
+  return (
+    typeof config.endpoint === 'string' &&
+    typeof config.apiKey === 'string' &&
+    typeof config.provider === 'string' &&
+    validProviders.includes(config.provider as LLMRuntimeConfig['provider'])
+  )
+}
+
+function readLLMRuntimeConfig(): LLMRuntimeConfig | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const raw = window.localStorage.getItem(LLM_RUNTIME_CONFIG_KEY)
+  if (!raw) {
+    return null
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!isLLMRuntimeConfig(parsed)) {
+      return null
+    }
+
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function createFallbackResolutionResult(turn: number): ResolutionResult {
+  return {
+    turn,
+    success: true,
+    events: [
+      {
+        id: `fallback-resolution-${turn}`,
+        type: 'fallback_resolution',
+        description: '未配置 LLM 运行时参数，使用本地最小结算结果',
+        data: { source: 'fallback' },
+      },
+    ],
+    stateChanges: { source: 'fallback' },
+  }
+}
+
+function createResolutionResultFromLLM(turn: number, llmResult: unknown): ResolutionResult {
+  const eventData = llmResult && typeof llmResult === 'object'
+    ? (llmResult as Record<string, unknown>)
+    : { raw: llmResult }
+
+  return {
+    turn,
+    success: true,
+    events: [
+      {
+        id: `llm-resolution-${turn}`,
+        type: 'llm_resolution',
+        description: '导演部完成本回合结算',
+        data: eventData,
+      },
+    ],
+    stateChanges: eventData,
+  }
+}
 
 /**
  * Hook 返回类型
@@ -161,6 +244,8 @@ export function useGameState(
   // 是否有未保存的更改
   const hasUnsavedChangesRef = useRef(false)
   
+  const { sendRequest } = useLLMClient(dispatch)
+  
   // 创建新游戏
   const createGame = useCallback(async (
     name: string,
@@ -237,6 +322,93 @@ export function useGameState(
       })
     }
   }, [context.gameState.phase, context.gameState.saveId, context.gameState])
+
+  useEffect(() => {
+    if (context.gameState.phase !== 'resolution') {
+      return
+    }
+
+    let cancelled = false
+
+    const executeResolution = async () => {
+      const runtimeConfig = readLLMRuntimeConfig()
+
+      if (!runtimeConfig) {
+        if (!cancelled) {
+          dispatch({
+            type: 'RESOLUTION_COMPLETE',
+            payload: { results: createFallbackResolutionResult(context.gameState.turn) },
+          })
+        }
+        return
+      }
+
+      try {
+        const response = await sendRequest({
+          provider: runtimeConfig.provider,
+          endpoint: runtimeConfig.endpoint,
+          apiKey: runtimeConfig.apiKey,
+          payload: {
+            turn: context.gameState.turn,
+            phase: context.gameState.phase,
+            worldState: context.gameState.worldState,
+            pendingOrders: context.pendingOrders,
+            confirmedOrders: context.confirmedOrders,
+          },
+        })
+
+        const resultPayload: unknown = await response.json()
+        if (cancelled) {
+          return
+        }
+
+        dispatch({
+          type: 'RESOLUTION_COMPLETE',
+          payload: { results: createResolutionResultFromLLM(context.gameState.turn, resultPayload) },
+        })
+
+        if (context.gameState.saveId) {
+          await logDiagnosticBySaveId(
+            context.gameState.saveId,
+            'info',
+            '回合结算完成（LLM）',
+            { turn: context.gameState.turn }
+          )
+        }
+      } catch (err) {
+        if (cancelled) {
+          return
+        }
+
+        const errorMessage = err instanceof Error ? err.message : '回合结算失败'
+        dispatch({ type: 'RESOLUTION_FAILED', payload: { error: errorMessage } })
+
+        if (context.gameState.saveId) {
+          await logDiagnosticBySaveId(
+            context.gameState.saveId,
+            'error',
+            '回合结算失败',
+            { turn: context.gameState.turn, error: errorMessage }
+          )
+        }
+      }
+    }
+
+    void executeResolution()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    context.gameState.phase,
+    context.gameState.turn,
+    context.gameState.worldState,
+    context.gameState.saveId,
+    context.pendingOrders,
+    context.confirmedOrders,
+    dispatch,
+    sendRequest,
+  ])
   
   // 自动保存
   useEffect(() => {

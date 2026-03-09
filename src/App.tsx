@@ -1,10 +1,23 @@
 import { GameStateDisplay } from '@/components/game-state-display';
 import { TurnControlPanel } from '@/components/turn-control-panel';
+import { useGameRecovery } from '@/game/use-game-recovery';
 
 /**
  * 主应用组件
  */
 export default function App() {
+  const { isRecovering, recoveryError } = useGameRecovery();
+
+  if (isRecovering) {
+    return (
+      <div className="app loading">
+        <div className="spinner">⏳</div>
+        <p>正在恢复游戏状态...</p>
+        {recoveryError && <p className="error-text">恢复失败: {recoveryError}</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       {/* 标题栏 */}
