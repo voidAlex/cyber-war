@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { GameStateDisplay } from '@/components/game-state-display';
 import { TurnControlPanel } from '@/components/turn-control-panel';
 import { WelcomeScreen } from '@/components/welcome-screen';
-import { GameBoard, CommandTerminal, EventLogPanel, AgentInspector, RuntimeConfigUnlockPanel } from '@/components';
+import { GameBoard, CommandTerminal, EventLogPanel } from '@/components';
 import { useGameRecovery } from '@/game/use-game-recovery';
 import { useGameStateContext } from '@/game';
 import { parseNaturalLanguageCommand } from '@agents/command-parser';
@@ -15,7 +15,7 @@ const logger = getLogger({ context: 'App' });
  * 主应用组件
  */
 export default function App() {
-  const { isRecovering, recoveryError } = useGameRecovery();
+  const { isRecovering, recoveryError } = useGameRecovery({ autoLoadLatest: false });
   const { gameState, submitOrder, createGame, loadSavedGame } = useGameStateContext();
   const [isParsing, setIsParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -33,7 +33,7 @@ export default function App() {
 
     const runtimeConfig = readRuntimeConfigFromSession();
     if (!runtimeConfig) {
-      const errorMsg = '请先配置并解锁 LLM 运行时（右侧面板）';
+      const errorMsg = '请先在欢迎页面配置并解锁 LLM 运行时';
       setParseError(errorMsg);
       logger.error('CommandParseError: ' + errorMsg, { command });
       return;
@@ -48,6 +48,7 @@ export default function App() {
         provider: runtimeConfig.provider,
         endpoint: runtimeConfig.endpoint,
         apiKey: runtimeConfig.apiKey,
+        model: runtimeConfig.model,
       });
       submitOrder(action);
       setParseError(null);
@@ -70,13 +71,23 @@ export default function App() {
     );
   }
 
-  // 如果没有进入游戏（没有游戏状态且没有主动进入），显示欢迎页面
-  if (!hasEnteredGame && !gameState) {
+  if (!hasEnteredGame) {
     return (
       <WelcomeScreen
-        onStartNewGame={() => {
+        onStartNewGame={(payload, playerFactionId) => {
           setHasEnteredGame(true);
-          createGame('新游戏');
+          createGame(payload.manifest.name, {
+            worldState: {
+              turnIndex: 0,
+              map: payload.map,
+              factions: payload.factions,
+              units: payload.units,
+            },
+          }).then(() => {
+            if (playerFactionId !== 'player') {
+              logger.info('玩家选择的阵营非默认 player', { playerFactionId })
+            }
+          })
         }}
         onLoadGame={(saveId) => {
           setHasEnteredGame(true);
@@ -105,18 +116,6 @@ export default function App() {
         
         <section className="center-panel">
           <GameBoard />
-          
-          {/* 开发说明 */}
-          <div className="dev-notes">
-            <h3>M4 里程碑进度</h3>
-            <ul>
-              <li>✅ 情报半衰期 + 残影时间戳显示</li>
-              <li>✅ 外交请求不确定履约（盟友信任度驱动）</li>
-              <li>✅ ZIP 战役包导入导出与安全解包</li>
-              <li>✅ API Key 本地加密（PBKDF2 + AES-GCM）</li>
-              <li>✅ Agent Inspector（开发模式）</li>
-            </ul>
-          </div>
         </section>
         
         <aside className="right-panel">
@@ -133,8 +132,6 @@ export default function App() {
             </div>
           )}
           <CommandTerminal onParseCommand={handleParseCommand} isParsing={isParsing} />
-          <RuntimeConfigUnlockPanel />
-          {import.meta.env.DEV && <AgentInspector />}
         </aside>
       </main>
 

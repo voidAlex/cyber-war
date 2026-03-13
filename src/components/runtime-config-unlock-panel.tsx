@@ -10,6 +10,7 @@ import {
 export function RuntimeConfigUnlockPanel() {
   const [provider, setProvider] = useState<'openai' | 'anthropic' | 'deepseek' | 'custom'>('openai')
   const [endpoint, setEndpoint] = useState('https://api.openai.com/v1/chat/completions')
+  const [model, setModel] = useState('gpt-4o-mini')
   const [apiKey, setApiKey] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [status, setStatus] = useState('未解锁')
@@ -27,6 +28,7 @@ export function RuntimeConfigUnlockPanel() {
         provider,
         endpoint,
         apiKey,
+        model,
         passphrase,
       })
       setApiKey('')
@@ -74,6 +76,11 @@ export function RuntimeConfigUnlockPanel() {
         <label>
           端点
           <input value={endpoint} onChange={event => setEndpoint(event.target.value)} placeholder="https://..." />
+        </label>
+
+        <label>
+          模型
+          <input value={model} onChange={event => setModel(event.target.value)} placeholder="gpt-4o-mini" />
         </label>
 
         <label>

@@ -13,6 +13,7 @@ interface RuntimeLLMConfig {
   provider: 'openai' | 'anthropic' | 'deepseek' | 'custom'
   endpoint: string
   apiKey: string
+  model: string
 }
 
 interface OrchestrateTurnResolutionInput {

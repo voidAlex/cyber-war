@@ -83,6 +83,7 @@ describe('agent-orchestrator', () => {
         provider: 'custom',
         endpoint: 'https://example.test/llm',
         apiKey: 'test-key',
+        model: 'test-model',
       },
       sendRequest,
       onEnvelope: envelope => {

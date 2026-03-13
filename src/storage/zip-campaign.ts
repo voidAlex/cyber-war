@@ -1,7 +1,7 @@
 import { zipSync, unzipSync, strFromU8, strToU8 } from 'fflate'
 
 import type { GameState, GameMap, Faction, Unit } from '@/types'
-import { getSaveDirectory, readJSONFile, writeJSONFile } from './opfs'
+import { getSaveDirectory, readJSONFile, writeJSONFile, initializeSaveDirectory, generateSaveId } from './opfs'
 import type { SaveManifest } from './game-storage'
 
 const MAX_ZIP_ENTRIES = 200
@@ -25,9 +25,21 @@ interface CampaignManifestSchema {
   schemaVersion: number
 }
 
+export interface CampaignPayload {
+  manifest: CampaignManifestSchema
+  map: GameMap
+  factions: Faction[]
+  units: Unit[]
+}
+
 export interface ImportCampaignResult {
   saveId: string
   manifest: CampaignManifestSchema
+}
+
+export interface ImportSaveResult {
+  saveId: string
+  manifest: SaveManifest
 }
 
 export async function exportSaveAsZip(saveId: string): Promise<Uint8Array> {
@@ -107,6 +119,85 @@ export async function importCampaignZip(saveId: string, zipData: Uint8Array): Pr
   return {
     saveId,
     manifest,
+  }
+}
+
+export function buildCampaignZip(payload: CampaignPayload): Uint8Array {
+  const files = {
+    'campaign/manifest.json': strToU8(JSON.stringify(payload.manifest)),
+    'campaign/map.json': strToU8(JSON.stringify(payload.map)),
+    'campaign/factions.json': strToU8(JSON.stringify(payload.factions)),
+    'campaign/units.json': strToU8(JSON.stringify(payload.units)),
+    'campaign/commanders.json': strToU8(JSON.stringify([])),
+    'campaign/rules.json': strToU8(JSON.stringify({ version: 1 })),
+    'campaign/victory.json': strToU8(JSON.stringify({ objective: 'sandbox' })),
+  }
+
+  return zipSync(files, { level: 6 })
+}
+
+export function loadCampaignZip(zipData: Uint8Array): CampaignPayload {
+  const entries = unzipSync(zipData)
+  validateZipEntries(entries)
+
+  for (const required of CAMPAIGN_REQUIRED_FILES) {
+    if (!entries[required]) {
+      throw new Error(`战役包缺少必要文件: ${required}`)
+    }
+  }
+
+  return {
+    manifest: parseCampaignManifest(entries['campaign/manifest.json']),
+    map: parseGameMap(entries['campaign/map.json']),
+    factions: parseFactions(entries['campaign/factions.json']),
+    units: parseUnits(entries['campaign/units.json']),
+  }
+}
+
+export async function importSaveZip(zipData: Uint8Array): Promise<ImportSaveResult> {
+  const entries = unzipSync(zipData)
+  validateZipEntries(entries)
+
+  const worldPayload = entries['save/world-state.json']
+  const manifestPayload = entries['save/save-manifest.json']
+
+  if (!worldPayload || !manifestPayload) {
+    throw new Error('存档包缺少 save/world-state.json 或 save/save-manifest.json')
+  }
+
+  const parsedWorld = parseJson(worldPayload)
+  if (!parsedWorld || typeof parsedWorld !== 'object') {
+    throw new Error('world-state.json 格式非法')
+  }
+
+  const parsedManifest = parseJson(manifestPayload)
+  if (!parsedManifest || typeof parsedManifest !== 'object') {
+    throw new Error('save-manifest.json 格式非法')
+  }
+
+  const now = new Date().toISOString()
+  const newSaveId = generateSaveId()
+  const nextState: GameState = {
+    ...(parsedWorld as GameState),
+    saveId: newSaveId,
+    updatedAt: now,
+  }
+
+  const nextManifest: SaveManifest = {
+    ...(parsedManifest as SaveManifest),
+    saveId: newSaveId,
+    updatedAt: now,
+    createdAt: now,
+  }
+
+  const saveDir = await initializeSaveDirectory(newSaveId)
+  const worldDir = await saveDir.getDirectoryHandle('world', { create: false })
+  await writeJSONFile(worldDir, 'world-state.json', nextState)
+  await writeJSONFile(saveDir, 'manifest.json', nextManifest)
+
+  return {
+    saveId: newSaveId,
+    manifest: nextManifest,
   }
 }
 

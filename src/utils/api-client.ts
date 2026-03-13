@@ -41,7 +41,8 @@ export async function fetchLLM(options: FetchLLMOptions): Promise<Response> {
     })
 
     if (!res.ok) {
-      throw new Error(`HTTP Error: ${res.status} ${res.statusText}`)
+      const message = await res.text()
+      throw new Error(`HTTP Error: ${res.status} ${res.statusText}${message ? ` - ${message}` : ''}`)
     }
 
     return res

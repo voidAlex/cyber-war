@@ -2,6 +2,7 @@ export interface RuntimeLLMConfig {
   provider: 'openai' | 'anthropic' | 'deepseek' | 'custom'
   endpoint: string
   apiKey: string
+  model: string
 }
 
 let runtimeConfigInSession: RuntimeLLMConfig | null = null

@@ -5,6 +5,7 @@ interface RuntimeLLMConfig {
   provider: 'openai' | 'anthropic' | 'deepseek' | 'custom'
   endpoint: string
   apiKey: string
+  model: string
 }
 
 interface ExecuteAgentStepInput {
@@ -74,6 +75,7 @@ export async function executeAgentStep(input: ExecuteAgentStepInput): Promise<Ex
       endpoint: input.runtimeConfig.endpoint,
       apiKey: input.runtimeConfig.apiKey,
       payload: {
+        model: input.runtimeConfig.model,
         messages: [
           { role: 'system', content: input.systemInstruction },
           { role: 'user', content: JSON.stringify(input.payload) },

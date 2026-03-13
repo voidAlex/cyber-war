@@ -7,6 +7,7 @@ interface ParseCommandInput {
   faction: string
   apiKey: string
   endpoint: string
+  model: string
   provider: 'openai' | 'anthropic' | 'deepseek' | 'custom'
 }
 
@@ -60,6 +61,7 @@ export async function parseNaturalLanguageCommand(input: ParseCommandInput): Pro
     endpoint: input.endpoint,
     apiKey: input.apiKey,
     payload: {
+      model: input.model,
       messages: [
         { role: 'system', content: systemInstruction },
         { role: 'user', content: input.command },
