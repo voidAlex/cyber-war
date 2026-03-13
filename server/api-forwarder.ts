@@ -80,6 +80,10 @@ function forwardToLLM(request: ForwardRequest, clientRes: http.ServerResponse) {
   if (request.provider === 'anthropic') {
     options.headers['x-api-key'] = request.apiKey
     delete options.headers['Authorization']
+    // Anthropic API 需要 anthropic-version header
+    options.headers['anthropic-version'] = '2023-06-01'
+    // Anthropic 使用 anthropic-dangerous-direct-browser-access 来允许浏览器直接访问
+    options.headers['anthropic-dangerous-direct-browser-access'] = 'true'
   }
 
   const protocolClient = targetUrl.protocol === 'https:' ? https : http
@@ -108,10 +112,8 @@ function forwardToLLM(request: ForwardRequest, clientRes: http.ServerResponse) {
 }
 
 // 独立启动用于开发测试
-if (require.main === module) {
-  const PORT = process.env.PORT || 3001
-  const server = createApiForwarder()
-  server.listen(PORT, () => {
-    console.log(`[API Forwarder] Listening on http://localhost:${PORT}`)
-  })
-}
+const PORT = process.env.PORT || 3001
+const server = createApiForwarder()
+server.listen(PORT, () => {
+  console.log(`[API Forwarder] Listening on http://localhost:${PORT}`)
+})
