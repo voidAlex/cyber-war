@@ -695,7 +695,10 @@ export function useGameState(
   }, [])
   
   return {
-    gameState: context.gameState.saveId ? context.gameState : null,
+    // 如果有 saveId 或者是初始化状态（turn=1, phase='idle'），则返回 gameState
+    gameState: context.gameState.saveId || (context.gameState.turn === 1 && context.gameState.phase === 'idle') 
+      ? context.gameState 
+      : null,
     context,
     isLoading,
     error: error ?? context.error,
