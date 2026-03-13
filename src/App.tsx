@@ -1,27 +1,41 @@
 import { useCallback, useState } from 'react';
 import { GameStateDisplay } from '@/components/game-state-display';
 import { TurnControlPanel } from '@/components/turn-control-panel';
+import { WelcomeScreen } from '@/components/welcome-screen';
 import { GameBoard, CommandTerminal, EventLogPanel, AgentInspector, RuntimeConfigUnlockPanel } from '@/components';
 import { useGameRecovery } from '@/game/use-game-recovery';
 import { useGameStateContext } from '@/game';
 import { parseNaturalLanguageCommand } from '@agents/command-parser';
 import { readRuntimeConfigFromSession } from '@/utils';
+import { getLogger } from '@/utils';
+
+const logger = getLogger({ context: 'App' });
 
 /**
  * 主应用组件
  */
 export default function App() {
   const { isRecovering, recoveryError } = useGameRecovery();
-  const { gameState, submitOrder } = useGameStateContext();
+  const { gameState, submitOrder, createGame, loadSavedGame } = useGameStateContext();
   const [isParsing, setIsParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [hasEnteredGame, setHasEnteredGame] = useState(false);
 
   const handleParseCommand = useCallback(async (command: string) => {
+    setParseError(null);
+    
     if (!gameState) {
+      const errorMsg = '请先创建或加载游戏';
+      setParseError(errorMsg);
+      logger.error('CommandParseError: ' + errorMsg, { command });
       return;
     }
 
     const runtimeConfig = readRuntimeConfigFromSession();
     if (!runtimeConfig) {
+      const errorMsg = '请先配置并解锁 LLM 运行时（右侧面板）';
+      setParseError(errorMsg);
+      logger.error('CommandParseError: ' + errorMsg, { command });
       return;
     }
 
@@ -36,6 +50,11 @@ export default function App() {
         apiKey: runtimeConfig.apiKey,
       });
       submitOrder(action);
+      setParseError(null);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : '命令解析失败';
+      setParseError(errorMsg);
+      logger.error('CommandParseError: ' + errorMsg, { command, error: err });
     } finally {
       setIsParsing(false);
     }
@@ -48,6 +67,22 @@ export default function App() {
         <p>正在恢复游戏状态...</p>
         {recoveryError && <p className="error-text">恢复失败: {recoveryError}</p>}
       </div>
+    );
+  }
+
+  // 如果没有进入游戏（没有游戏状态且没有主动进入），显示欢迎页面
+  if (!hasEnteredGame && !gameState) {
+    return (
+      <WelcomeScreen
+        onStartNewGame={() => {
+          setHasEnteredGame(true);
+          createGame('新游戏');
+        }}
+        onLoadGame={(saveId) => {
+          setHasEnteredGame(true);
+          loadSavedGame(saveId);
+        }}
+      />
     );
   }
 
@@ -85,6 +120,18 @@ export default function App() {
         </section>
         
         <aside className="right-panel">
+          {parseError && (
+            <div className="error-banner" style={{ 
+              background: '#fee2e2', 
+              color: '#dc2626', 
+              padding: '10px', 
+              marginBottom: '10px',
+              borderRadius: '4px',
+              fontSize: '14px'
+            }}>
+              ⚠️ {parseError}
+            </div>
+          )}
           <CommandTerminal onParseCommand={handleParseCommand} isParsing={isParsing} />
           <RuntimeConfigUnlockPanel />
           {import.meta.env.DEV && <AgentInspector />}
