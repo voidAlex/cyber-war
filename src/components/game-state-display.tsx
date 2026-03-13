@@ -60,7 +60,7 @@ export function GameStateDisplay({ className }: GameStateDisplayProps) {
     return (
       <div className={`game-state-display no-game ${className ?? ''}`}>
         <span>尚未开始游戏</span>
-        <button onClick={() => {}}>开始新游戏</button>
+        <p className="hint">点击下方"开始新游戏"按钮创建游戏</p>
       </div>
     );
   }
