@@ -11,6 +11,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import './styles.css'
 
 // 根容器（index.html 中的 #root）
 const rootElement = document.getElementById('root')

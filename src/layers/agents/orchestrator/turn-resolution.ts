@@ -77,6 +77,39 @@ export interface OrchestrateTurnResolutionParams {
   playerFactionId?: string
   /** LLM 调用配置（若 theater/commander/director 为 LLM 角色需注入；mock 角色可省略） */
   llmConfig?: LlmCallConfig
+  /**
+   * 进度回调（可选，纯 UI 可观测副作用，**不影响编排产物与确定性**）。
+   *
+   * 编排在各批次完成时回调 onProgress 通知 UI 更新 agentProgressById。
+   * 不传时无副作用（默认值），已有测试不受影响。
+   *
+   * 注意：onProgress 仅用于进度展示，绝不参与 envelopes/events/sequence 计算
+   * （确定性由 scenarioSeed:turn:sequence 预分配保证，与本回调无关）。
+   */
+  onProgress?: (entry: TurnResolutionProgress) => void
+  /**
+   * 流式战报回调（可选）：导演部战报文本增量流出时回调（TTFT<200ms 目标）。
+   * 不传时导演部按非流式产出完整战报（默认行为，测试不受影响）。
+   */
+  onReportChunk?: (chunk: string) => void
+}
+
+/**
+ * 编排进度条目（onProgress 回调入参，纯 UI 可观测）。
+ *
+ * 不含任何影响确定性的字段（仅 status/agentId/role/partial）。
+ */
+export interface TurnResolutionProgress {
+  /** Agent id（chief-{faction} / theater-{faction} / commander-{faction} / director） */
+  agentId: string
+  /** 角色 */
+  role: 'chief' | 'theater' | 'commander' | 'director'
+  /** 当前状态 */
+  status: 'thinking' | 'running' | 'adjudicating' | 'done' | 'failed'
+  /** 当前输出的部分文本（可选） */
+  partial?: string
+  /** 错误信息（失败时） */
+  error?: string
 }
 
 /** 编排产物 */
@@ -143,6 +176,7 @@ export async function orchestrateTurnResolution(
     theaterRole,
     commanderRole,
     directorRole,
+    onProgress,
   } = params
 
   const playerFactionId = params.playerFactionId ?? resolvePlayerFactionId(worldState)
@@ -202,6 +236,18 @@ export async function orchestrateTurnResolution(
   )
 
   // 并行执行战区 + 所有敌盟统帅（sequence 已预分配，安全）
+  // 进度：chief 批次已完成（lockedOrders 收集完毕）
+  if (onProgress) {
+    for (const e of chiefEnvelopes) {
+      onProgress({ agentId: e.agentId, role: 'chief', status: 'done' })
+    }
+    // 战区司令 + 各敌盟统帅标记为 running（并行开始）
+    onProgress({ agentId: `theater-${playerFactionId}`, role: 'theater', status: 'running' })
+    for (const f of nonPlayerFactions) {
+      onProgress({ agentId: `commander-${f.id}`, role: 'commander', status: 'running' })
+    }
+  }
+
   const theaterTask = theaterRole
     .resolve({
       world: worldState,
@@ -222,6 +268,9 @@ export async function orchestrateTurnResolution(
           turn,
         )
       })
+      if (onProgress) {
+        onProgress({ agentId: `theater-${playerFactionId}`, role: 'theater', status: 'done' })
+      }
       return { segment: 'theater' as const, envelopes }
     })
 
@@ -245,6 +294,9 @@ export async function orchestrateTurnResolution(
             turn,
           )
         })
+        if (onProgress) {
+          onProgress({ agentId: `commander-${f.id}`, role: 'commander', status: 'done' })
+        }
         return { segment: 'commander' as const, envelopes }
       }),
   )
@@ -268,6 +320,10 @@ export async function orchestrateTurnResolution(
     | Awaited<ReturnType<DirectorRole['adjudicate']>>
     | RuleEngineFallbackResult
   let degraded = false
+  // 进度：导演部裁定开始
+  if (onProgress) {
+    onProgress({ agentId: 'director', role: 'director', status: 'adjudicating' })
+  }
   try {
     directorResult = await directorRole.adjudicate({
       physicsResult: rawResults,
@@ -275,9 +331,21 @@ export async function orchestrateTurnResolution(
       world: worldState,
       scenarioSeed,
       turn,
+      onReportChunk: params.onReportChunk,
     })
+    if (onProgress) {
+      onProgress({ agentId: 'director', role: 'director', status: 'done' })
+    }
   } catch (err) {
     // 导演部异常（非 LLM 类）：切规则引擎兜底（绝不卡死游戏）
+    if (onProgress) {
+      onProgress({
+        agentId: 'director',
+        role: 'director',
+        status: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
     degraded = true
     directorResult = ruleEngineFallback({
       physicsResult: rawResults,

@@ -1,22 +1,40 @@
 /**
- * 战报面板（BriefingPanel.tsx）— M2 战报 UI。
+ * 战报面板（BriefingPanel.tsx）— M3 增强版（流式战报 + Agent 进度）。
  *
- * briefing 阶段显示上一回合结算结果（ResolutionSummary）：
- * - 战报文本（从 ResolutionResult.events 拼装，M3 由 LLM 润色）
- * - 战损摘要（各方人员/战损）
- * - 占领变更与胜负提示
+ * 职责（对应重写计划 M3 范围#3 + 「真流式战报 TTFT<200ms」）：
+ * - resolution 阶段：进度条 + 各 Agent 实时状态（参谋长/战区司令/敌方统帅/导演部），
+ *   读 store.agentProgressById。
+ * - director 战报**真流式**：读 store.liveReport（边出边显示，由 orchestrator
+ *   onReportChunk 追加；M3 由 turn-resolution 透传到 director 的 streamTextWithDeltas）。
+ * - briefing 阶段：完整战报（store.liveReport 完成态 或 context.lastResolution）
+ *   + 战损摘要 + 胜负 + 降级提示。
  *
- * 「继续」→ ENTER_PERSIST（briefing → persist），后续由 advanceTurn 落盘。
- *
- * 阶段守卫：仅 briefing 阶段展示战报；其他阶段显示占位提示。
+ * 「继续」→ ENTER_PERSIST（briefing → persist）。
  *
  * @module layers/ui/briefing/BriefingPanel
  */
 
 import { type JSX } from 'react'
-import { useGameStore } from '@/store/game-store'
+import { useGameStore, type AgentProgressEntry } from '@/store/game-store'
 import { isActionAllowed } from '@/layers/application/state-machine'
 import type { ResolutionSummary } from '@/types'
+
+/** Agent 角色中文显示名 */
+const ROLE_LABELS: Record<string, string> = {
+  chief: '参谋长',
+  theater: '战区司令',
+  commander: '敌方统帅',
+  director: '导演部',
+}
+
+/** Agent 状态中文显示名 */
+const STATUS_LABELS: Record<AgentProgressEntry['status'], string> = {
+  thinking: '思考中',
+  running: '执行中',
+  adjudicating: '裁定中',
+  done: '已完成',
+  failed: '失败',
+}
 
 /**
  * 战报面板组件。
@@ -25,6 +43,10 @@ export default function BriefingPanel(): JSX.Element {
   const context = useGameStore((s) => s.context)
   const busy = useGameStore((s) => s.busy)
   const dispatch = useGameStore((s) => s.dispatch)
+  const agentProgressById = useGameStore((s) => s.agentProgressById)
+  const liveReport = useGameStore((s) => s.liveReport)
+  const streamingReport = useGameStore((s) => s.streamingReport)
+  const degraded = useGameStore((s) => s.degraded)
 
   if (context === null) {
     return (
@@ -37,6 +59,22 @@ export default function BriefingPanel(): JSX.Element {
 
   const phase = context.game.phase
   const resolution = context.lastResolution
+
+  // resolution 阶段：显示 Agent 进度 + 流式战报直播
+  if (phase === 'resolution') {
+    return (
+      <section className="panel briefing-panel">
+        <h2 className="panel__title">结算中…</h2>
+        <AgentProgressList entries={Object.values(agentProgressById)} />
+        {(streamingReport || liveReport.length > 0) && (
+          <div className="briefing-panel__live-report">
+            <h3>战报直播{streamingReport && <span className="briefing-panel__streaming-dot">●</span>}</h3>
+            <pre className="briefing-panel__text">{liveReport || '（导演部正在生成战报…）'}</pre>
+          </div>
+        )}
+      </section>
+    )
+  }
 
   // 非 briefing 阶段：占位提示当前阶段
   if (phase !== 'briefing' || resolution === null) {
@@ -53,19 +91,21 @@ export default function BriefingPanel(): JSX.Element {
   }
 
   const canContinue = isActionAllowed(phase, 'ENTER_PERSIST') && !busy
+  // briefing 阶段优先用流式累积的完整战报（若 orchestrator 已填），否则用 lastResolution
+  const reportText = liveReport || resolution.reportText
 
   return (
     <section className="panel briefing-panel">
       <h2 className="panel__title">战报 — 第 {resolution.turn + 1} 天</h2>
 
-      {resolution.degraded && (
+      {(resolution.degraded || degraded) && (
         <p className="briefing-panel__degraded" role="alert">
-          ⚠ 本回合为降级结算（规则引擎兜底）
+          ⚠ 本回合为降级结算（规则引擎兜底，无叙事润色）
         </p>
       )}
 
       <div className="briefing-panel__report">
-        <pre className="briefing-panel__text">{resolution.reportText || '（本日无战事）'}</pre>
+        <pre className="briefing-panel__text">{reportText || '（本日无战事）'}</pre>
       </div>
 
       <CasualtySummary casualties={resolution.casualties} world={context.game.world} />
@@ -81,6 +121,42 @@ export default function BriefingPanel(): JSX.Element {
         </button>
       </div>
     </section>
+  )
+}
+
+/** Agent 进度列表子组件 */
+function AgentProgressList({ entries }: { entries: AgentProgressEntry[] }): JSX.Element {
+  if (entries.length === 0) {
+    return <p className="briefing-panel__progress-empty">正在初始化结算…</p>
+  }
+  // 按 role 固定顺序展示（chief/theater/commander/director）
+  const order = { chief: 0, theater: 1, commander: 2, director: 3 }
+  const sorted = [...entries].sort((a, b) => (order[a.role] ?? 9) - (order[b.role] ?? 9))
+  const doneCount = sorted.filter((e) => e.status === 'done').length
+  const pct = sorted.length === 0 ? 0 : Math.round((doneCount / sorted.length) * 100)
+
+  return (
+    <div className="briefing-panel__progress">
+      <div className="briefing-panel__progress-bar">
+        <div className="briefing-panel__progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <ul className="briefing-panel__agent-list">
+        {sorted.map((e) => (
+          <li
+            key={e.agentId}
+            className={`briefing-panel__agent briefing-panel__agent--${e.status}`}
+          >
+            <span className="briefing-panel__agent-role">
+              {ROLE_LABELS[e.role] ?? e.role}
+            </span>
+            <span className="briefing-panel__agent-status">
+              {STATUS_LABELS[e.status]}
+              {e.status === 'failed' && e.error ? `：${e.error}` : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 

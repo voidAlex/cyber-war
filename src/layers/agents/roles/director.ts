@@ -34,6 +34,8 @@ import {
   type DirectorAgentOutput,
   type DirectorOverride,
 } from '@/layers/agents/protocol/schema'
+import { parseLLMJson } from '@/layers/agents/protocol/schema'
+import { LlmJsonParseError } from '@/layers/agents/protocol/schema'
 import { isLlmCallError } from './role-errors'
 
 /**
@@ -50,6 +52,11 @@ export interface DirectorAdjudicateParams {
   scenarioSeed: string
   /** 结算回合 */
   turn: number
+  /**
+   * 流式战报回调（可选）：导演部战报文本增量流出时回调（TTFT<200ms 目标）。
+   * 不传时按非流式产出完整战报（默认行为，mock 透传与测试不受影响）。
+   */
+  onReportChunk?: (chunk: string) => void
 }
 
 /**
@@ -191,7 +198,32 @@ async function adjudicateWithLlm(
   const task = `回合 ${turn}。请对以下物理结算结果进行终裁，产出叙事战报（reportText），必要时覆写数值（overrides，每条必含 field/before/after/reason），并记录关键事件（keyEvents）。\n物理结算：${physicsBrief}\n锁定指令：${ordersBrief}`
 
   const opts = buildLlmOptions(config, 'director', world, task)
-  const { data } = await llmService.streamChatStructured<DirectorAgentOutput>(opts, validate)
+
+  // 真流式战报：若调用方提供了 onReportChunk，用增量流式消费（边出边显示）。
+  // 增量通过 onDelta 原样转发；完整文本到齐后再 parseLLMJson + schema 校验。
+  // 注意：流式输出可能是部分 JSON，onReportChunk 转发原始增量（早期可能不可读，
+  // 但 TTFT<200ms 的目标是"开始有东西流出"，而非完整可读）。UI 层按需截断展示。
+  let data: DirectorAgentOutput
+  if (params.onReportChunk) {
+    const { text } = await llmService.streamTextWithDeltas(opts, (chunk) => {
+      params.onReportChunk!(chunk)
+    })
+    try {
+      data = parseLLMJson<DirectorAgentOutput>(text, validate)
+    } catch (err) {
+      // 校验失败：绝不伪造，重新抛 LlmJsonParseError（上层 isLlmCallError 不捕获 → 回退 mock）
+      throw err instanceof LlmJsonParseError
+        ? err
+        : new LlmJsonParseError(
+            err instanceof Error ? err.message : String(err),
+            null,
+          )
+    }
+  } else {
+    // 非流式路径：保持原 streamChatStructured（schema 校验 + 缓存统计）
+    const structured = await llmService.streamChatStructured<DirectorAgentOutput>(opts, validate)
+    data = structured.data
+  }
 
   // 1. 应用 overrides 到 finalResult（覆写留痕）
   const overrides = data.overrides ?? []

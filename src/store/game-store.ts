@@ -5,6 +5,9 @@
  * - 持有 StateMachineContext（reducer 的全部输入/输出）。
  * - 提供 dispatch（封装 wegoReducer）与 selector。
  * - 提供 loadGame / 列存档等副作用编排出口（调 persistence-service/orchestrator）。
+ * - M3：持有运行时 LLM 配置解锁态、Agent 实时进度（agentProgressById）、
+ *   流式战报直播文本（liveReport）、缓存命中统计（cacheStats）。
+ *   这些是 UI 可观测状态，**不进 reducer**（保持 reducer 纯净可回放）。
  *
  * UI 通过 selector 订阅；推进回合必须走 advanceTurn（persist-gate 强制），
  * 禁直接 dispatch NEXT_TURN（对应重写计划关键防坑）。
@@ -16,10 +19,30 @@ import { create } from 'zustand'
 import type { StateMachineContext, StateMachineAction } from '@/layers/application/state-machine/types'
 import { wegoReducer } from '@/layers/application/state-machine/reducer'
 import { persistenceService } from '@/layers/application/services/persistence-service'
-import { advanceTurn, createDefaultResolver } from '@/layers/application/orchestrator/turn-orchestrator'
+import {
+  advanceTurn,
+  createMultiAgentResolver,
+} from '@/layers/application/orchestrator/turn-orchestrator'
 import { initWorkerService } from '@/layers/application/services/worker-service'
-import { directorRole } from '@/layers/agents/roles/director'
+import { llmService } from '@/layers/application/services/llm-service'
+import { errorToBanner } from '@/layers/application/services/llm-service'
+import { createLlmTheaterRole, createLlmCommanderRole, createLlmDirectorRole } from '@/layers/agents/roles'
+import { createTheaterRole, createCommanderRole, createDirectorRole } from '@/layers/agents/roles'
+import type { TheaterRole, CommanderRole, DirectorRole } from '@/layers/agents/roles'
+import {
+  saveEncryptedConfig,
+  unlockConfig,
+  clearSession,
+  isSessionUnlocked,
+  getSessionConfig,
+  type RuntimeLLMConfig,
+  RuntimeConfigError,
+} from '@/layers/gateway/runtime-config'
 import type { WorldState } from '@/types'
+import type { CacheStats } from '@/layers/application/services/llm-service'
+import type { LlmErrorBanner } from '@/layers/application/services/llm-service'
+import type { ActionEnvelope, AgentRole } from '@/types'
+import type { LlmCallConfig } from '@/layers/agents/roles'
 
 /**
  * 物理引擎 Worker 客户端（单例，主线程持有 Worker 句柄）。
@@ -30,10 +53,89 @@ import type { WorldState } from '@/types'
 const physicsClient = initWorkerService()
 
 /**
- * M2 默认结算器：物理引擎 Worker + 导演部 mock 终裁。
- * 注入 advanceTurn 的 services.resolve。
+ * M3 多 Agent 结算器：物理引擎 + 多 Agent 编排（解锁时用 LLM 角色，否则 mock）。
+ * buildMultiAgentResolver 构造具体实例（驱动进度条 + 流式战报），mock 角色保证离线可玩。
  */
-const defaultResolver = createDefaultResolver(physicsClient, directorRole)
+
+/**
+ * 构造 M3 多 Agent 结算器（带进度 + 流式战报回调）。
+ *
+ * - 若会话已解锁 LLM 配置：用 LLM 角色（theater/commander/director），真流式战报。
+ * - 否则：用 mock 角色（M2 行为，但走多 Agent 编排路径以驱动进度条）。
+ *
+ * 进度回调绑定到 store 的 setAgentProgress；流式战报增量绑定到 appendLiveReport。
+ * 返回的 resolver 同时把缓存统计与降级标志回写 store（供 Inspector / BriefingPanel）。
+ */
+function buildMultiAgentResolver(
+  get: () => GameStoreState,
+): NonNullable<Parameters<typeof advanceTurn>[1]['resolve']> {
+  const llmConfig = buildLlmCallConfig()
+  // 角色选择：有配置用 LLM，否则 mock（保证 M3 路径可用）
+  const theaterRole: TheaterRole = llmConfig
+    ? createLlmTheaterRole(llmService, llmConfig)
+    : createTheaterRole()
+  const commanderRole: CommanderRole = llmConfig
+    ? createLlmCommanderRole(llmService, llmConfig)
+    : createCommanderRole()
+  const directorRoleInst: DirectorRole = llmConfig
+    ? createLlmDirectorRole(llmService, llmConfig)
+    : createDirectorRole()
+
+  return createMultiAgentResolver({
+    llmService,
+    workerService: physicsClient,
+    theaterRole,
+    commanderRole,
+    directorRole: directorRoleInst,
+    llmConfig: llmConfig ?? undefined,
+    onProgress: (entry) => {
+      // 把编排进度映射到 store.agentProgressById
+      get().setAgentProgress({
+        agentId: entry.agentId,
+        role: entry.role,
+        status: entry.status,
+        partial: entry.partial,
+        error: entry.error,
+      })
+    },
+    onReportChunk: (chunk) => {
+      get().appendLiveReport(chunk)
+    },
+  })
+}
+
+/**
+ * 某个 Agent 在结算中的实时进度（UI 进度条/Inspector 用）。
+ *
+ * 不进 reducer（纯运行时可观测状态，非确定性回放内容）。
+ */
+export interface AgentProgressEntry {
+  /** Agent id（如 chief-player / theater-blue / commander-red / director） */
+  agentId: string
+  /** Agent 角色 */
+  role: AgentRole
+  /** 阶段标签（思考中/并行中/裁定中/已完成/失败） */
+  status: 'thinking' | 'running' | 'adjudicating' | 'done' | 'failed'
+  /** 当前输出的原始 LLM 文本片段（流式累积，用于 Inspector 与直播） */
+  partial?: string
+  /** 解析后的结构化命令（briefing 后填充） */
+  parsedEnvelope?: ActionEnvelope
+  /** 置信度（0..1） */
+  confidence?: number
+  /** 错误信息（若失败） */
+  error?: string
+  /** prompt 分层估算（estimateCacheLayers 产出，供 Inspector） */
+  layers?: {
+    l0: number
+    l1: number
+    l2: number
+    l3: number
+  }
+  /** 本次调用缓存命中 token 数 */
+  cacheHitTokens?: number
+  /** 本次调用缓存未命中 token 数 */
+  cacheMissTokens?: number
+}
 
 /**
  * Store 状态形态。
@@ -43,17 +145,41 @@ export interface GameStoreState {
   context: StateMachineContext | null
   /** 当前存档 id（null=未选择存档） */
   saveId: string | null
-  /** 存档列表（SaveListPanel 渲染） */
+  /** 存档列表（SaveListPanel 渲染；已过滤伪 saveId） */
   saves: string[]
   /** 异步操作进行中标志（UI 禁用按钮） */
   busy: boolean
   /** 最近一次面向用户的错误消息（null=无） */
   userError: string | null
+  /** 最近一次四分类 LLM 错误（ErrorBanner 用；null=无） */
+  llmError: LlmErrorBanner | null
+
+  // —— M3 运行时 LLM 配置解锁态 ——
+  /** 是否已加载过加密配置（存在落盘文件） */
+  hasConfig: boolean
+  /** 是否已解锁（会话内存持有明文 apiKey） */
+  configUnlocked: boolean
+  /** 解锁后的明文配置（仅 provider/endpoint/model，apiKey 不放 store 避免泄漏） */
+  config: { provider: string; endpoint: string; model: string } | null
+
+  // —— M3 Agent 进度与流式战报（UI 可观测，非回放内容） ——
+  /** 本回合各 Agent 实时进度（agentId → entry） */
+  agentProgressById: Record<string, AgentProgressEntry>
+  /** 导演部流式战报直播文本（边出边显示，TTFT<200ms 目标） */
+  liveReport: string
+  /** 是否正在流式输出战报 */
+  streamingReport: boolean
+  /** 本回合已产出的 envelopes（Inspector 展示用） */
+  liveEnvelopes: ActionEnvelope[]
+  /** 累计缓存命中统计（Inspector 展示命中率） */
+  cacheStats: CacheStats
+  /** 本回合是否降级结算（规则引擎兜底） */
+  degraded: boolean
 
   // —— 动作 ——
   /** dispatch 一个纯 action 到 reducer（守卫拒绝时设 userError） */
   dispatch: (action: StateMachineAction) => boolean
-  /** 刷新存档列表 */
+  /** 刷新存档列表（自动过滤伪 saveId） */
   refreshSaves: () => Promise<void>
   /** 创建新存档并载入 */
   createSave: (saveId: string, displayName: string) => Promise<void>
@@ -67,7 +193,38 @@ export interface GameStoreState {
   setFromWorld: (world: WorldState, saveId?: string) => void
   /** 清除 userError */
   clearError: () => void
+
+  // —— M3 配置与进度动作 ——
+  /** 检测是否存在已保存的加密配置（启动时调用） */
+  probeConfig: () => Promise<void>
+  /** 保存并加密配置（落盘 + 会话解锁） */
+  saveConfig: (config: RuntimeLLMConfig, passphrase: string) => Promise<void>
+  /** 用口令解锁配置（读盘 + 解密 → 会话内存） */
+  unlockConfig: (passphrase: string) => Promise<void>
+  /** 锁定会话（清内存明文 apiKey，不删盘） */
+  lockSession: () => void
+  /** 更新某 Agent 的实时进度（orchestrator onProgress 回调调用） */
+  setAgentProgress: (entry: AgentProgressEntry) => void
+  /** 追加流式战报文本片段 */
+  appendLiveReport: (chunk: string) => void
+  /** 标记流式战报开始/结束 */
+  setStreamingReport: (streaming: boolean) => void
+  /** 设置本回合 envelopes（briefing 后填充，Inspector 用） */
+  setLiveEnvelopes: (envelopes: ActionEnvelope[]) => void
+  /** 设置缓存统计（Inspector 用） */
+  setCacheStats: (stats: CacheStats) => void
+  /** 设置降级标志 */
+  setDegraded: (degraded: boolean) => void
+  /** 设置四分类 LLM 错误（ErrorBanner 用） */
+  setLlmError: (err: LlmErrorBanner | null) => void
+  /** 清空本回合进度/直播状态（新回合开始时） */
+  resetTurnProgress: () => void
 }
+
+// 存档过滤谓词（纯函数，从 save-filter 导入；拆分以避免测试 import store 时触发 Worker）
+import { isPlayerSaveId } from './save-filter'
+// 向后兼容 re-export（其他模块若从 store 引用谓词）
+export { isPlayerSaveId } from './save-filter'
 
 /**
  * zustand store（唯一外部状态）。
@@ -81,6 +238,25 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   saves: [],
   busy: false,
   userError: null,
+  llmError: null,
+
+  hasConfig: false,
+  configUnlocked: false,
+  config: null,
+
+  agentProgressById: {},
+  liveReport: '',
+  streamingReport: false,
+  liveEnvelopes: [],
+  cacheStats: {
+    totalHitTokens: 0,
+    totalMissTokens: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    callCount: 0,
+    degradedCount: 0,
+  },
+  degraded: false,
 
   dispatch(action) {
     const ctx = get().context
@@ -100,7 +276,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   async refreshSaves() {
     set({ busy: true })
     try {
-      const saves = await persistenceService.listSaves()
+      const all = await persistenceService.listSaves()
+      // 过滤伪 saveId（runtime-config 占用），不展示给玩家
+      const saves = all.filter(isPlayerSaveId)
       set({ saves, busy: false })
     } catch (err) {
       set({ busy: false, userError: `读取存档列表失败：${String(err)}` })
@@ -126,7 +304,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         persistCompleted: true,
         error: null,
       }
-      const saves = await persistenceService.listSaves()
+      const all = await persistenceService.listSaves()
+      const saves = all.filter(isPlayerSaveId)
       set({ context: ctx, saveId, saves, busy: false })
     } catch (err) {
       set({ busy: false, userError: `创建存档失败：${String(err)}` })
@@ -161,7 +340,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set({ busy: true, userError: null })
     try {
       await persistenceService.deleteSave(saveId)
-      const saves = await persistenceService.listSaves()
+      const all = await persistenceService.listSaves()
+      const saves = all.filter(isPlayerSaveId)
       const cur = get()
       // 若删除的是当前存档，清空上下文
       if (cur.saveId === saveId) {
@@ -181,14 +361,37 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       return
     }
     set({ busy: true, userError: null })
+    // 新回合开始：清空上一回合进度/直播/错误，重置缓存统计
+    llmService.resetCacheStats()
+    set({
+      agentProgressById: {},
+      liveReport: '',
+      streamingReport: false,
+      liveEnvelopes: [],
+      degraded: false,
+      llmError: null,
+    })
+    // 流式战报开始（编排期间 director 增量写入 liveReport）
+    set({ streamingReport: true })
     try {
+      // 多 Agent 结算器（带进度回调 + 流式战报；解锁时用 LLM 角色，否则 mock）
+      const resolver = buildMultiAgentResolver(get)
       const result = await advanceTurn(ctx, {
         persistence: persistenceService,
-        resolve: defaultResolver,
+        resolve: resolver,
       })
-      // advanceTurn 内部已 dispatch 全链路 + 落盘；将其最终上下文写回 store
-      set({ context: result.context, busy: false })
+      // 结算完成：回写缓存统计、降级标志、envelopes（供 Inspector）
+      set({
+        context: result.context,
+        busy: false,
+        streamingReport: false,
+        cacheStats: llmService.getCacheStats(),
+        degraded: result.context.lastResolution?.degraded ?? false,
+      })
     } catch (err) {
+      set({ streamingReport: false })
+      // 四分类 LLM 错误：映射为横幅（绝不把 ApiKey 误报为网络）
+      set({ llmError: errorToBanner(err), cacheStats: llmService.getCacheStats() })
       // 落盘失败等：上下文可能已被部分推进，从 error.context 恢复（若存在）
       const maybeCtx = (err as { context?: StateMachineContext }).context
       if (maybeCtx) {
@@ -213,6 +416,138 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   },
 
   clearError() {
-    set({ userError: null })
+    set({ userError: null, llmError: null })
+  },
+
+  // ===========================================================================
+  // M3 配置与进度动作
+  // ===========================================================================
+
+  async probeConfig() {
+    // 会话内是否已解锁（同进程内此前解锁过则直接采信）
+    const unlocked = isSessionUnlocked()
+    set({
+      configUnlocked: unlocked,
+      config: sessionConfigView(),
+    })
+    // 探测落盘配置是否存在：用只读 persistRead 注入解锁流程，
+    // 读到内容即视为存在配置文件（不解密、不污染会话）。
+    let hasConfig = false
+    try {
+      await unlockConfig('__probe__', {
+        decrypt: async () => '',
+        persistRead: async () => {
+          hasConfig = true
+          // 抛出以中止后续解密（已判定存在）
+          throw new Error('__probe_done__')
+        },
+      })
+    } catch {
+      // 预期中止；hasConfig 已在 persistRead 内置位
+    }
+    set({ hasConfig })
+  },
+
+  async saveConfig(config, passphrase) {
+    set({ busy: true, userError: null })
+    try {
+      await saveEncryptedConfig(config, passphrase)
+      // 保存后解锁到会话
+      await unlockConfig(passphrase)
+      set({
+        hasConfig: true,
+        configUnlocked: true,
+        config: { provider: config.provider, endpoint: config.endpoint, model: config.model },
+        busy: false,
+      })
+    } catch (err) {
+      set({ busy: false, userError: `保存配置失败：${String(err)}` })
+    }
+  },
+
+  async unlockConfig(passphrase) {
+    set({ busy: true, userError: null })
+    try {
+      const cfg = await unlockConfig(passphrase)
+      set({
+        configUnlocked: true,
+        hasConfig: true,
+        config: { provider: cfg.provider, endpoint: cfg.endpoint, model: cfg.model },
+        busy: false,
+      })
+    } catch (err) {
+      set({
+        busy: false,
+        userError: err instanceof RuntimeConfigError ? err.message : `解锁失败：${String(err)}`,
+      })
+    }
+  },
+
+  lockSession() {
+    clearSession()
+    set({ configUnlocked: false, config: null })
+  },
+
+  setAgentProgress(entry) {
+    set((s) => ({
+      agentProgressById: { ...s.agentProgressById, [entry.agentId]: entry },
+    }))
+  },
+
+  appendLiveReport(chunk) {
+    set((s) => ({ liveReport: s.liveReport + chunk }))
+  },
+
+  setStreamingReport(streaming) {
+    set({ streamingReport: streaming })
+  },
+
+  setLiveEnvelopes(envelopes) {
+    set({ liveEnvelopes: envelopes })
+  },
+
+  setCacheStats(stats) {
+    set({ cacheStats: stats })
+  },
+
+  setDegraded(degraded) {
+    set({ degraded })
+  },
+
+  setLlmError(err) {
+    set({ llmError: err })
+  },
+
+  resetTurnProgress() {
+    set({
+      agentProgressById: {},
+      liveReport: '',
+      streamingReport: false,
+      liveEnvelopes: [],
+      degraded: false,
+    })
   },
 }))
+
+/** 从会话取配置的非密钥视图（apiKey 不进 store） */
+function sessionConfigView(): GameStoreState['config'] {
+  const cfg = getSessionConfig()
+  if (cfg === null) return null
+  return { provider: cfg.provider, endpoint: cfg.endpoint, model: cfg.model }
+}
+
+/**
+ * 构造 LlmCallConfig（供 M3 多 Agent resolver 用）。
+ * 从会话取明文 apiKey（即用即抛，不进 store）。
+ * 未解锁时返回 null（UI 应显示配置面板而非进入结算）。
+ */
+export function buildLlmCallConfig(): LlmCallConfig | null {
+  const cfg = getSessionConfig()
+  if (cfg === null) return null
+  return {
+    provider: cfg.provider,
+    endpoint: cfg.endpoint,
+    model: cfg.model,
+    apiKey: cfg.apiKey,
+  }
+}

@@ -102,6 +102,54 @@ function kindToTypedError(kind: LlmErrorKindString, message: string): LlmCallErr
 }
 
 /**
+ * 面向 UI 的四分类错误横幅（与 llm-service 四分类对齐）。
+ * 定义在此（叶子模块）以避免与 store 循环依赖。
+ */
+export type LlmErrorBanner =
+  | { kind: 'api_key'; message: string }
+  | { kind: 'timeout'; message: string }
+  | { kind: 'network'; message: string }
+  | { kind: 'degraded'; message: string }
+  | { kind: 'schema'; message: string }
+  | { kind: 'server'; message: string }
+
+/**
+ * 把 typed LlmCallError 映射为面向 UI 的四分类横幅信息（ErrorBanner 用）。
+ *
+ * 对应重写计划「错误四分类提示」与审计教训「绝不把 ApiKey 失效误报为网络中断」：
+ * - LlmApiKeyError → "API Key 失效，请检查密钥"
+ * - LlmTimeoutError → "请求超时，已重试/降级"
+ * - LlmNetworkError → "网络异常，状态已保存"
+ * - LlmDegradedError → "本回合降级结算（规则引擎）"
+ * - LlmSchemaError → "AI 输出格式异常，已兜底"
+ * - LlmServerError → 通用服务端错误
+ *
+ * @param err LlmCallError（或任意值；非 LlmCallError 归 server）
+ * @returns 四分类横幅信息（kind + 用户可读 message）
+ */
+export function errorToBanner(err: unknown): LlmErrorBanner {
+  if (err instanceof LlmApiKeyError) {
+    return { kind: 'api_key', message: 'API Key 失效，请检查密钥' }
+  }
+  if (err instanceof LlmTimeoutError) {
+    return { kind: 'timeout', message: '请求超时，已重试/降级' }
+  }
+  if (err instanceof LlmNetworkError) {
+    return { kind: 'network', message: '网络异常，状态已保存' }
+  }
+  if (err instanceof LlmDegradedError) {
+    return { kind: 'degraded', message: '本回合降级结算（规则引擎）' }
+  }
+  if (err instanceof LlmSchemaError) {
+    return { kind: 'schema', message: 'AI 输出格式异常，已兜底' }
+  }
+  return {
+    kind: 'server',
+    message: err instanceof Error ? err.message : String(err),
+  }
+}
+
+/**
  * 把 invoke reject 的 unknown 错误转成 typed error。
  *
  * 优先识别 Rust AppErrorPayload（type:'llm' 含 kind），其次 LlmStreamError，
@@ -193,6 +241,21 @@ export interface LlmService {
     validate: ValidateFunction<T>,
     ajv?: Ajv,
   ): Promise<{ data: T; stats: StreamChatStats }>
+
+  /**
+   * 增量回调式流式：消费 delta 事件（边出边显示，TTFT<200ms 目标），
+   * 同时累计 hit/miss/降级统计，最终返回完整文本。
+   *
+   * 用于导演部战报真流式：onDelta 在每个 text 片段到达时回调。
+   * 错误时抛 typed LlmCallError；degraded 时抛 LlmDegradedError。
+   *
+   * @param opts 流式请求选项
+   * @param onDelta 每个文本片段的回调（可选）
+   */
+  streamTextWithDeltas(
+    opts: StreamChatOptions,
+    onDelta?: (chunk: string) => void,
+  ): Promise<StreamChatResult>
 
   /** 获取当前缓存命中统计（供 Inspector） */
   getCacheStats(): CacheStats
@@ -296,6 +359,40 @@ export function createLlmService(
 
     getCacheStats(): CacheStats {
       return { ...stats }
+    },
+
+    async streamTextWithDeltas(
+      opts: StreamChatOptions,
+      onDelta?: (chunk: string) => void,
+    ): Promise<StreamChatResult> {
+      // 若注入了 stream（测试 mock），无可迭代器，回退到 streamText（无 delta 回调）。
+      if (deps.stream) {
+        return this.streamText(opts)
+      }
+      // 默认：直接消费 gateway streamChat 的 AsyncIterable（真流式 delta）。
+      const handle = streamChat(opts)
+      try {
+        for await (const evt of handle) {
+          if (evt.type === 'delta' && onDelta) {
+            onDelta(evt.text)
+          }
+        }
+      } catch (err) {
+        throw toLlmCallError(err)
+      }
+      let result: StreamChatResult
+      try {
+        result = await handle.result()
+      } catch (err) {
+        throw toLlmCallError(err)
+      }
+      accumulate(result.stats)
+      if (result.stats.degraded) {
+        throw new LlmDegradedError(
+          'LLM 3 次重试均失败，切规则引擎兜底（degraded:true）',
+        )
+      }
+      return result
     },
 
     resetCacheStats(): void {

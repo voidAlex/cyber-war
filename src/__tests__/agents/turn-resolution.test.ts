@@ -137,6 +137,10 @@ function makeMockLlmService(): LlmService {
       stats: { promptCacheHitTokens: 0, promptCacheMissTokens: 0, inputTokens: 0, outputTokens: 0, degraded: false },
     })),
     streamChatStructured: vi.fn(),
+    streamTextWithDeltas: vi.fn(async () => ({
+      text: '',
+      stats: { promptCacheHitTokens: 0, promptCacheMissTokens: 0, inputTokens: 0, outputTokens: 0, degraded: false },
+    })),
     getCacheStats: () => ({ ...stats }),
     resetCacheStats: () => {
       Object.assign(stats, {

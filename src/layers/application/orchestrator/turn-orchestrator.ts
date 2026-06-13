@@ -264,6 +264,7 @@ export function createDefaultResolver(
 import type { LlmService } from '@/layers/application/services/llm-service'
 import type { TheaterRole, CommanderRole, LlmCallConfig } from '@/layers/agents/roles'
 import { orchestrateTurnResolution } from '@/layers/agents/orchestrator/turn-resolution'
+import type { TurnResolutionProgress } from '@/layers/agents/orchestrator/turn-resolution'
 
 /**
  * M3 多 Agent 结算器所需的角色与服务（依赖注入，便于 mock 测试）。
@@ -283,6 +284,13 @@ export interface MultiAgentResolverDeps {
   playerFactionId?: string
   /** LLM 调用配置（mock 角色可省略；LLM 角色需注入） */
   llmConfig?: LlmCallConfig
+  /**
+   * 进度回调（可选）：透传给 orchestrateTurnResolution，更新 UI 进度条。
+   * 纯可观测副作用，不影响编排产物与确定性。
+   */
+  onProgress?: (entry: TurnResolutionProgress) => void
+  /** 流式战报增量回调（可选）：透传给导演部 streamTextWithDeltas。 */
+  onReportChunk?: (chunk: string) => void
 }
 
 /**
@@ -318,6 +326,8 @@ export function createMultiAgentResolver(
       directorRole: deps.directorRole,
       playerFactionId: deps.playerFactionId,
       llmConfig: deps.llmConfig,
+      onProgress: deps.onProgress,
+      onReportChunk: deps.onReportChunk,
     })
 
     // 把编排器的 degraded 标志反映到 resolution.degraded（UI 据此明示降级结算）。

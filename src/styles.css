@@ -1,0 +1,439 @@
+/**
+ * 全局最小样式（styles.css）— M3 UI 布局骨架。
+ *
+ * 不追求美观，仅保证面板/栅格/错误横幅/进度条/Inspector 可读可用。
+ * 设计系统在 M4/正式视觉阶段统一。
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #0f1115;
+  color: #e6e8eb;
+  font-size: 14px;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-shell--locked {
+  align-items: stretch;
+}
+
+.app-shell__header {
+  padding: 12px 20px;
+  background: #161a21;
+  border-bottom: 1px solid #232831;
+}
+
+.app-shell__header h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.app-shell__subtitle {
+  margin: 4px 0 0;
+  color: #8a93a3;
+  font-size: 12px;
+}
+
+.app-shell__banner {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.app-shell__main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 280px 1fr 380px;
+  gap: 12px;
+  padding: 12px;
+}
+
+.app-shell__main--centered {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 40px;
+}
+
+.app-shell__left,
+.app-shell__center,
+.app-shell__right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.app-shell__right {
+  overflow: auto;
+}
+
+.app-shell__footer {
+  padding: 0 12px 12px;
+}
+
+/* 通用面板 */
+.panel {
+  background: #161a21;
+  border: 1px solid #232831;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.panel__title {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+/* 存档列表 */
+.save-list-panel__create {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.save-list-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.save-list-panel__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: #1c212a;
+  border-radius: 4px;
+}
+
+.save-list-panel__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* LLM 配置面板 */
+.llm-config-panel {
+  max-width: 520px;
+  width: 100%;
+}
+
+.llm-config-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.llm-config-panel__field label {
+  font-size: 12px;
+  color: #8a93a3;
+}
+
+.llm-config-panel__status {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 8px 0;
+}
+
+.llm-config-panel__endpoint {
+  word-break: break-all;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.llm-config-panel__unlocked {
+  color: #4ade80;
+}
+
+.llm-config-panel__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.llm-config-panel__error {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  padding: 8px;
+  background: #3a1f1f;
+  border: 1px solid #5c2626;
+  border-radius: 4px;
+  color: #fca5a5;
+}
+
+/* 错误横幅 */
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid;
+}
+
+.error-banner--api-key {
+  background: #3a2a1f;
+  border-color: #5c4426;
+  color: #fcd9a5;
+}
+
+.error-banner--timeout,
+.error-banner--network {
+  background: #1f2a3a;
+  border-color: #26415c;
+  color: #a5c9fc;
+}
+
+.error-banner--degraded {
+  background: #2a2a1f;
+  border-color: #4a4a26;
+  color: #f0f0a5;
+}
+
+.error-banner--schema,
+.error-banner--server,
+.error-banner--generic {
+  background: #3a1f1f;
+  border-color: #5c2626;
+  color: #fca5a5;
+}
+
+.error-banner__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.error-banner__hint {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+/* 战报面板 */
+.briefing-panel__report {
+  background: #0f1115;
+  border: 1px solid #232831;
+  border-radius: 4px;
+  padding: 8px;
+  margin: 8px 0;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.briefing-panel__text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.briefing-panel__degraded {
+  color: #f0e0a5;
+  margin: 8px 0;
+}
+
+.briefing-panel__progress {
+  margin: 8px 0;
+}
+
+.briefing-panel__progress-bar {
+  height: 8px;
+  background: #232831;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.briefing-panel__progress-fill {
+  height: 100%;
+  background: #4ade80;
+  transition: width 0.2s ease;
+}
+
+.briefing-panel__agent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.briefing-panel__agent {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: #1c212a;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.briefing-panel__agent--running,
+.briefing-panel__agent--thinking,
+.briefing-panel__agent--adjudicating {
+  border-left: 3px solid #60a5fa;
+}
+
+.briefing-panel__agent--done {
+  border-left: 3px solid #4ade80;
+}
+
+.briefing-panel__agent--failed {
+  border-left: 3px solid #f87171;
+}
+
+.briefing-panel__streaming-dot {
+  color: #4ade80;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Agent Inspector */
+.agent-inspector {
+  font-size: 12px;
+}
+
+.agent-inspector__dev-tag {
+  font-size: 10px;
+  background: #2a2a1f;
+  color: #f0e0a5;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+
+.agent-inspector__cache-stats dl,
+.agent-inspector__entry {
+  margin: 6px 0;
+}
+
+.agent-inspector__cache-stats dl {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 12px;
+}
+
+.agent-inspector__entry {
+  padding: 8px;
+  background: #1c212a;
+  border-radius: 4px;
+  border-left: 3px solid #4a5260;
+}
+
+.agent-inspector__entry--failed {
+  border-left-color: #f87171;
+}
+
+.agent-inspector__entry-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.agent-inspector__entry-id {
+  color: #8a93a3;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.agent-inspector__raw pre {
+  margin: 6px 0;
+  max-height: 160px;
+  overflow: auto;
+  font-size: 11px;
+  background: #0f1115;
+  padding: 6px;
+  border-radius: 3px;
+}
+
+.agent-inspector__error {
+  color: #f87171;
+  margin-top: 4px;
+}
+
+/* 通用表单元素 */
+input,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input[type='text'],
+input[type='password'],
+select {
+  background: #0f1115;
+  border: 1px solid #2f3744;
+  border-radius: 4px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+input:disabled,
+select:disabled,
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button {
+  background: #2563eb;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+button.agent-inspector__dismiss,
+.error-banner__dismiss,
+.turn-control-panel__error-dismiss {
+  background: transparent;
+  border: 1px solid currentColor;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+th,
+td {
+  padding: 4px 6px;
+  text-align: left;
+  border-bottom: 1px solid #232831;
+}
