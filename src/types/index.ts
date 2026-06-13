@@ -50,6 +50,12 @@ export type {
   AgentRole,
 } from './action-envelope'
 export type {
+  CommandIntent,
+  ParsedCommand,
+  ClarifyRequest,
+  ParseCommandResult,
+} from './command'
+export type {
   AgentAction,
   AgentActionKind,
   EventLogSource,

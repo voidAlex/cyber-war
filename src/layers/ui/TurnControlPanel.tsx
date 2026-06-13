@@ -54,8 +54,10 @@ export default function TurnControlPanel(): JSX.Element {
   const phase = context.game.phase
   const turn = context.game.world.turnIndex
   const canStart = isActionAllowed(phase, 'START_TURN') && !busy
-  // 推进按钮：planning 阶段可空转（advanceTurn 从 planning 起步推进到下一 idle）
-  const canAdvance = phase === 'planning' && !busy
+  // 推进按钮：
+  // - planning 阶段：空转推演（advanceTurn 内部 ENTER_HANDSHAKE→LOCK→…）。
+  // - locked 阶段：M2 玩家经 CommandTerminal 握手锁定后，从此处推演结算。
+  const canAdvance = (phase === 'planning' || phase === 'locked') && !busy
   void canAdvanceTurn // persist-gate 守卫在 reducer 内生效，UI 此处不复算
 
   return (
@@ -86,7 +88,7 @@ export default function TurnControlPanel(): JSX.Element {
           开始规划
         </button>
         <button type="button" onClick={() => void advance()} disabled={!canAdvance}>
-          锁定并推演下一天
+          {phase === 'locked' ? '推演结算下一天' : '锁定并推演下一天'}
         </button>
       </div>
 

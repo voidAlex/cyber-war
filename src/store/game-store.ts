@@ -16,8 +16,24 @@ import { create } from 'zustand'
 import type { StateMachineContext, StateMachineAction } from '@/layers/application/state-machine/types'
 import { wegoReducer } from '@/layers/application/state-machine/reducer'
 import { persistenceService } from '@/layers/application/services/persistence-service'
-import { advanceTurn } from '@/layers/application/orchestrator/turn-orchestrator'
+import { advanceTurn, createDefaultResolver } from '@/layers/application/orchestrator/turn-orchestrator'
+import { initWorkerService } from '@/layers/application/services/worker-service'
+import { directorRole } from '@/layers/agents/roles/director'
 import type { WorldState } from '@/types'
+
+/**
+ * 物理引擎 Worker 客户端（单例，主线程持有 Worker 句柄）。
+ *
+ * 模块级实例：Worker 构造代价较高，整个应用生命周期复用一个 client。
+ * 测试环境（vitest）不 import 本 store，故不会拉起 Worker。
+ */
+const physicsClient = initWorkerService()
+
+/**
+ * M2 默认结算器：物理引擎 Worker + 导演部 mock 终裁。
+ * 注入 advanceTurn 的 services.resolve。
+ */
+const defaultResolver = createDefaultResolver(physicsClient, directorRole)
 
 /**
  * Store 状态形态。
@@ -166,7 +182,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }
     set({ busy: true, userError: null })
     try {
-      const result = await advanceTurn(ctx, { persistence: persistenceService })
+      const result = await advanceTurn(ctx, {
+        persistence: persistenceService,
+        resolve: defaultResolver,
+      })
       // advanceTurn 内部已 dispatch 全链路 + 落盘；将其最终上下文写回 store
       set({ context: result.context, busy: false })
     } catch (err) {

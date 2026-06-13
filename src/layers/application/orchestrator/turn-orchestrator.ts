@@ -10,6 +10,10 @@
  * persist 阶段 await services.persistence.writeTurn + 追加事件，
  * 成功后才 PERSIST_COMPLETE → NEXT_TURN。
  *
+ * M2 增强 resolution：services.resolve 可注入物理引擎结算（Worker）+ 导演部终裁（mock）。
+ * 默认 createDefaultResolver 接 PhysicsEngineClient.simulateTurn + director.adjudicate，
+ * 战报从 ResolutionResult.events 拼装（M3 换真流式 LLM）。
+ *
  * UI 推进按钮必须走本编排器，禁直接 dispatch NEXT_TURN。
  *
  * @module layers/application/orchestrator/turn-orchestrator
@@ -27,6 +31,9 @@ import type {
 } from '@/layers/application/state-machine/types'
 import { wegoReducer } from '@/layers/application/state-machine/reducer'
 import type { PersistenceService } from '@/layers/application/services/persistence-service'
+import type { PhysicsEngineClient } from '@/layers/application/services/worker-service'
+import type { ResolutionResult } from '@/layers/domain/combat'
+import type { DirectorRole } from '@/layers/agents/roles/director'
 
 /**
  * 编排器所需的副作用服务句柄（依赖注入，便于 mock 测试）。
@@ -37,6 +44,10 @@ export interface TurnOrchestratorServices {
   /**
    * 结算服务（M1 空回合产出空 ResolutionResult；M2+ 接入物理/Agent）。
    * 返回 { resolution, events }。M1 events 为空数组。
+   *
+   * 默认实现（createDefaultResolver）：locked → resolution 时调
+   * workerService.simulateTurn(world, lockedOrders, seed) 得物理结果，
+   * 再经 director.adjudicate（mock 透传）产出战报与事件。
    */
   resolve?: (ctx: StateMachineContext, signal: AbortSignal) => Promise<{
     resolution: ResolutionSummary
@@ -115,15 +126,19 @@ export async function advanceTurn(
     actions.push({ type: 'START_TURN' })
   }
 
-  // planning → handshake
-  cur = step(cur, { type: 'ENTER_HANDSHAKE' }, signal)
-  actions.push({ type: 'ENTER_HANDSHAKE' })
+  // planning → handshake（M2 命令握手由 handshake-flow 完成；若已进入 handshake/locked 则跳过）
+  if (cur.game.phase === 'planning') {
+    cur = step(cur, { type: 'ENTER_HANDSHAKE' }, signal)
+    actions.push({ type: 'ENTER_HANDSHAKE' })
+  }
 
-  // handshake → locked（空回合无命令，直接锁定）
-  cur = step(cur, { type: 'CONFIRM_HANDSHAKE' }, signal)
-  actions.push({ type: 'CONFIRM_HANDSHAKE' })
+  // handshake → locked（M2 玩家经 handshake-flow.lockOrders 锁定后已是 locked，跳过）
+  if (cur.game.phase === 'handshake') {
+    cur = step(cur, { type: 'CONFIRM_HANDSHAKE' }, signal)
+    actions.push({ type: 'CONFIRM_HANDSHAKE' })
+  }
 
-  // locked → resolution
+  // locked → resolution（从 locked 起：玩家已握手锁定，或从 planning 空转至此）
   cur = step(cur, { type: 'ENTER_RESOLUTION' }, signal)
   actions.push({ type: 'ENTER_RESOLUTION' })
 
@@ -182,4 +197,62 @@ async function defaultEmptyResolution(
     degraded: false,
   }
   return { resolution, events: [] }
+}
+
+// ============================================================================
+// M2 默认结算器：物理引擎 Worker + 导演部 mock 终裁
+// ============================================================================
+
+/**
+ * 构造 M2 默认结算器：接物理引擎 Worker + 导演部 mock 终裁。
+ *
+ * 流程（locked → resolution 阶段调用）：
+ * 1. 收集所有阵营的 lockedOrders 扁平化为数组（按 sequence 升序）。
+ * 2. 调 workerService.simulateTurn(world, lockedOrders, scenarioSeed)
+ *    得物理结果（source:'physics'）。
+ * 3. 调 director.adjudicate（mock：直接采信物理结果 + 拼装战报）。
+ * 4. 返回 { resolution: ResolutionSummary, events: AgentAction[] }，
+ *    其中 events 标 source:'physics'（落盘 event-log）。
+ *
+ * 返回的函数符合 TurnOrchestratorServices.resolve 签名，可直接注入。
+ *
+ * @param workerService 物理引擎客户端（需已 init）
+ * @param director 导演部角色（M2 mock）
+ * @returns resolve 服务函数
+ */
+export function createDefaultResolver(
+  workerService: PhysicsEngineClient,
+  director: DirectorRole,
+): NonNullable<TurnOrchestratorServices['resolve']> {
+  return async (ctx, _signal) => {
+    const world = ctx.game.world
+    const turn = world.turnIndex
+
+    // 1. 扁平化 lockedOrders（按 sequence 升序，保证确定性）
+    const lockedOrders = Object.values(ctx.lockedOrders)
+      .flat()
+      .sort((a, b) => a.sequence - b.sequence)
+
+    // 2. 物理引擎结算（Worker）
+    const physicsResult: ResolutionResult = await workerService.simulateTurn(
+      world,
+      lockedOrders,
+      world.scenarioSeed,
+    )
+
+    // 3. 导演部终裁（mock：透传物理结果 + 战报拼装）
+    const directorResult = await director.adjudicate({
+      physicsResult,
+      envelopes: lockedOrders,
+      world,
+      scenarioSeed: world.scenarioSeed,
+      turn,
+    })
+
+    // 4. 返回战报摘要 + 事件（落盘 event-log，source:'physics'）
+    return {
+      resolution: directorResult.resolutionSummary,
+      events: directorResult.directorEvents,
+    }
+  }
 }

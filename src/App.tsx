@@ -1,33 +1,57 @@
 /**
- * 应用最小布局壳（M1 可演示闭环）。
+ * 应用主布局（App.tsx）— M2 可玩闭环接线。
  *
- * M1 阶段挂载存档列表 + 回合控制两个面板，演示「创建存档 → 空转推进回合 →
- * 刷新/重启后状态完整恢复」闭环。沙盘/终端等由后续里程碑接入。
+ * 布局（PRD §4 / TDD §2）：
+ * - 左栏：SaveListPanel（存档）+ TurnControlPanel（回合状态）。
+ * - 中栏：Sandbox（沙盘，读 pendingOrders 画虚线预演）。
+ * - 右栏：按 phase 切换 CommandTerminal（planning/handshake/locked/idle）
+ *         与 BriefingPanel（briefing）。
+ * - 底部：EventLogPanel（事件日志台，虚拟滚动）。
  *
- * 通过 zustand store 订阅；不直接调 @tauri-apps/api。
+ * 挂载 zustand store（已在 game-store.ts 单例）；不直接调 @tauri-apps/api。
  *
  * @module App
  */
 
 import { type JSX } from 'react'
-import SaveListPanel from '@/layers/ui/SaveListPanel'
-import TurnControlPanel from '@/layers/ui/TurnControlPanel'
+import { SaveListPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel } from '@/layers/ui'
+import { useGameStore } from '@/store/game-store'
 
 /**
- * 应用根组件。
- * M1：左侧存档列表 + 右侧回合控制，最小布局（不要求美观，M2 再做沙盘）。
+ * 应用根组件：三栏 + 底部最小可用布局（不要求美观）。
  */
 export default function App(): JSX.Element {
+  const context = useGameStore((s) => s.context)
+  const phase = context?.game.phase ?? 'idle'
+
+  // 右栏：briefing 阶段显示战报，其他阶段显示命令终端
+  const showBriefing = phase === 'briefing'
+
   return (
     <div className="app-shell">
       <header className="app-shell__header">
         <h1>赛博战争模拟器</h1>
-        <p className="app-shell__subtitle">Cyber War Simulator — M1 骨架闭环</p>
+        <p className="app-shell__subtitle">Cyber War Simulator — M2 握手 + 物理 + 沙盘闭环</p>
       </header>
+
       <main className="app-shell__main">
-        <SaveListPanel />
-        <TurnControlPanel />
+        <div className="app-shell__left">
+          <SaveListPanel />
+          <TurnControlPanel />
+        </div>
+
+        <div className="app-shell__center">
+          <Sandbox />
+        </div>
+
+        <div className="app-shell__right">
+          {showBriefing ? <BriefingPanel /> : <CommandTerminal />}
+        </div>
       </main>
+
+      <footer className="app-shell__footer">
+        <EventLogPanel />
+      </footer>
     </div>
   )
 }
