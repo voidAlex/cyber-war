@@ -131,6 +131,65 @@ body,
   white-space: nowrap;
 }
 
+/* 战役包面板（导入导出 + 开局） */
+.campaign-panel__section {
+  border-top: 1px solid #2a2f3a;
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.campaign-panel__section:first-of-type {
+  border-top: none;
+  margin-top: 0;
+}
+
+.campaign-panel__subtitle {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.campaign-panel__row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.campaign-panel__row input,
+.campaign-panel__row select {
+  flex: 1;
+  min-width: 120px;
+}
+
+.campaign-panel__confirm {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+  flex-wrap: wrap;
+  background: #1c212a;
+  padding: 6px;
+  border-radius: 4px;
+}
+
+.campaign-panel__hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.campaign-panel__message {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  background: #1c212a;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #d1d5db;
+  word-break: break-all;
+}
+
 /* LLM 配置面板 */
 .llm-config-panel {
   max-width: 520px;

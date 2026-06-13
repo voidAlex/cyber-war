@@ -17,7 +17,7 @@
  */
 
 import { useEffect, type JSX } from 'react'
-import { SaveListPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector } from '@/layers/ui'
+import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector } from '@/layers/ui'
 import { useGameStore } from '@/store/game-store'
 
 /**
@@ -67,6 +67,7 @@ export default function App(): JSX.Element {
       <main className="app-shell__main">
         <div className="app-shell__left">
           <SaveListPanel />
+          <CampaignPanel />
           <TurnControlPanel />
         </div>
 

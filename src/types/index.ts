@@ -89,6 +89,29 @@ export {
 // === 存档 ===
 export type { SaveManifest, SaveListItem } from './save-manifest'
 
+// === 战役包七文件（ZIP 导入导出 + schema 校验契约）===
+export type {
+  CampaignManifest,
+  CampaignMap,
+  CampaignMapCell,
+  CampaignHighValueNode,
+  CampaignFaction,
+  CampaignFactionSupply,
+  CampaignUnit,
+  CampaignUnitCoord,
+  CampaignCommander,
+  CampaignRules,
+  CampaignIntelDecay,
+  CampaignCombatRules,
+  CampaignMovementRules,
+  CampaignSupplyRules,
+  CampaignVictory,
+  CampaignVictoryCondition,
+  CampaignVictoryType,
+  CampaignPayload,
+} from './campaign'
+export { CAMPAIGN_ZIP_FILES, CAMPAIGN_SCHEMA_VERSION } from './campaign'
+
 // === 回放与快照（验收#7 红线）===
 export type {
   DriftKind,

@@ -2,14 +2,47 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "campaign-schemas/rules.schema.json",
   "title": "CampaignRules",
-  "description": "数值规则公式（炮击压制/要塞防御加成/消耗损耗/毒气侦察）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "description": "数值规则覆盖（战损/机动/补给/防御/情报半衰/炮击压制）。严格校验供 ajv 导入包。",
   "type": "object",
   "properties": {
     "intelDecay": {
       "type": "object",
       "properties": {
-        "halfLifeTurns": { "type": "integer", "minimum": 1 }
-      }
+        "halfLifeTurns": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "decayPerHalfLife": { "type": "number", "minimum": 0, "maximum": 3 }
+      },
+      "required": ["halfLifeTurns", "decayPerHalfLife"],
+      "additionalProperties": false
+    },
+    "combat": {
+      "type": "object",
+      "properties": {
+        "attritionRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "artillerySuppression": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fortressDefenseBonus": { "type": "number", "minimum": 0, "maximum": 1 },
+        "trenchDefenseBonus": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "movement": {
+      "type": "object",
+      "properties": {
+        "baseMovementPoints": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "riverCrossingPenalty": { "type": "number", "minimum": 0, "maximum": 10 },
+        "fatiguePerMove": { "type": "number", "minimum": 0, "maximum": 50 }
+      },
+      "additionalProperties": false
+    },
+    "supply": {
+      "type": "object",
+      "properties": {
+        "sustainCostPerTurn": { "type": "number", "minimum": 0, "maximum": 50 },
+        "lowSupplyThreshold": { "type": "number", "minimum": 0, "maximum": 100 },
+        "restockRate": { "type": "number", "minimum": 0, "maximum": 100 }
+      },
+      "additionalProperties": false
     }
-  }
+  },
+  "required": ["intelDecay", "combat"],
+  "additionalProperties": false
 }

@@ -2,15 +2,44 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "campaign-schemas/units.schema.json",
   "title": "CampaignUnits",
-  "description": "初始单位部署。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "description": "初始单位部署（编制+初始坐标+战力/人员/燃料/弹药/士气/疲劳）。严格校验供 ajv 导入包。",
   "type": "array",
+  "minItems": 1,
   "items": {
     "type": "object",
     "properties": {
-      "id": { "type": "string" },
-      "factionId": { "type": "string" },
-      "type": { "type": "string" }
+      "id": { "type": "string", "minLength": 1 },
+      "factionId": { "type": "string", "minLength": 1 },
+      "type": {
+        "type": "string",
+        "enum": ["infantry", "armor", "artillery", "recon", "fortress", "support"]
+      },
+      "coord": {
+        "type": "object",
+        "properties": {
+          "col": { "type": "integer", "minimum": 0 },
+          "row": { "type": "integer", "minimum": 0 }
+        },
+        "required": ["col", "row"],
+        "additionalProperties": false
+      },
+      "strength": { "type": "number", "minimum": 0, "maximum": 100 },
+      "personnel": { "type": "integer", "minimum": 0 },
+      "maxPersonnel": { "type": "integer", "minimum": 1 },
+      "fuel": { "type": "number", "minimum": 0, "maximum": 100 },
+      "ammo": { "type": "number", "minimum": 0, "maximum": 100 },
+      "morale": { "type": "number", "minimum": 0, "maximum": 100 },
+      "fatigue": { "type": "number", "minimum": 0, "maximum": 100 },
+      "status": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["engaged", "suppressed", "pinned", "retreating", "low_supply", "decoy"]
+        },
+        "uniqueItems": true
+      }
     },
-    "required": ["id", "factionId", "type"]
+    "required": ["id", "factionId", "type", "coord", "strength", "personnel", "maxPersonnel", "fuel", "ammo", "morale", "fatigue"],
+    "additionalProperties": false
   }
 }

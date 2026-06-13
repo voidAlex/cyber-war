@@ -2,14 +2,47 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "campaign-schemas/factions.schema.json",
   "title": "CampaignFactions",
-  "description": "阵营定义（side/敌对关系）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "description": "阵营定义（id/名称/颜色/立场/最高统帅人格/战区司令/后勤/学说）。严格校验供 ajv 导入包。",
   "type": "array",
+  "minItems": 1,
   "items": {
     "type": "object",
     "properties": {
-      "id": { "type": "string" },
-      "side": { "type": "string", "enum": ["player", "enemy", "ally", "neutral"] }
+      "id": { "type": "string", "minLength": 1 },
+      "name": { "type": "string", "minLength": 1 },
+      "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+      "side": { "type": "string", "enum": ["player", "enemy", "ally", "neutral"] },
+      "commanderId": { "type": "string", "minLength": 1 },
+      "theaterCommanderIds": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "uniqueItems": true
+      },
+      "supply": {
+        "type": "object",
+        "properties": {
+          "supplies": { "type": "number", "minimum": 0, "maximum": 100 },
+          "ammunition": { "type": "number", "minimum": 0, "maximum": 100 },
+          "fuel": { "type": "number", "minimum": 0, "maximum": 100 }
+        },
+        "required": ["supplies", "ammunition", "fuel"],
+        "additionalProperties": false
+      },
+      "trust": {
+        "type": "object",
+        "patternProperties": {
+          "^[A-Za-z0-9_-]+$": { "type": "number", "minimum": 0, "maximum": 100 }
+        },
+        "additionalProperties": false
+      },
+      "doctrineTags": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "uniqueItems": true
+      },
+      "description": { "type": "string", "maxLength": 2000 }
     },
-    "required": ["id", "side"]
+    "required": ["id", "name", "color", "side", "commanderId", "supply", "doctrineTags"],
+    "additionalProperties": false
   }
 }

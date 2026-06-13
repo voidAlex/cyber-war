@@ -2,13 +2,23 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "campaign-schemas/manifest.schema.json",
   "title": "CampaignManifest",
-  "description": "战役包清单（scenarioId/固定 seed/玩家可选阵营）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "description": "战役包清单（scenarioId/显示名/固定 seed/schemaVersion/玩家可选阵营）。严格校验供 ajv 导入包。",
   "type": "object",
   "properties": {
-    "scenarioId": { "type": "string" },
-    "displayName": { "type": "string" },
-    "scenarioSeed": { "type": "string" },
-    "playableFactionIds": { "type": "array", "items": { "type": "string" } }
+    "scenarioId": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "scenarioSeed": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "schemaVersion": { "type": "string", "minLength": 1 },
+    "playerFactionIds": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "description": { "type": "string", "maxLength": 2000 },
+    "startInGameDate": { "type": "string", "minLength": 1 },
+    "maxTurns": { "type": "integer", "minimum": 1, "maximum": 1000 }
   },
-  "required": ["scenarioId", "displayName", "scenarioSeed"]
+  "required": ["scenarioId", "displayName", "scenarioSeed", "schemaVersion", "playerFactionIds"],
+  "additionalProperties": false
 }

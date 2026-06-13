@@ -1,0 +1,408 @@
+/**
+ * 战役包 ZIP 闭环 + JSON Schema 校验测试（campaign-zip.test.ts）— 验收#5。
+ *
+ * 覆盖：
+ * - buildCampaignZip → loadCampaignZip 闭环（打包再解包字段一致）。
+ * - validateCampaignPayload：合法 payload 通过 / 非法 payload throw CampaignSchemaError。
+ * - loadCampaignZip：损坏 ZIP / 缺文件 / 非法 JSON / schema 校验失败各 throw。
+ * - 凡尔登默认包能通过 schema 校验 + buildInitialWorldState + startCampaignFromPayload 开局。
+ *
+ * 纯函数（buildCampaignZip/loadCampaignZip/validateCampaignPayload/buildInitialWorldState）
+ * 不依赖 Tauri；startCampaignFromPayload 经 vi.mock 替换 gateway，捕获 fs_init_save/
+ * fs_write_world_state 调用而不真落盘。
+ *
+ * @module __tests__/campaign-zip
+ */
+
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { unzipSync, zipSync, strToU8 } from 'fflate'
+
+// =============================================================================
+// mock @/layers/gateway/tauri-bridge：捕获 fs 命令调用，不真落盘
+// =============================================================================
+const mockFs = {
+  initSaveCalls: [] as Array<{ saveId: string; manifest: string }>,
+  writeWorldStateCalls: [] as Array<{ saveId: string; content: string }>,
+}
+
+vi.mock('@/layers/gateway/tauri-bridge', () => ({
+  fsInitSave: vi.fn(async (saveId: string, manifest: string): Promise<void> => {
+    mockFs.initSaveCalls.push({ saveId, manifest })
+  }),
+  fsWriteWorldState: vi.fn(async (saveId: string, content: string): Promise<void> => {
+    mockFs.writeWorldStateCalls.push({ saveId, content })
+  }),
+  fsWriteManifest: vi.fn(async (): Promise<void> => {}),
+  fsListSaves: vi.fn(async (): Promise<string[]> => []),
+  fsDeleteSave: vi.fn(async (): Promise<void> => {}),
+  fsReadWorldState: vi.fn(async (): Promise<string> => '{}'),
+  fsExportSave: vi.fn(async (): Promise<void> => {}),
+  fsImportSave: vi.fn(async (): Promise<void> => {}),
+  fsUnpackCampaign: vi.fn(async (): Promise<void> => {}),
+}))
+
+// =============================================================================
+// 被测模块（必须在 vi.mock 之后 import）
+// =============================================================================
+import {
+  buildCampaignZip,
+  loadCampaignZip,
+  validateCampaignPayload,
+  CampaignSchemaError,
+  CampaignZipError,
+} from '@/layers/persistence'
+import {
+  buildInitialWorldState,
+  startCampaignFromPayload,
+  startDefaultCampaign,
+  validateCampaignConsistency,
+  CampaignConsistencyError,
+} from '@/layers/persistence'
+import type { CampaignPayload } from '@/types'
+import { CAMPAIGN_ZIP_FILES } from '@/types'
+import { verdunCampaign } from '@/data/verdun-1916'
+
+// =============================================================================
+// 测试 fixture：最小合法 CampaignPayload（schema 边界测试用）
+// =============================================================================
+
+/** 构造最小合法 payload（深拷贝凡尔登后裁剪，保证 schema 合法） */
+function makeValidPayload(): CampaignPayload {
+  return JSON.parse(JSON.stringify(verdunCampaign)) as CampaignPayload
+}
+
+beforeEach(() => {
+  mockFs.initSaveCalls.length = 0
+  mockFs.writeWorldStateCalls.length = 0
+})
+
+// =============================================================================
+// 1. buildCampaignZip → loadCampaignZip 闭环
+// =============================================================================
+
+describe('buildCampaignZip → loadCampaignZip 闭环', () => {
+  it('凡尔登包打包再解包，七文件字段一致', () => {
+    const original = makeValidPayload()
+    const zipBytes = buildCampaignZip(original)
+    expect(zipBytes).toBeInstanceOf(Uint8Array)
+    expect(zipBytes.byteLength).toBeGreaterThan(0)
+
+    const roundtrip = loadCampaignZip(zipBytes)
+
+    // 七文件顶层字段逐一比对
+    expect(roundtrip.manifest).toEqual(original.manifest)
+    expect(roundtrip.map).toEqual(original.map)
+    expect(roundtrip.factions).toEqual(original.factions)
+    expect(roundtrip.units).toEqual(original.units)
+    expect(roundtrip.commanders).toEqual(original.commanders)
+    expect(roundtrip.rules).toEqual(original.rules)
+    expect(roundtrip.victory).toEqual(original.victory)
+  })
+
+  it('ZIP 内含七文件（文件名固定）', () => {
+    const zipBytes = buildCampaignZip(makeValidPayload())
+    // 解包后 ZIP 应包含全部七文件名（loadCampaignZip 读取的就是这些 key）
+    // 通过反向构造验证：删任一文件后 loadCampaignZip 应报缺失
+    const unzipped = unzipSync(zipBytes)
+    const expected = Object.values(CAMPAIGN_ZIP_FILES)
+    for (const name of expected) {
+      expect(unzipped[name]).toBeDefined()
+    }
+  })
+})
+
+// =============================================================================
+// 2. validateCampaignPayload：合法通过 / 非法 throw
+// =============================================================================
+
+describe('validateCampaignPayload', () => {
+  it('合法凡尔登 payload 通过校验（不 throw）', () => {
+    expect(() => validateCampaignPayload(makeValidPayload())).not.toThrow()
+  })
+
+  it('manifest.scenarioId 缺失 → throw CampaignSchemaError（manifest.json）', () => {
+    const p = makeValidPayload()
+    delete (p.manifest as Partial<typeof p.manifest>).scenarioId
+    try {
+      validateCampaignPayload(p)
+      throw new Error('应 throw 但未 throw')
+    } catch (e) {
+      expect(e).toBeInstanceOf(CampaignSchemaError)
+      expect((e as CampaignSchemaError).file).toBe(CAMPAIGN_ZIP_FILES.manifest)
+    }
+  })
+
+  it('map.gridType 非法值 → throw CampaignSchemaError（map.json）', () => {
+    const p = makeValidPayload()
+    ;(p.map as { gridType: string }).gridType = 'triangle'
+    expect(() => validateCampaignPayload(p)).toThrow(CampaignSchemaError)
+  })
+
+  it('commanders.aggression 超范围（>1）→ throw', () => {
+    const p = makeValidPayload()
+    p.commanders[0].aggression = 1.5
+    expect(() => validateCampaignPayload(p)).toThrow(CampaignSchemaError)
+  })
+
+  it('commanders.aggression 为负 → throw', () => {
+    const p = makeValidPayload()
+    p.commanders[0].aggression = -0.2
+    expect(() => validateCampaignPayload(p)).toThrow(CampaignSchemaError)
+  })
+
+  it('units 单元缺 required 字段 coord → throw', () => {
+    const p = makeValidPayload()
+    delete (p.units[0] as Partial<typeof p.units[0]>).coord
+    expect(() => validateCampaignPayload(p)).toThrow(CampaignSchemaError)
+  })
+
+  it('victory.conditions 空 → throw（minItems:1）', () => {
+    const p = makeValidPayload()
+    p.victory.conditions = []
+    expect(() => validateCampaignPayload(p)).toThrow(CampaignSchemaError)
+  })
+
+  it('rules.intelDecay 缺失 → throw（required）', () => {
+    const p = makeValidPayload()
+    delete (p.rules as Partial<typeof p.rules>).intelDecay
+    expect(() => validateCampaignPayload(p)).toThrow(CampaignSchemaError)
+  })
+
+  it('factions.color 非法格式 → throw', () => {
+    const p = makeValidPayload()
+    p.factions[0].color = 'blue'
+    expect(() => validateCampaignPayload(p)).toThrow(CampaignSchemaError)
+  })
+
+  it('manifest 含 additionalProperties 外字段 → throw（strict）', () => {
+    const p = makeValidPayload()
+    ;(p.manifest as unknown as Record<string, unknown>).evilField = 'inject'
+    expect(() => validateCampaignPayload(p)).toThrow(CampaignSchemaError)
+  })
+})
+
+// =============================================================================
+// 3. loadCampaignZip：损坏 ZIP / 缺文件 / 非法 JSON
+// =============================================================================
+
+describe('loadCampaignZip 错误路径', () => {
+  it('非 ZIP 字节 → throw CampaignZipError', () => {
+    const garbage = new Uint8Array([1, 2, 3, 4, 5])
+    expect(() => loadCampaignZip(garbage)).toThrow(CampaignZipError)
+  })
+
+  it('缺文件 → throw CampaignZipError（含 missingFiles）', () => {
+    const p = makeValidPayload()
+    const zipBytes = buildCampaignZip(p)
+    // 解包后删掉 commanders.json 再重新打包
+    const unzipped = unzipSync(zipBytes)
+    delete unzipped[CAMPAIGN_ZIP_FILES.commanders]
+    const tampered = zipSync(unzipped)
+
+    try {
+      loadCampaignZip(tampered)
+      throw new Error('应 throw 但未 throw')
+    } catch (e) {
+      expect(e).toBeInstanceOf(CampaignZipError)
+      expect((e as CampaignZipError).missingFiles).toContain(CAMPAIGN_ZIP_FILES.commanders)
+    }
+  })
+
+  it('文件内容非法 JSON → throw CampaignSchemaError', () => {
+    const p = makeValidPayload()
+    const zipBytes = buildCampaignZip(p)
+    const unzipped = unzipSync(zipBytes)
+    // 把 manifest.json 替换为非法 JSON
+    unzipped[CAMPAIGN_ZIP_FILES.manifest] = strToU8('{ not valid json ///')
+    const tampered = zipSync(unzipped)
+
+    expect(() => loadCampaignZip(tampered)).toThrow(CampaignSchemaError)
+  })
+
+  it('schema 校验失败 → throw CampaignSchemaError（不加载损坏包）', () => {
+    const p = makeValidPayload()
+    // 制造 schema 非法：map.gridType
+    p.map.gridType = 'invalid' as never
+    const zipBytes = buildCampaignZip(p)
+    expect(() => loadCampaignZip(zipBytes)).toThrow(CampaignSchemaError)
+  })
+})
+
+// =============================================================================
+// 4. 凡尔登包：schema 校验 + 一致性 + buildInitialWorldState + 开局
+// =============================================================================
+
+describe('凡尔登默认示例包', () => {
+  it('通过 schema 校验', () => {
+    expect(() => validateCampaignPayload(verdunCampaign)).not.toThrow()
+  })
+
+  it('通过跨文件一致性校验', () => {
+    expect(() => validateCampaignConsistency(verdunCampaign)).not.toThrow()
+  })
+
+  it('schemaVersion 为 1.0.0', () => {
+    expect(verdunCampaign.manifest.schemaVersion).toBe('1.0.0')
+  })
+
+  it('manifest.playerFactionIds 含法/德', () => {
+    expect(verdunCampaign.manifest.playerFactionIds).toEqual(
+      expect.arrayContaining(['france', 'germany']),
+    )
+  })
+
+  it('含四员指挥官（贝当/尼韦勒/法金汉/皇太子）', () => {
+    const names = verdunCampaign.commanders.map((c) => c.id)
+    expect(names).toEqual(
+      expect.arrayContaining(['petain', 'nivelle', 'falkenhayn', 'crown-prince']),
+    )
+  })
+
+  it('人格数值合理：贝当 aggression 低 obedience 高', () => {
+    const petain = verdunCampaign.commanders.find((c) => c.id === 'petain')!
+    expect(petain.aggression).toBeLessThan(0.4)
+    expect(petain.obedience).toBeGreaterThan(0.7)
+    expect(petain.preferredTempo).toBe('methodical')
+  })
+
+  it('人格数值合理：尼韦勒 aggression 高', () => {
+    const nivelle = verdunCampaign.commanders.find((c) => c.id === 'nivelle')!
+    expect(nivelle.aggression).toBeGreaterThan(0.7)
+    expect(nivelle.preferredTempo).toBe('rapid')
+  })
+
+  it('人格数值合理：法金汉 methodical + aggression 中', () => {
+    const falkenhayn = verdunCampaign.commanders.find((c) => c.id === 'falkenhayn')!
+    expect(falkenhayn.aggression).toBeGreaterThanOrEqual(0.4)
+    expect(falkenhayn.aggression).toBeLessThanOrEqual(0.6)
+    expect(falkenhayn.preferredTempo).toBe('methodical')
+  })
+
+  it('规则 halfLifeTurns=3（情报半衰草案）', () => {
+    expect(verdunCampaign.rules.intelDecay.halfLifeTurns).toBe(3)
+  })
+
+  it('含高价值节点杜奥蒙堡/沃堡/苏维尔堡/凡尔登城', () => {
+    const nodeIds = verdunCampaign.map.highValueNodes.map((n) => n.id)
+    expect(nodeIds).toEqual(
+      expect.arrayContaining([
+        'fort-douaumont',
+        'fort-vaux',
+        'fort-souville',
+        'verdun-city',
+      ]),
+    )
+  })
+
+  it('胜利条件含法/德双方（消耗与占领）', () => {
+    const factionIds = verdunCampaign.victory.conditions.map((c) => c.factionId)
+    expect(factionIds).toEqual(expect.arrayContaining(['france', 'germany']))
+    const types = verdunCampaign.victory.conditions.map((c) => c.type)
+    expect(types).toEqual(expect.arrayContaining(['objective', 'casualty', 'turn_limit']))
+  })
+})
+
+describe('buildInitialWorldState（凡尔登投影）', () => {
+  it('投影出合法 WorldState（turnIndex=0，含阵营/单位/地图）', () => {
+    const world = buildInitialWorldState(verdunCampaign, 'save-1', 'france')
+    expect(world.saveId).toBe('save-1')
+    expect(world.scenarioId).toBe('verdun-1916')
+    expect(world.scenarioSeed).toBe(verdunCampaign.manifest.scenarioSeed)
+    expect(world.turnIndex).toBe(0)
+    expect(world.inGameDate).toBe('1916-02-21')
+    expect(world.factions).toHaveLength(2)
+    expect(world.units.length).toBeGreaterThan(0)
+    expect(world.map.cols).toBe(verdunCampaign.map.cols)
+    expect(world.intel.decayRule.halfLifeTurns).toBe(3)
+  })
+
+  it('阵营 commander 已解析为 CommanderProfile', () => {
+    const world = buildInitialWorldState(verdunCampaign, 'save-1', 'france')
+    const france = world.factions.find((f) => f.id === 'france')!
+    expect(france.commander.id).toBe('petain')
+    expect(france.commander.aggression).toBeLessThan(0.4)
+    // 战区司令（尼韦勒）
+    expect(france.theaterCommanders.map((c) => c.id)).toContain('nivelle')
+  })
+
+  it('单位 detection：己方 L3 全量透视，敌方 L0 盲区', () => {
+    const world = buildInitialWorldState(verdunCampaign, 'save-1', 'france')
+    const frUnit = world.units.find((u) => u.factionId === 'france')!
+    expect(frUnit.detection['france'].level).toBe(3)
+    expect(frUnit.detection['germany'].level).toBe(0)
+    const deUnit = world.units.find((u) => u.factionId === 'germany')!
+    expect(deUnit.detection['germany'].level).toBe(3)
+    expect(deUnit.detection['france'].level).toBe(0)
+  })
+
+  it('非法 playerFactionId → throw CampaignConsistencyError', () => {
+    expect(() =>
+      buildInitialWorldState(verdunCampaign, 'save-1', 'nonexistent'),
+    ).toThrow(CampaignConsistencyError)
+  })
+})
+
+describe('startCampaignFromPayload（凡尔登开局，gateway mock）', () => {
+  it('调 fs_init_save + fs_write_world_state 各一次', async () => {
+    const world = await startCampaignFromPayload(
+      verdunCampaign,
+      'save-start',
+      'germany',
+    )
+    expect(world.saveId).toBe('save-start')
+    expect(world.scenarioId).toBe('verdun-1916')
+    expect(mockFs.initSaveCalls).toHaveLength(1)
+    expect(mockFs.initSaveCalls[0].saveId).toBe('save-start')
+    expect(mockFs.writeWorldStateCalls).toHaveLength(1)
+    expect(mockFs.writeWorldStateCalls[0].saveId).toBe('save-start')
+    // manifest 含 playerFactionId
+    const manifest = JSON.parse(mockFs.initSaveCalls[0].manifest)
+    expect(manifest.playerFactionId).toBe('germany')
+  })
+
+  it('startDefaultCampaign 默认选 france 开局', async () => {
+    mockFs.initSaveCalls.length = 0
+    mockFs.writeWorldStateCalls.length = 0
+    const world = await startDefaultCampaign('save-default')
+    expect(world.scenarioId).toBe('verdun-1916')
+    const manifest = JSON.parse(mockFs.initSaveCalls[0].manifest)
+    expect(manifest.playerFactionId).toBe('france')
+  })
+})
+
+// =============================================================================
+// 5. 跨文件一致性校验
+// =============================================================================
+
+describe('validateCampaignConsistency 跨文件引用', () => {
+  it('faction.commanderId 引用不存在指挥官 → throw', () => {
+    const p = makeValidPayload()
+    p.factions[0].commanderId = 'ghost-commander'
+    expect(() => validateCampaignConsistency(p)).toThrow(CampaignConsistencyError)
+  })
+
+  it('unit.factionId 引用不存在阵营 → throw', () => {
+    const p = makeValidPayload()
+    p.units[0].factionId = 'ghost-faction'
+    expect(() => validateCampaignConsistency(p)).toThrow(CampaignConsistencyError)
+  })
+
+  it('unit.coord 超出地图范围 → throw', () => {
+    const p = makeValidPayload()
+    p.units[0].coord = { col: 999, row: 999 }
+    expect(() => validateCampaignConsistency(p)).toThrow(CampaignConsistencyError)
+  })
+
+  it('victory.nodeId 引用不存在节点 → throw', () => {
+    const p = makeValidPayload()
+    const objectiveCond = p.victory.conditions.find((c) => c.type === 'objective')!
+    objectiveCond.nodeId = 'ghost-node'
+    expect(() => validateCampaignConsistency(p)).toThrow(CampaignConsistencyError)
+  })
+
+  it('manifest.playerFactionIds 引用不存在阵营 → throw', () => {
+    const p = makeValidPayload()
+    p.manifest.playerFactionIds = ['france', 'ghost-faction']
+    expect(() => validateCampaignConsistency(p)).toThrow(CampaignConsistencyError)
+  })
+})

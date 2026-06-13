@@ -2,12 +2,48 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "campaign-schemas/map.schema.json",
   "title": "CampaignMap",
-  "description": "战役地图（网格/地形/高价值节点）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "description": "战役地图（网格类型/列/行/单元数组/高价值节点）。严格校验供 ajv 导入包。",
   "type": "object",
   "properties": {
     "gridType": { "type": "string", "enum": ["square", "hex"] },
-    "cols": { "type": "integer", "minimum": 1 },
-    "rows": { "type": "integer", "minimum": 1 }
+    "cols": { "type": "integer", "minimum": 1, "maximum": 200 },
+    "rows": { "type": "integer", "minimum": 1, "maximum": 200 },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "col": { "type": "integer", "minimum": 0 },
+          "row": { "type": "integer", "minimum": 0 },
+          "terrain": {
+            "type": "string",
+            "enum": ["plain", "forest", "mountain", "water", "urban", "fortress", "marsh"]
+          },
+          "movementCost": { "type": "number", "minimum": 0, "maximum": 100 },
+          "defenseBonus": { "type": "number", "minimum": 0, "maximum": 1 },
+          "isObjective": { "type": "boolean" }
+        },
+        "required": ["id", "col", "row", "terrain", "movementCost", "defenseBonus", "isObjective"],
+        "additionalProperties": false
+      }
+    },
+    "highValueNodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "cellId": { "type": "string", "minLength": 1 },
+          "controlThreshold": { "type": "integer", "minimum": 0, "maximum": 100 }
+        },
+        "required": ["id", "name", "cellId", "controlThreshold"],
+        "additionalProperties": false
+      }
+    }
   },
-  "required": ["gridType", "cols", "rows"]
+  "required": ["gridType", "cols", "rows", "cells", "highValueNodes"],
+  "additionalProperties": false
 }

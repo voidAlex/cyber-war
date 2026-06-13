@@ -15,6 +15,7 @@
  */
 
 export { default as SaveListPanel } from './SaveListPanel'
+export { default as CampaignPanel } from './CampaignPanel'
 export { default as TurnControlPanel } from './TurnControlPanel'
 export { default as Sandbox } from './sandbox/Sandbox'
 export { default as CommandTerminal } from './terminal/CommandTerminal'

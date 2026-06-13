@@ -2,11 +2,32 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "campaign-schemas/victory.schema.json",
   "title": "CampaignVictory",
-  "description": "胜负条件（占节点/战损阈值/回合上限）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "description": "胜负条件（占节点/战损阈值/回合上限）。严格校验供 ajv 导入包。",
   "type": "object",
   "properties": {
-    "maxTurns": { "type": "integer", "minimum": 1 },
-    "conditions": { "type": "array", "items": { "type": "object" } }
+    "maxTurns": { "type": "integer", "minimum": 1, "maximum": 1000 },
+    "conditions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "factionId": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": ["objective", "casualty", "turn_limit"]
+          },
+          "description": { "type": "string", "minLength": 1 },
+          "nodeId": { "type": "string", "minLength": 1 },
+          "casualtyThreshold": { "type": "number", "minimum": 0, "maximum": 1 },
+          "targetFactionId": { "type": "string", "minLength": 1 }
+        },
+        "required": ["id", "factionId", "type", "description"],
+        "additionalProperties": false
+      }
+    }
   },
-  "required": ["maxTurns"]
+  "required": ["maxTurns", "conditions"],
+  "additionalProperties": false
 }

@@ -2,16 +2,27 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "campaign-schemas/commanders.schema.json",
   "title": "CampaignCommanders",
-  "description": "指挥官人格数值（aggression/obedience/preferredTempo/doctrineTags）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "description": "指挥官人格数值基底（id/名称/人格描述/aggression/obedience/preferredTempo/doctrineTags）。严格校验供 ajv 导入包。",
   "type": "array",
+  "minItems": 1,
   "items": {
     "type": "object",
     "properties": {
-      "id": { "type": "string" },
-      "name": { "type": "string" },
+      "id": { "type": "string", "minLength": 1 },
+      "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+      "personality": { "type": "string", "minLength": 1, "maxLength": 2000 },
       "aggression": { "type": "number", "minimum": 0, "maximum": 1 },
-      "obedience": { "type": "number", "minimum": 0, "maximum": 1 }
+      "obedience": { "type": "number", "minimum": 0, "maximum": 1 },
+      "preferredTempo": { "type": "string", "enum": ["methodical", "balanced", "rapid"] },
+      "doctrineTags": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "uniqueItems": true
+      },
+      "rank": { "type": "string", "minLength": 1, "maxLength": 80 },
+      "factionId": { "type": "string", "minLength": 1 }
     },
-    "required": ["id", "name"]
+    "required": ["id", "name", "personality", "aggression", "obedience", "preferredTempo", "doctrineTags"],
+    "additionalProperties": false
   }
 }

@@ -11,5 +11,23 @@ export { saveRepository } from './repository'
 export { appendEvent, appendEvents, readEventLog } from './event-log'
 export { createTurnSnapshot, loadTurnSnapshot, writeSnapshot, readSnapshot } from './snapshot'
 export { restoreFromEventLog, replayToLatest } from './replay'
-export { unpackCampaign } from './campaign-zip'
+export {
+  buildCampaignZip,
+  loadCampaignZip,
+  validateCampaignPayload,
+  exportSaveAsZip,
+  importSaveZip,
+  importCampaignZip,
+  createCampaignAjv,
+  getCampaignValidator,
+  CampaignSchemaError,
+  CampaignZipError,
+} from './campaign-zip'
 export { appendDiagnostic } from './diagnostics'
+export {
+  startCampaignFromPayload,
+  startDefaultCampaign,
+  buildInitialWorldState,
+  validateCampaignConsistency,
+  CampaignConsistencyError,
+} from './campaign-service'
