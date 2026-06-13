@@ -88,3 +88,11 @@ export {
 
 // === 存档 ===
 export type { SaveManifest, SaveListItem } from './save-manifest'
+
+// === 回放与快照（验收#7 红线）===
+export type {
+  DriftKind,
+  DriftWarning,
+  RestoreResult,
+  TurnSnapshot,
+} from './replay'

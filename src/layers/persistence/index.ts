@@ -9,7 +9,7 @@
 
 export { saveRepository } from './repository'
 export { appendEvent, appendEvents, readEventLog } from './event-log'
-export { writeSnapshot } from './snapshot'
-export { replayToTurn } from './replay'
+export { createTurnSnapshot, loadTurnSnapshot, writeSnapshot, readSnapshot } from './snapshot'
+export { restoreFromEventLog, replayToLatest } from './replay'
 export { unpackCampaign } from './campaign-zip'
 export { appendDiagnostic } from './diagnostics'

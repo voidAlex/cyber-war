@@ -114,6 +114,23 @@ pub async fn fs_write_snapshot(
     Ok(())
 }
 
+/// 读取 snapshot.json 全文（小文件，回放/崩溃恢复时取最近快照）。
+///
+/// Rust 不解析语义，仅返回原始 JSON 字符串；不存在时返回 Err(Fs)，
+/// 上层（snapshot.ts readTurnSnapshot）据 null 兜底回退到 world-state。
+#[tauri::command]
+pub async fn fs_read_snapshot(
+    app: AppHandle,
+    save_id: String,
+) -> Result<String, AppError> {
+    let dir = save_dir(&app, &save_id)?;
+    let path = dir.snapshot();
+    let content = tokio::task::spawn_blocking(move || read_text(&path))
+        .await
+        .map_err(|e| AppError::Fs(format!("任务调度失败: {e}")))??;
+    Ok(content)
+}
+
 /// 真追加一行事件到 event-log.jsonl（O(1)）。
 #[tauri::command]
 pub async fn fs_append_event(

@@ -57,6 +57,11 @@ export function fsWriteSnapshot(saveId: string, content: string): Promise<void> 
   return invoke<void>('fs_write_snapshot', { saveId, content })
 }
 
+/** 读取 snapshot.json 全文（回放/崩溃恢复取最近快照；不存在则 reject）。 */
+export function fsReadSnapshot(saveId: string): Promise<string> {
+  return invoke<string>('fs_read_snapshot', { saveId })
+}
+
 /** 真追加一行事件到 event-log.jsonl（O(1)）。 */
 export function fsAppendEvent(saveId: string, line: string): Promise<void> {
   return invoke<void>('fs_append_event', { saveId, line })

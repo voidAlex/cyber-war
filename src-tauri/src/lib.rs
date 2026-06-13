@@ -43,6 +43,7 @@ pub fn run() {
             commands::fs_read_world_state,
             commands::fs_write_world_state,
             commands::fs_write_snapshot,
+            commands::fs_read_snapshot,
             commands::fs_append_event,
             commands::fs_read_event_log,
             commands::fs_write_faction_file,
