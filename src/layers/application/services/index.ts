@@ -9,4 +9,20 @@
 
 export { persistenceService, createEmptyWorldState } from './persistence-service'
 export type { PersistenceService } from './persistence-service'
-export { llmService } from './llm-service'
+export {
+  llmService,
+  createLlmService,
+  toLlmCallError,
+  hitRate,
+  LlmCallError,
+  LlmNetworkError,
+  LlmApiKeyError,
+  LlmServerError,
+  LlmTimeoutError,
+  LlmDegradedError,
+  LlmSchemaError,
+} from './llm-service'
+export type {
+  LlmService,
+  CacheStats,
+} from './llm-service'

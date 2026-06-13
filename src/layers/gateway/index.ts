@@ -14,9 +14,35 @@
  */
 
 export * from './tauri-bridge'
-export { streamForward } from './llm-client'
-export type { LlmStreamHandlers } from './llm-client'
+export {
+  streamChat,
+  streamForward,
+  LlmStreamError,
+} from './llm-client'
+export type {
+  LlmStreamHandlers,
+  StreamChatOptions,
+  StreamChatStats,
+  StreamChatResult,
+  StreamChatIterable,
+} from './llm-client'
 export { encryptApiKey, decryptApiKey } from './crypto-client'
+export {
+  saveEncryptedConfig,
+  unlockConfig,
+  clearSession,
+  getSessionConfig,
+  isSessionUnlocked,
+  RuntimeConfigError,
+} from './runtime-config'
+export type {
+  RuntimeLLMConfig,
+  PersistedRuntimeConfig,
+  EncryptFn,
+  DecryptFn,
+  PersistWriteFn,
+  PersistReadFn,
+} from './runtime-config'
 export type {
   EncryptedPayload,
   ProviderKindString,
