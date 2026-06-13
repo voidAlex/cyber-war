@@ -1,22 +1,27 @@
 /**
- * 参谋长角色（chief.ts）— M2 mock 命令解析器。
+ * 参谋长角色（chief.ts）— 命令解析器（mock + 真 LLM 双实现）。
  *
  * 参谋长负责：解析玩家自然语言命令 → 握手反问 → 预演虚线 → 玩家确认。
  * 批量握手取代逐条（重写计划修订点 B）。
  *
- * M2 实现：规则/mock 解析（识别意图 move/attack/capture_node/hold +
- * 目标单位 + 目标坐标）。M3 替换为真 LLM，但接口 parseCommand 不变。
+ * 两种实现：
+ * - **mock 解析**（createChiefRole / chiefRole）：规则解析（识别意图
+ *   move/attack/capture_node/hold + 目标单位 + 目标坐标）。M2 默认，测试/离线兜底用。
+ * - **真 LLM 解析**（createLlmChiefRole）：经 llm-service 调 streamChatStructured
+ *   （chief schema + context-builder L0-L3 分层），失败时回退 mock（绝不伪造）。
  *
  * 审计教训「解析失败伪造 unit-1/C3」的对策：
  * - 解析基于真实 WorldState.units/map.highValueNodes 校验目标存在；
- * - 找不到目标单位/坐标越界/节点不存在 → 返回 ClarifyRequest，绝不编造数据。
+ * - 找不到目标单位/坐标越界/节点不存在 → 返回 ClarifyRequest，绝不编造数据；
+ * - LLM 输出经 ajv 严格校验 + 真实性校验（unitId 必须存在于 world.units）。
  *
  * 接口设计：`parseCommand(input, ctx) => Promise<ParsedCommand | ClarifyRequest>`，
- * 便于 M3 真实 LLM 替换（保持调用方代码不变）。
+ * 两种实现签名一致（LLM 实现额外需注入 llmService + config）。
  *
  * @module layers/agents/roles/chief
  */
 
+import type { ValidateFunction } from 'ajv'
 import type {
   CommandIntent,
   ParseCommandResult,
@@ -26,6 +31,15 @@ import type {
   WorldState,
   Unit,
 } from '@/types'
+import type { LlmService } from '@/layers/application/services/llm-service'
+import type { LlmCallConfig } from './llm-role-base'
+import { buildLlmOptions } from './llm-role-base'
+import {
+  getAgentValidator,
+  type ChiefAgentOutput,
+  type ChiefCandidateCommand,
+} from '@/layers/agents/protocol/schema'
+import { isLlmCallError } from './role-errors'
 
 /**
  * 参谋长解析所需的世界状态视图（最小依赖，便于测试注入）。
@@ -96,6 +110,141 @@ export function createChiefRole(): ChiefRole {
  * 直接 import 此实例即可使用；测试/替换时用 createChiefRole() 重建。
  */
 export const chiefRole: ChiefRole = createChiefRole()
+
+// ============================================================================
+// M3 真 LLM 参谋长（保留 mock 作为 fallback）
+// ============================================================================
+
+/**
+ * 真 LLM 参谋长角色（M3）。
+ *
+ * parseCommand 经 llm-service 调 streamChatStructured（chief schema），
+ * 把 LLM 候选命令逐条做**真实性校验**（unitId/node/coord 必须存在于 world），
+ * 校验不过的候选降级为 clarify（绝不伪造）。
+ *
+ * 任何 LLM 错误（四分类/degraded/schema 校验失败）→ **回退 mock 解析**
+ * （审计教训"不伪造"的兜底：宁可用规则解析也不让游戏卡死）。
+ */
+export interface LlmChiefRole extends ChiefRole {
+  /** 注入的 LLM 服务 */
+  readonly llm: LlmService
+  /** 注入的 LLM 调用配置 */
+  readonly config: LlmCallConfig
+}
+
+/**
+ * 创建真 LLM 参谋长（M3）。
+ *
+ * @param llmService LLM 服务（测试可 mock）
+ * @param config LLM 调用配置（provider/endpoint/model/apiKey）
+ * @returns LlmChiefRole（parseCommand 失败自动回退 mock）
+ */
+export function createLlmChiefRole(
+  llmService: LlmService,
+  config: LlmCallConfig,
+): LlmChiefRole {
+  return {
+    llm: llmService,
+    config,
+    async parseCommand(input, ctx) {
+      try {
+        return await parseCommandWithLlm(input, ctx, llmService, config)
+      } catch (err) {
+        if (isLlmCallError(err)) {
+          // LLM 失败：回退 mock 规则解析（绝不伪造，绝不卡死游戏）
+          return parseCommandMock(input, ctx)
+        }
+        throw err
+      }
+    },
+  }
+}
+
+/**
+ * 真 LLM 解析实现（chief schema + context-builder + 真实性校验）。
+ *
+ * 流程：
+ * 1. buildLlmOptions（L0-L3 分层 messages）→ streamChatStructured<ChiefAgentOutput>。
+ * 2. 把 LLM 候选命令逐条做真实性校验：
+ *    - unitIds 必须全部存在于玩家方 world.units；
+ *    - targetCoord 必须在地图范围内；
+ *    - targetUnitId/nodeId 必须存在于 world。
+ *    校验不过的候选剔除；全部剔除则降级 clarify。
+ * 3. 取首条通过校验的候选构造 ParsedCommand（与 mock 结构一致）。
+ *
+ * 校验失败/无候选 → 返回 clarify（不伪造）。
+ *
+ * @throws LlmCallError（四分类/degraded/schema 校验失败）由上层回退
+ */
+async function parseCommandWithLlm(
+  input: string,
+  ctx: ChiefParseContext,
+  llmService: LlmService,
+  config: LlmCallConfig,
+): Promise<ParseCommandResult> {
+  const trimmed = input.trim()
+  if (trimmed.length === 0) {
+    return clarify(input, '命令为空，请输入指令', [])
+  }
+
+  const validate = getAgentValidator('chief') as ValidateFunction<ChiefAgentOutput>
+  const opts = buildLlmOptions(
+    config,
+    'chief',
+    ctx.world,
+    // L3 任务：解析玩家本条命令（回合号属 L3，放任务文本里安全）
+    `请把以下玩家自然语言命令解析为候选结构化命令：\n"${trimmed}"`,
+  )
+  const { data } = await llmService.streamChatStructured<ChiefAgentOutput>(opts, validate)
+
+  // 逐条真实性校验（绝不伪造不存在的单位/坐标/节点）
+  const playerUnits = ctx.world.units.filter((u) => u.factionId === ctx.playerFactionId)
+  const playerUnitIds = new Set(playerUnits.map((u) => u.id))
+  const nodeIds = new Set(ctx.world.map.highValueNodes.map((n) => n.id))
+  const allUnitIds = new Set(ctx.world.units.map((u) => u.id))
+
+  const validCandidates: ChiefCandidateCommand[] = []
+  for (const cand of data.candidates) {
+    // unitIds 必须全部是玩家方真实单位
+    if (cand.unitIds.length === 0 || !cand.unitIds.every((id) => playerUnitIds.has(id))) {
+      continue
+    }
+    // attack 的 targetUnitId 必须是真实敌方单位
+    if (cand.intent === 'attack') {
+      if (!cand.targetUnitId || !allUnitIds.has(cand.targetUnitId)) continue
+    }
+    // capture_node 的 nodeId 必须是真实节点
+    if (cand.intent === 'capture_node') {
+      if (!cand.nodeId || !nodeIds.has(cand.nodeId)) continue
+    }
+    // move/capture 的 targetCoord 必须在范围内
+    if (cand.targetCoord) {
+      if (!isInBounds(cand.targetCoord, ctx.world.map.cols, ctx.world.map.rows)) continue
+    }
+    validCandidates.push(cand)
+  }
+
+  if (validCandidates.length === 0) {
+    return clarify(
+      input,
+      data.note ?? 'LLM 解析未产生有效候选（目标单位/坐标/节点校验失败）',
+      playerUnits.slice(0, 5).map((u) => `可用单位：${u.id}`),
+    )
+  }
+
+  // 取首条通过校验的候选构造 ParsedCommand
+  const first = validCandidates[0]
+  return {
+    kind: 'parsed',
+    intent: first.intent as CommandIntent,
+    targetUnitIds: first.unitIds,
+    targetCoord: first.targetCoord,
+    targetUnitId: first.targetUnitId,
+    nodeId: first.nodeId,
+    summary: first.summary,
+    confidence: first.confidence,
+  }
+}
 
 /**
  * M2 mock 解析实现（纯函数，可单测）。

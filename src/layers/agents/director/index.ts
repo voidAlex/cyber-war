@@ -4,4 +4,10 @@
  * @module layers/agents/director
  */
 
-export { ruleEngineFallback } from './rule-engine-fallback'
+export {
+  ruleEngineFallback,
+} from './rule-engine-fallback'
+export type {
+  RuleEngineFallbackParams,
+  RuleEngineFallbackResult,
+} from './rule-engine-fallback'

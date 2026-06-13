@@ -256,3 +256,79 @@ export function createDefaultResolver(
     }
   }
 }
+
+// ============================================================================
+// M3 多 Agent 结算器：接 orchestrateTurnResolution（替换 M2 mock director）
+// ============================================================================
+
+import type { LlmService } from '@/layers/application/services/llm-service'
+import type { TheaterRole, CommanderRole, LlmCallConfig } from '@/layers/agents/roles'
+import { orchestrateTurnResolution } from '@/layers/agents/orchestrator/turn-resolution'
+
+/**
+ * M3 多 Agent 结算器所需的角色与服务（依赖注入，便于 mock 测试）。
+ */
+export interface MultiAgentResolverDeps {
+  /** LLM 服务（真流式 + schema 校验 + 缓存统计） */
+  llmService: LlmService
+  /** 物理引擎客户端（需已 init） */
+  workerService: PhysicsEngineClient
+  /** 战区司令角色（mock 或 LLM） */
+  theaterRole: TheaterRole
+  /** 敌/盟统帅角色（mock 或 LLM） */
+  commanderRole: CommanderRole
+  /** 导演部角色（mock 或 LLM） */
+  directorRole: DirectorRole
+  /** 玩家阵营 id（可选，默认取 side==='player'） */
+  playerFactionId?: string
+  /** LLM 调用配置（mock 角色可省略；LLM 角色需注入） */
+  llmConfig?: LlmCallConfig
+}
+
+/**
+ * 构造 M3 多 Agent 结算器：接 orchestrateTurnResolution。
+ *
+ * 流程（locked → resolution 阶段调用）：
+ * 1. 把 ctx.lockedOrders（按 factionId 分组）传入编排器。
+ * 2. 编排器内部：物理先算 → chief 收集 → theater/commander 并行 → director 终裁。
+ * 3. 导演部 LLM 失败 → 编排器自动切规则引擎兜底（绝不卡死游戏）。
+ * 4. 返回战报摘要 + 事件（落盘 event-log）：
+ *    - physics 事件标 source:'physics'（可重算校验）；
+ *    - director 覆写/战报标 source:'director'（记录即真相）；
+ *    - 规则引擎兜底标 source:'rule-engine'（回放采信）。
+ *
+ * @param deps 多 Agent 依赖
+ * @returns resolve 服务函数（符合 TurnOrchestratorServices.resolve 签名）
+ */
+export function createMultiAgentResolver(
+  deps: MultiAgentResolverDeps,
+): NonNullable<TurnOrchestratorServices['resolve']> {
+  return async (ctx, _signal) => {
+    const world = ctx.game.world
+
+    const result = await orchestrateTurnResolution({
+      worldState: world,
+      lockedOrders: ctx.lockedOrders,
+      scenarioSeed: world.scenarioSeed,
+      turn: world.turnIndex,
+      llmService: deps.llmService,
+      workerService: deps.workerService,
+      theaterRole: deps.theaterRole,
+      commanderRole: deps.commanderRole,
+      directorRole: deps.directorRole,
+      playerFactionId: deps.playerFactionId,
+      llmConfig: deps.llmConfig,
+    })
+
+    // 把编排器的 degraded 标志反映到 resolution.degraded（UI 据此明示降级结算）。
+    const resolution: ResolutionSummary = result.degraded
+      ? { ...result.resolution, degraded: true }
+      : result.resolution
+
+    // 事件直接采用编排器产出（已按 source 分源标记）。
+    return {
+      resolution,
+      events: result.events,
+    }
+  }
+}

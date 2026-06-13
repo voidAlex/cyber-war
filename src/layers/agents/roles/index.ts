@@ -1,15 +1,48 @@
 /**
- * Agent 角色层 barrel（chief/theater/commander/director）。
+ * Agent 角色层 barrel（chief/theater/commander/director，mock + LLM 双实现）。
  *
- * M2：chief（mock 命令解析）/ director（mock 终裁）已填充。
- * M3：theater/commander 接入真 LLM，chief/director 可替换为真 LLM。
+ * - chief（mock 命令解析 + 真 LLM 解析）：createChiefRole/createLlmChiefRole
+ * - theater（mock 拆解 + 真 LLM 拆解）：createTheaterRole/createLlmTheaterRole
+ * - commander（mock 决策 + 真 LLM 决策）：createCommanderRole/createLlmCommanderRole
+ * - director（mock 终裁 + 真 LLM 终裁）：createDirectorRole/createLlmDirectorRole
  *
  * @module layers/agents/roles
  */
 
-export { chiefRole, createChiefRole } from './chief'
-export type { ChiefRole, ChiefParseContext } from './chief'
-export { theaterRole } from './theater'
-export { commanderRole } from './commander'
-export { directorRole, createDirectorRole } from './director'
-export type { DirectorRole, DirectorAdjudicateParams, DirectorAdjudicateResult } from './director'
+export { chiefRole, createChiefRole, createLlmChiefRole } from './chief'
+export type { ChiefRole, ChiefParseContext, LlmChiefRole } from './chief'
+export {
+  theaterRole,
+  createTheaterRole,
+  createLlmTheaterRole,
+  theaterActionToEnvelope,
+} from './theater'
+export type {
+  TheaterRole,
+  TheaterResolveParams,
+  TheaterResolveResult,
+  TheaterResolvedAction,
+  TheaterTaskCandidate,
+  LlmTheaterRole,
+} from './theater'
+export {
+  commanderRole,
+  createCommanderRole,
+  createLlmCommanderRole,
+  commanderDecisionToEnvelope,
+} from './commander'
+export type {
+  CommanderRole,
+  CommanderResolveParams,
+  CommanderResolveResult,
+  CommanderResolvedDecision,
+  LlmCommanderRole,
+} from './commander'
+export { directorRole, createDirectorRole, createLlmDirectorRole } from './director'
+export type {
+  DirectorRole,
+  DirectorAdjudicateParams,
+  DirectorAdjudicateResult,
+  LlmDirectorRole,
+} from './director'
+export type { LlmCallConfig } from './llm-role-base'
