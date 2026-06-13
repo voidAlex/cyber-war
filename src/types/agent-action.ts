@@ -1,195 +1,80 @@
 /**
- * Agent 行动类型定义
- * 
- * 定义多 Agent 系统的行动协议。
- * 所有 Agent 交互统一使用此格式。
- * 
+ * Agent 动作类型定义（agent-action）
+ *
+ * Agent 动作是 LLM/规则引擎产出的、可被领域结算消费的结构化输出。
+ * 与 ActionEnvelope 的区别：
+ * - ActionEnvelope：命令信封（描述意图与生命周期），偏流程。
+ * - AgentAction：Agent 的具体输出（决策/战报/裁定），偏内容。
+ *
+ * event-log 每条标 source，回放时 physics 类校验重算、director 类直接采信。
+ *
  * @module types/agent-action
  */
 
-/**
- * Agent 行动意图枚举
- * 
- * 定义 Agent 可能执行的行动类型。
- */
-export type AgentIntent = 
-  // 机动类
-  | 'move'              // 移动
-  | 'deploy'            // 部署
-  | 'retreat'           // 撤退
-  
-  // 战斗类
-  | 'attack'            // 攻击
-  | 'attack_node'       // 攻击节点/据点
-  | 'capture_node'      // 占领节点/据点
-  | 'defend'            // 防守
-  
-  // 侦察类
-  | 'scout'             // 侦察
-  | 'recon'             // 侦察（同 scout）
-  
-  // 支援类
-  | 'resupply'          // 补给
-  | 'repair'            // 维修
-  | 'heal'              // 治疗
-  
-  // 外交类
-  | 'request_ally'      // 请求盟友支援
-  | 'negotiate'         // 谈判
-  
-  // 其他
-  | 'hold'              // 原地待命
-  | 'custom'            // 自定义行动
+import type { AgentRole } from './action-envelope'
 
 /**
- * Agent 行动载荷
- * 
- * 根据不同的意图类型，载荷结构可能不同。
+ * event-log 条目来源（确定性两层）。
+ *
+ * - physics：纯数值规则产物，回放时校验重算一致。
+ * - director：LLM 导演部输出「记录即真相」，回放直接采信不重算。
+ * - rule-engine：离线/降级时规则引擎兜底产物（无 LLM 时推进游戏）。
  */
-export interface AgentActionPayload {
-  /** 目标节点/位置 */
-  node?: string
-  
-  /** 目标位置坐标 */
-  position?: { x: number; y: number }
-  
-  /** 涉及的单位 ID 列表 */
-  units?: string[]
-  
-  /** 目标单位 ID */
-  targetUnitId?: string
-  
-  /** 目标阵营 ID */
-  targetFactionId?: string
-  
-  /** 其他自定义参数 */
-  [key: string]: unknown
-}
+export type EventLogSource = 'physics' | 'director' | 'rule-engine'
 
 /**
- * Agent 行动信封
- * 
- * 所有 Agent 交互的统一格式。
- * 这是 Agent 系统与游戏系统之间的通信协议。
+ * Agent 动作类别。
+ */
+export type AgentActionKind =
+  | 'order' // 命令（解析自玩家/参谋长）
+  | 'decision' // 决策（战区司令/敌盟统帅）
+  | 'adjudication' // 终裁（director 覆写数值）
+  | 'report' // 战报文本（director 润色）
+  | 'query' // 握手反问（chief）
+
+/**
+ * Agent 动作接口（写入 event-log 的结构化条目）。
  */
 export interface AgentAction {
-  /** 回合数 */
-  turn: number
-  
-  /** 阵营 ID */
-  faction: string
-  
-  /** Agent ID */
-  agentId: string
-  
-  /** 行动意图 */
-  intent: AgentIntent
-  
-  /** 行动载荷 */
-  payload: AgentActionPayload
-  
-  /** 置信度（0-1） */
-  confidence: number
-  
-  /** 是否需要确认 */
-  requiresConfirmation: boolean
-  
-  /** 行动 ID（唯一标识符） */
-  actionId: string
-  
-  /** 行动描述（人类可读） */
-  description?: string
-  
-  /** 行动时间戳（ISO 8601） */
-  timestamp: string
-}
-
-/**
- * Agent 角色枚举
- */
-export type AgentRole = 
-  | 'chief_of_staff'    // 参谋长（玩家侧）
-  | 'theater_commander' // 战区司令
-  | 'supreme_commander' // 统帅（敌方/盟友）
-  | 'director'          // 导演部（裁判）
-
-/**
- * Agent 状态枚举
- */
-export type AgentStatus = 
-  | 'idle'              // 空闲
-  | 'processing'        // 处理中
-  | 'waiting'           // 等待输入
-  | 'completed'         // 已完成
-  | 'failed'            // 失败
-
-/**
- * Agent 信息接口
- */
-export interface AgentInfo {
-  /** Agent ID */
+  /** 全局唯一 id（event-log 主键） */
   id: string
-  
-  /** Agent 角色 */
-  role: AgentRole
-  
-  /** Agent 名称 */
-  name: string
-  
-  /** 所属阵营 ID */
-  factionId: string
-  
-  /** 当前状态 */
-  status: AgentStatus
-}
-
-/**
- * Agent 进度状态
- */
-export type AgentProgressState =
-  | 'queued'
-  | 'running'
-  | 'streaming'
-  | 'completed'
-  | 'failed'
-
-export type EnvelopeKind =
-  | 'agent_status'
-  | 'battle_report_chunk'
-  | 'director_final'
-
-export interface DirectorVerdictPayload {
+  /** 所属回合 */
   turn: number
-  summary: string
-  events: Array<{
-    id: string
-    type: string
-    description: string
-    data: Record<string, unknown>
-  }>
-  stateChanges: Record<string, unknown>
-}
-
-export interface ActionEnvelope {
-  envelopeId: string
-  sequence: number
-  turn: number
-  factionId: string
-  role: AgentRole
+  /** 产出方 Agent id */
   agentId: string
-  kind: EnvelopeKind
-  state: AgentProgressState
-  payload: Record<string, unknown> | DirectorVerdictPayload
-  timestamp: string
+  /** Agent 角色 */
+  agentRole: AgentRole
+  /** 动作类别 */
+  kind: AgentActionKind
+  /** 产出来源（physics/director/rule-engine） */
+  source: EventLogSource
+  /** 结构化载荷（具体内容由各 Agent 协议定义） */
+  payload: Record<string, unknown>
+  /** 自然语言文本（战报/解释，可为空） */
+  text?: string
+  /** 关联的确定性序号（与 ActionEnvelope.sequence 对齐，便于回放） */
+  sequence: number
+  /** 产出时使用的确定性种子（scenarioSeed:turn:seq），便于复现 */
+  seed: string
 }
 
 /**
- * 生成唯一行动 ID
+ * Agent 协议契约的最小输入上下文（L0-L3 缓存分层构造，见 agents/context-builder）。
+ * 此接口为各 role 协议的公共输入骨架，具体扩展在各 role 文件。
  */
-export function generateActionId(): string {
-  return `action_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+export interface AgentContext {
+  /** L0 角色 system prompt（永不变，必须完全固定） */
+  systemPrompt: string
+  /** L2 当前世界状态摘要（每回合变一次，同回合多 Agent 共享） */
+  worldSummary: string
+  /** L3 本条具体指令（每请求变，回合号/时间戳只放这里） */
+  instruction: string
+  /** 历史 messages（append-only，多轮对话天然命中缓存） */
+  history: AgentMessage[]
 }
 
-export function generateEnvelopeId(): string {
-  return `envelope_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+/** 单条对话消息（OpenAI/DeepSeek 兼容格式） */
+export interface AgentMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
 }

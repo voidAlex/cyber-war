@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "campaign-schemas/factions.schema.json",
+  "title": "CampaignFactions",
+  "description": "阵营定义（side/敌对关系）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string" },
+      "side": { "type": "string", "enum": ["player", "enemy", "ally", "neutral"] }
+    },
+    "required": ["id", "side"]
+  }
+}

@@ -11,7 +11,10 @@
     "test": "vitest",
     "test:m5": "vitest --run src/game/agent-orchestrator.test.ts src/game/use-game-state.test.ts src/game/engine/replay-regression.test.ts src/utils/performance-baseline.test.ts",
     "test:coverage": "vitest run --coverage",
-    "dev:server": "npx tsx server/api-forwarder.ts"
+    "dev:server": "npx tsx server/api-forwarder.ts",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "keywords": [
     "game",
@@ -35,6 +38,7 @@
   "packageManager": "pnpm@8.15.0",
   "devDependencies": {
     "@eslint/js": "^8.57.1",
+    "@tauri-apps/cli": "^2",
     "@types/node": "^25.3.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -51,12 +55,14 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2",
     "@types/seedrandom": "^3.0.8",
     "fflate": "^0.8.2",
     "konva": "^10.2.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-konva": "^19.2.3",
-    "seedrandom": "^3.0.5"
+    "seedrandom": "^3.0.5",
+    "zustand": "^5.0.14"
   }
 }

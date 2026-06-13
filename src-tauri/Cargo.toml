@@ -1,0 +1,70 @@
+# =============================================================================
+# 赛博战争模拟器 — Rust 后端（爪牙）
+# Tauri 2 桌面壳的后端，只做三件事：本地文件 IO / LLM 真流式转发 / 加密原语。
+# 铁律：零业务逻辑。任何 command 中出现游戏规则计算即判违规。
+# =============================================================================
+[package]
+name = "cyber-war-simulator"
+version = "0.1.0"
+description = "赛博战争模拟器桌面后端（Tauri 2）"
+authors = ["Cyber War Simulator Contributors"]
+license = "AGPL-3.0"
+# 桌面应用：固定 edition 2021，与 Tauri 2 生态对齐
+edition = "2021"
+rust-version = "1.77"
+# Tauri 2 期望 lib crate（main.rs 调 lib 的 run），故同时产出 bin 与 lib
+default-run = "cyber-war-simulator"
+
+# =============================================================================
+# 依赖
+# =============================================================================
+[lib]
+name = "cyber_war_simulator_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# 生产依赖
+[dependencies]
+# --- Tauri 2 核心 ---
+# features 说明：
+#   - 无 protocol-whitelist 等 Tauri 1 残留；Tauri 2 默认不带 fs/http 插件
+#   - 本后端用 Rust 直连文件系统与网络，不依赖 Tauri fs/http 插件
+tauri = { version = "2", features = [] }
+
+# --- HTTP / 流式（reqwest 真流式，绝不伪造）---
+reqwest = { version = "0.12", features = ["stream", "json", "rustls-tls"], default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "time"] }
+futures-util = "0.3"
+# URL 解析（用于 SSRF 守卫解析 endpoint）
+url = "2"
+
+# --- 加密原语（与前端 key-encryption.ts 等参数：pbkdf2-SHA256-600k + AES-256-GCM）---
+aes-gcm = "0.10"
+pbkdf2 = { version = "0.12", features = ["simple"] }
+hmac = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+# base64 编解码（constant-time 实现，适合处理密文相关数据）
+base64ct = { version = "1", features = ["alloc"] }
+
+# --- 序列化 ---
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# --- 工具 ---
+zip = { version = "2", default-features = false, features = ["deflate"] } # 战役包 ZIP 解包（防 zip-slip）
+thiserror = "1"   # 统一错误枚举 AppError
+uuid = { version = "1", features = ["v4"] }
+
+# 构建脚本：Tauri 2 build script（生成 capabilities 代码与图标符号链接等）
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# =============================================================================
+# 性能配置：本地开发 Release 也保留部分符号便于排障
+# =============================================================================
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

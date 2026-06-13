@@ -1,59 +1,84 @@
 /**
- * 类型定义导出
- * 
- * 统一导出所有核心类型定义。
- * 
+ * 权威类型契约 barrel（前后端共享）
+ *
+ * 所有游戏数据结构与状态机契约集中导出。
+ * Rust 后端的 serde 类型与此处一一对应（commands.rs / crypto / llm）。
+ *
+ * 铁律：此目录为类型契约唯一真相源，禁止在此导入任何运行时副作用代码。
+ *
  * @module types
  */
 
-// 核心状态类型
-export type { 
-  GamePhase, 
-  GameState 
-} from './game-state'
-export { 
-  GAME_VERSION, 
-  DEFAULT_GAME_STATE 
-} from './game-state'
-
-// 世界状态类型
-export type { WorldState } from './world-state'
-
-// 阵营类型
-export type { 
-  FactionType, 
-  Faction, 
-  FactionResources 
-} from './faction'
-
-// 单位类型
-export type { 
-  Position, 
-  UnitType, 
-  UnitStatus, 
-  Unit 
-} from './unit'
-
-// 地图类型
-export type { 
-  TerrainType, 
-  FogLevel, 
-  MapCell, 
-  GameMap 
-} from './map'
-export { createEmptyMap } from './map'
-
-// Agent 类型
+// === 顶层状态 ===
+export type { GameState, GamePhase, StateMachineAction } from './game-state'
+export { GAME_VERSION } from './game-state'
 export type {
-  AgentIntent,
-  AgentActionPayload,
-  AgentAction,
+  WorldState,
+  WorldIntelState,
+  WorldDiplomacyState,
+  DirectorMemory,
+  ResolutionSummary,
+} from './world-state'
+
+// === 实体 ===
+export type {
+  Faction,
+  FactionSide,
+  CommanderProfile,
+  CommanderTempo,
+  FactionSupply,
+} from './faction'
+export type {
+  Unit,
+  UnitType,
+  UnitStatusFlag,
+  GridCoord,
+  UnitIntelSnapshot,
+} from './unit'
+export type {
+  GameMap,
+  GridType,
+  TerrainType,
+  MapCell,
+  HighValueNode,
+} from './map'
+
+// === 命令与 Agent ===
+export type {
   ActionEnvelope,
-  EnvelopeKind,
-  AgentProgressState,
-  DirectorVerdictPayload,
+  ActionState,
   AgentRole,
-  AgentStatus,
-  AgentInfo
+} from './action-envelope'
+export type {
+  AgentAction,
+  AgentActionKind,
+  EventLogSource,
+  AgentContext,
+  AgentMessage,
 } from './agent-action'
-export { generateActionId, generateEnvelopeId } from './agent-action'
+
+// === 情报与外交 ===
+export type {
+  IntelLevel,
+  IntelObservation,
+  IntelDecayRule,
+} from './intelligence'
+export {
+  INTEL_LEVEL_BLIND,
+  INTEL_LEVEL_HEAT_PULSE,
+  INTEL_LEVEL_FORMATION_CONFIRMED,
+  INTEL_LEVEL_FULL_PENETRATION,
+  DEFAULT_INTEL_DECAY_RULE,
+} from './intelligence'
+export type {
+  DiplomacyTrust,
+  DiplomaticStance,
+  DiplomacyEvent,
+} from './diplomacy'
+export {
+  INITIAL_TRUST_BY_STANCE,
+  DEFAULT_DIPLOMACY_DELTAS,
+} from './diplomacy'
+
+// === 存档 ===
+export type { SaveManifest, SaveListItem } from './save-manifest'

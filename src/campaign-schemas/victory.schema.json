@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "campaign-schemas/victory.schema.json",
+  "title": "CampaignVictory",
+  "description": "胜负条件（占节点/战损阈值/回合上限）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "type": "object",
+  "properties": {
+    "maxTurns": { "type": "integer", "minimum": 1 },
+    "conditions": { "type": "array", "items": { "type": "object" } }
+  },
+  "required": ["maxTurns"]
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "campaign-schemas/commanders.schema.json",
+  "title": "CampaignCommanders",
+  "description": "指挥官人格数值（aggression/obedience/preferredTempo/doctrineTags）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string" },
+      "name": { "type": "string" },
+      "aggression": { "type": "number", "minimum": 0, "maximum": 1 },
+      "obedience": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "required": ["id", "name"]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "主窗口 capability：授予前端与 Rust 后端通信所需的最小权限。注意：文件 IO、LLM HTTP 转发、加密均在 Rust 侧直接完成（不经 Tauri fs/http 插件），前端仅通过 invoke/Channel 与自定义 command 交互，因此这里不授予任何 fs/http 插件权限，从源头收紧攻击面。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "core:window:default",
+    "core:window:allow-set-title",
+    "core:webview:default",
+    "core:app:default",
+    "core:path:default"
+  ]
+}

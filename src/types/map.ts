@@ -1,120 +1,81 @@
 /**
  * 地图类型定义
- * 
- * 定义游戏地图的数据结构，包括地形和迷雾系统。
- * 
+ *
+ * 沙盘网格（方格/六边形），含地形、移动消耗、防御加成、目标节点。
+ * 沙盘渲染由 PixiJS 消费这些数据。
+ *
  * @module types/map
  */
 
 /**
- * 地形类型枚举
- * 
- * - plain: 平原（正常移动）
- * - mountain: 山地（移动消耗增加，提供防御加成）
- * - water: 水域（不可通行，除非有特殊能力）
- * - urban: 城镇（提供防御加成，可能有资源）
- * - forest: 森林（提供隐蔽，移动消耗略增）
+ * 网格类型。
+ *
+ * - square：方格网格（4 邻接）
+ * - hex：六边形网格（6 邻接）
  */
-export type TerrainType = 'plain' | 'mountain' | 'water' | 'urban' | 'forest'
+export type GridType = 'square' | 'hex'
 
 /**
- * 迷雾等级枚举
- * 
- * 情报系统使用 0-3 级迷雾：
- * - 0: 完全可见（己方控制或侦察范围内）
- * - 1: 部分可见（最近侦察，信息可能过时）
- * - 2: 模糊可见（情报残影，时间戳较旧）
- * - 3: 完全迷雾（无情报）
+ * 地形类型（影响移动消耗、防御加成、可见度）。
  */
-export type FogLevel = 0 | 1 | 2 | 3
+export type TerrainType =
+  | 'plain' // 平原
+  | 'forest' // 森林
+  | 'mountain' // 山地
+  | 'water' // 水域（不可通行/渡河惩罚）
+  | 'urban' // 城镇
+  | 'fortress' // 要塞（极高防御加成）
+  | 'marsh' // 沼泽（高移动消耗）
 
 /**
- * 地图单元格接口
- * 
- * 代表地图上的一个格子。
+ * 单个网格单元。
  */
 export interface MapCell {
-  /** X 坐标（列索引） */
-  x: number
-  
-  /** Y 坐标（行索引） */
-  y: number
-  
-  /** 地形类型 */
+  /** 单元唯一标识 */
+  id: string
+  /** 列（x） */
+  col: number
+  /** 行（y） */
+  row: number
+  /** 地形 */
   terrain: TerrainType
-  
-  /** 迷雾等级（针对当前玩家视角） */
-  fogLevel: FogLevel
-  
-  /** 
-   * 情报时间戳（Unix 时间戳）
-   * 记录最后一次获得该格子情报的时间
-   */
-  intelligenceTimestamp?: number
-
-  /** 残影单位 ID（用于迷雾残影展示） */
-  ghostUnitId?: string
-
-  /** 残影情报时间戳（Unix 时间戳） */
-  ghostTimestamp?: number
-  
-  /** 该格子上的单位 ID（如果有） */
-  unitId?: string
-  
-  /** 控制该格子的阵营 ID（如果有） */
-  controllingFactionId?: string
-  
-  /** 地形特征（如桥梁、据点等） */
-  features?: string[]
+  /** 移动消耗（点数，影响机动） */
+  movementCost: number
+  /** 防御加成（0..1 比例，影响战斗结算） */
+  defenseBonus: number
+  /** 是否为高价值目标节点（胜负条件相关） */
+  isObjective: boolean
 }
 
 /**
- * 游戏地图接口
- * 
- * 代表完整的游戏地图。
+ * 高价值节点（堡垒、城市、隘口等，胜负条件引用）。
+ */
+export interface HighValueNode {
+  /** 节点唯一标识 */
+  id: string
+  /** 节点名称（如「杜奥蒙堡」） */
+  name: string
+  /** 所在单元 id */
+  cellId: string
+  /** 占领阈值（控制方需驻守的回合数等，domain 解释） */
+  controlThreshold: number
+}
+
+/**
+ * 游戏地图（WorldState.map）。
+ *
+ * cells 为一维数组（行优先），col/row 由 cell 自身字段决定，
+ * 便于六边形网格与稀疏网格扩展。
  */
 export interface GameMap {
-  /** 地图宽度（列数） */
-  width: number
-  
-  /** 地图高度（行数） */
-  height: number
-  
-  /** 地图单元格（二维数组，[y][x] 访问） */
-  cells: MapCell[][]
-}
-
-/**
- * 创建空白地图
- * 
- * @param width 宽度
- * @param height 高度
- * @param defaultTerrain 默认地形
- * @returns 空白地图
- */
-export function createEmptyMap(
-  width: number, 
-  height: number, 
-  defaultTerrain: TerrainType = 'plain'
-): GameMap {
-  const cells: MapCell[][] = []
-  
-  for (let y = 0; y < height; y++) {
-    const row: MapCell[] = []
-    for (let x = 0; x < width; x++) {
-      row.push({
-        x,
-        y,
-        terrain: defaultTerrain,
-        fogLevel: 3, // 默认完全迷雾
-      })
-    }
-    cells.push(row)
-  }
-  
-  return {
-    width,
-    height,
-    cells,
-  }
+  /** 网格类型 */
+  gridType: GridType
+  /** 列数 */
+  cols: number
+  /** 行数 */
+  rows: number
+  /** 所有单元（一维，行优先） */
+  cells: MapCell[]
+  /** 高价值节点列表 */
+  highValueNodes: HighValueNode[]
 }

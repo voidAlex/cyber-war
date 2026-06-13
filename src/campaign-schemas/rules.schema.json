@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "campaign-schemas/rules.schema.json",
+  "title": "CampaignRules",
+  "description": "数值规则公式（炮击压制/要塞防御加成/消耗损耗/毒气侦察）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "type": "object",
+  "properties": {
+    "intelDecay": {
+      "type": "object",
+      "properties": {
+        "halfLifeTurns": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

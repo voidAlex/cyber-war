@@ -28,9 +28,13 @@
       "@agents/*": ["src/agents/*"],
       "@game/*": ["src/game/*"],
       "@utils/*": ["src/utils/*"],
-      "@types/*": ["src/types/*"]
+      "@types/*": ["src/types/*"],
+      "@layers/*": ["src/layers/*"],
+      "@gateway/*": ["src/layers/gateway/*"],
+      "@workers/*": ["src/workers/*"]
     }
   },
   "include": ["src"],
+  "exclude": ["src-legacy", "dist", "node_modules"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

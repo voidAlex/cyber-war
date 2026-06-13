@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "campaign-schemas/units.schema.json",
+  "title": "CampaignUnits",
+  "description": "初始单位部署。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string" },
+      "factionId": { "type": "string" },
+      "type": { "type": "string" }
+    },
+    "required": ["id", "factionId", "type"]
+  }
+}

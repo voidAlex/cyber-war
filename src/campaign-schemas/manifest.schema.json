@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "campaign-schemas/manifest.schema.json",
+  "title": "CampaignManifest",
+  "description": "战役包清单（scenarioId/固定 seed/玩家可选阵营）。TODO(M2/M4): 由后续子代理补全 ajv schema。",
+  "type": "object",
+  "properties": {
+    "scenarioId": { "type": "string" },
+    "displayName": { "type": "string" },
+    "scenarioSeed": { "type": "string" },
+    "playableFactionIds": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["scenarioId", "displayName", "scenarioSeed"]
+}
