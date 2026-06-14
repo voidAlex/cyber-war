@@ -20,6 +20,10 @@ on:
         required: false
         default: ''
 
+env:
+  # 提前用 Node 24 跑 actions（Node 20 于 2026-06-16 起被强制迁移到 Node 24）
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 permissions:
   contents: write  # 预留给后续 release 上传
 
