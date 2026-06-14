@@ -362,33 +362,41 @@ export default function Sandbox(): JSX.Element {
     // 后内容不可见；布局稳定后 ResizeObserver 触发，这里 resize + 重绘确保内容显现。
     let lastContainerW = 0
     let lastContainerH = 0
+    // rAF coalesce：ResizeObserver 可能一帧内多次触发（PIXI resize → container layout → 再触发），
+    // 用 requestAnimationFrame 合并为每帧一次 + 尺寸未变跳过，避免 ResizeObserver loop 循环
+    // （真机 app.log 曾每 6ms 刷爆此 warning + 卡 UI，玩家点"下一天"看不到反馈）。
+    let rafId: number | null = null
     const ro = new ResizeObserver(() => {
-      if (app === null || disposed) return
-      const ctx = useGameStore.getState().context
-      const map = ctx?.game.world.map
-      const rect = container.getBoundingClientRect()
-      // 尺寸未变（首次回调也可能如此）→ 仅 resize；尺寸真变化才记日志
-      const sizeChanged =
-        Math.abs(rect.width - lastContainerW) > 1 || Math.abs(rect.height - lastContainerH) > 1
-      lastContainerW = rect.width
-      lastContainerH = rect.height
-      resizeToContainer(map?.cols ?? 1, map?.rows ?? 1)
-      // 尺寸变化且 init 完成：重新 sync 一次 world（防 init race 导致漏绘）
-      if (sizeChanged && initDone && map !== undefined) {
-        logger.debug('sandbox/resize/force_resync', '容器尺寸变化，强制重新 sync world', {
-          scope: 'app',
-          w: rect.width,
-          h: rect.height,
-        })
-        syncFromStore(
-          map,
-          ctx?.game.world.units ?? [],
-          ctx?.game.world.factions ?? [],
-          ctx?.pendingOrders ?? [],
-          ctx?.game.world.turnIndex ?? 0,
-          safeHalfLifeTurns(ctx ?? null),
-        )
-      }
+      if (disposed) return
+      if (rafId !== null) return // 已排队，跳过（coalesce）
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null
+        if (app === null || disposed) return
+        const ctx = useGameStore.getState().context
+        const map = ctx?.game.world.map
+        const rect = container.getBoundingClientRect()
+        const sizeChanged =
+          Math.abs(rect.width - lastContainerW) > 1 || Math.abs(rect.height - lastContainerH) > 1
+        lastContainerW = rect.width
+        lastContainerH = rect.height
+        if (!sizeChanged) return // 尺寸未变跳过（防 PIXI resize 触发的微变循环）
+        resizeToContainer(map?.cols ?? 1, map?.rows ?? 1)
+        if (initDone && map !== undefined) {
+          logger.debug('sandbox/resize/force_resync', '容器尺寸变化，强制重新 sync world', {
+            scope: 'app',
+            w: rect.width,
+            h: rect.height,
+          })
+          syncFromStore(
+            map,
+            ctx?.game.world.units ?? [],
+            ctx?.game.world.factions ?? [],
+            ctx?.pendingOrders ?? [],
+            ctx?.game.world.turnIndex ?? 0,
+            safeHalfLifeTurns(ctx ?? null),
+          )
+        }
+      })
     })
     ro.observe(container)
 
@@ -397,6 +405,10 @@ export default function Sandbox(): JSX.Element {
     // 传播到整棵树，导致主界面其余面板全部被卸载。所有销毁操作 try/catch。
     return () => {
       disposed = true
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+        rafId = null
+      }
       try {
         ro.disconnect()
       } catch {

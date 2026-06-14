@@ -59,6 +59,9 @@ export default function App(): JSX.Element {
   // 全局未捕获错误：写 app.log（best-effort，便于排查致命崩溃）
   useEffect(() => {
     const onError = (event: ErrorEvent): void => {
+      // ResizeObserver loop 是良性警告（resize 回调触发新 layout），不写 app.log
+      // （否则真机每帧刷爆日志）。仅记录真错误。
+      if (event.message?.includes('ResizeObserver loop')) return
       logger.error('app/window/onerror', `未捕获错误: ${event.message}`, {
         scope: 'app',
         filename: event.filename,
