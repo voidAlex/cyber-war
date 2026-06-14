@@ -18,6 +18,7 @@
 
 import { useEffect, type JSX } from 'react'
 import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector, IntelligencePanel, DiplomacyPanel } from '@/layers/ui'
+import SandboxErrorBoundary from '@/layers/ui/sandbox/SandboxErrorBoundary'
 import { useGameStore } from '@/store/game-store'
 
 /**
@@ -74,7 +75,10 @@ export default function App(): JSX.Element {
         </div>
 
         <div className="app-shell__center">
-          <Sandbox />
+          {/* SandboxErrorBoundary：隔离沙盘崩溃，防止传播到整棵树（主界面其余面板不被卸载） */}
+          <SandboxErrorBoundary>
+            <Sandbox />
+          </SandboxErrorBoundary>
         </div>
 
         <div className="app-shell__right">

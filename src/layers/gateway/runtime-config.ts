@@ -95,7 +95,7 @@ export type PersistReadFn = () => Promise<string | null>
 
 import { cryptoEncryptApiKey, cryptoDecryptApiKey } from './tauri-bridge'
 import {
-  fsWriteManifest,
+  fsWriteWorldState,
   fsInitSave,
   fsReadWorldState,
 } from './tauri-bridge'
@@ -124,8 +124,9 @@ async function defaultPersistWrite(content: string): Promise<void> {
     createdAt: 0,
   })
   await fsInitSave(RUNTIME_CONFIG_SAVE_ID, initManifest)
-  // 用 manifest.json 的原子写能力写加密配置 blob（覆盖 init 写的占位 manifest）
-  await fsWriteManifest(RUNTIME_CONFIG_SAVE_ID, content)
+  // 用 world-state.json 的原子写能力写加密配置 blob
+  // （与 defaultPersistRead 的 fsReadWorldState 读写同一文件，保持一致，修复存后读不到的 bug）
+  await fsWriteWorldState(RUNTIME_CONFIG_SAVE_ID, content)
 }
 
 /** 默认 persist 读取：从伪 saveId 读配置 blob（不存在返回 null） */
