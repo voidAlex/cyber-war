@@ -5,10 +5,12 @@
  * 严禁其他层直接 import `@tauri-apps/api`（铁律，AGENTS.md）。
  *
  * 导出：
- * - tauri-bridge：fs_* / crypto_* / llm_set_allowed_hosts invoke 封装
+ * - tauri-bridge：fs_* / llm_key_* / llm_config_* / llm_set_allowed_hosts invoke 封装
  * - llm-client：llm_stream_forward 的 Channel 订阅封装
- * - crypto-client：加解密便捷封装
+ * - runtime-config：apiKey 经 OS 凭证库 + 非密钥字段明文 config 的会话管理
  * - bridge-types：与 Rust serde 结构对齐的类型契约
+ *
+ * 去口令改造后：删 crypto-client（加解密封装，apiKey 改 OS 凭证库不再需要应用层加密）。
  *
  * @module layers/gateway
  */
@@ -26,10 +28,9 @@ export type {
   StreamChatResult,
   StreamChatIterable,
 } from './llm-client'
-export { encryptApiKey, decryptApiKey } from './crypto-client'
 export {
-  saveEncryptedConfig,
-  unlockConfig,
+  saveConfig,
+  loadConfig,
   clearSession,
   getSessionConfig,
   isSessionUnlocked,
@@ -38,13 +39,9 @@ export {
 export type {
   RuntimeLLMConfig,
   PersistedRuntimeConfig,
-  EncryptFn,
-  DecryptFn,
-  PersistWriteFn,
-  PersistReadFn,
+  PendingConfigView,
 } from './runtime-config'
 export type {
-  EncryptedPayload,
   ProviderKindString,
   LlmErrorKindString,
   LlmStreamEvent,

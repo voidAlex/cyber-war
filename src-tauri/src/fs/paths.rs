@@ -3,6 +3,9 @@
 //! 存储根布局（对应重写计划项目结构）：
 //! ```text
 //! <app_data_dir>/                      # OS 标准应用数据目录
+//! ├── config/                          # 应用配置根（去口令后新增）
+//! │   ├── llm-config.json              # LLM 配置（provider/endpoint/model，非密钥字段明文）
+//! │   └── api-key.txt                  # apiKey 降级明文（仅 keyring 不可用时）
 //! └── saves/                           # 所有存档的根目录
 //!     └── <saveId>/                    # 单个存档目录
 //!         ├── manifest.json            # 存档清单（scenarioId/seed/创建时间…）
@@ -36,6 +39,17 @@ pub mod files {
     pub const FACTIONS_SUBDIR: &str = "factions";
 }
 
+/// 应用配置根下的标准文件名常量（去口令改造：apiKey 经 OS 凭证库 + 降级明文）。
+///
+/// - `LLM_CONFIG`：LLM 非密钥配置（provider/endpoint/model），原子写明文 JSON。
+/// - `API_KEY_PLAINTEXT`：apiKey 降级明文（仅 keyring 不可用时落盘）。
+pub mod config_files {
+    /// LLM 配置文件名（provider/endpoint/model，明文 JSON）
+    pub const LLM_CONFIG: &str = "llm-config.json";
+    /// apiKey 降级明文文件名（仅 keyring 失败时使用）
+    pub const API_KEY_PLAINTEXT: &str = "api-key.txt";
+}
+
 /// 解析 saves 根目录：`<app_data_dir>/saves`。
 ///
 /// 若该目录不存在会被 setup hook 创建；本函数仅负责路径解析，不创建目录。
@@ -45,6 +59,20 @@ pub fn resolve_saves_root(app: &AppHandle) -> Result<PathBuf, AppError> {
         .app_data_dir()
         .map_err(|e| AppError::Fs(format!("解析 app_data_dir 失败: {e}")))?;
     Ok(data_dir.join("saves"))
+}
+
+/// 解析应用配置根目录：`<app_data_dir>/config`。
+///
+/// 用于存放 LLM 配置（`llm-config.json`，明文非密钥字段）与 apiKey 降级明文
+/// （`api-key.txt`，仅 keyring 不可用时落盘）。
+///
+/// 若该目录不存在会被 setup hook 创建；本函数仅负责路径解析，不创建目录。
+pub fn resolve_config_root(app: &AppHandle) -> Result<PathBuf, AppError> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Fs(format!("解析 app_data_dir 失败: {e}")))?;
+    Ok(data_dir.join("config"))
 }
 
 /// 单个存档目录的便捷句柄（封装 saveId 与各标准文件路径解析）。

@@ -1,14 +1,16 @@
 /**
- * LLM 配置面板（LLMConfigPanel.tsx）— M3 UI 层。
+ * LLM 配置面板（LLMConfigPanel.tsx）— M3 UI 层（去口令改造后）。
  *
- * 职责（对应重写计划「DeepSeek 推荐供应商」+ M3 范围#1）：
+ * 职责（对应重写计划「DeepSeek 推荐供应商」+ M3 范围#1 + 去口令 §前端）：
  * - 表单：provider 下拉（DeepSeek v4-flash 默认推荐 / v4-pro / openai / anthropic / custom）。
  * - endpoint/model 按 provider 自动填默认（可改）。
- * - apiKey + passphrase。
- * - 保存：调 saveEncryptedConfig（加密存本地）→ unlockConfig（会话解锁）。
- * - 锁定状态显示、解锁 / 清除会话 / 重新配置。
+ * - apiKey（无 passphrase，经 OS 凭证库存取）。
+ * - 保存：调 saveConfig（keyring 存 apiKey + 明文 config 落盘）→ 会话加载。
  *
- * 接线：未配置/未解锁时 App 显示此面板作为入口；解锁后进主界面。
+ * 三互斥视图（去口令后无解锁面板）：
+ * ①`configUnlocked && config`：显示 provider/model/endpoint + keyring 降级警告 + "重新配置"。
+ * ②`hasConfig && !configUnlocked`（legacy/no-api-key）：提示重输 apiKey，预填 provider/endpoint/model。
+ * ③首次（无 config）：ConfigForm 四项，无 passphrase。
  *
  * gateway 唯一 import @tauri-apps/api；本组件经 store/hooks，不直接调 gateway。
  *
@@ -69,27 +71,38 @@ function toProviderKind(option: ProviderOption): ProviderKindString {
 }
 
 /**
+ * 从 provider 字符串反推 ProviderOption（用于从旧 config 预填表单）。
+ * 默认 deepseek，未匹配归一为对应 kind。
+ */
+function providerKindToOption(kind: ProviderKindString): ProviderOption {
+  return kind
+}
+
+/**
  * LLM 配置面板组件。
  */
 export default function LLMConfigPanel(): JSX.Element {
   const hasConfig = useGameStore((s) => s.hasConfig)
   const configUnlocked = useGameStore((s) => s.configUnlocked)
   const config = useGameStore((s) => s.config)
+  // legacy/no-api-key 时从旧 config 文件读到的非密钥字段（供表单预填）
+  const pendingConfig = useGameStore((s) => s.pendingConfig)
+  const keyBackendWarning = useGameStore((s) => s.keyBackendWarning)
   const busy = useGameStore((s) => s.busy)
   const userError = useGameStore((s) => s.userError)
   const saveConfig = useGameStore((s) => s.saveConfig)
-  const unlockConfig = useGameStore((s) => s.unlockConfig)
-  const lockSession = useGameStore((s) => s.lockSession)
   const clearError = useGameStore((s) => s.clearError)
 
-  // 表单状态（首次默认 DeepSeek v4-flash）
-  const [providerOption, setProviderOption] = useState<ProviderOption>('deepseek')
-  const [endpoint, setEndpoint] = useState(defaultEndpoint('deepseek'))
-  const [model, setModel] = useState(defaultModel('deepseek'))
+  // 表单状态（首次默认 DeepSeek v4-flash；legacy/no-api-key 时从 pendingConfig 预填）
+  const initialOption = pendingConfig
+    ? providerKindToOption(pendingConfig.provider as ProviderKindString)
+    : 'deepseek'
+  const [providerOption, setProviderOption] = useState<ProviderOption>(initialOption)
+  const [endpoint, setEndpoint] = useState(
+    pendingConfig?.endpoint ?? defaultEndpoint(initialOption),
+  )
+  const [model, setModel] = useState(pendingConfig?.model ?? defaultModel(initialOption))
   const [apiKey, setApiKey] = useState('')
-  const [passphrase, setPassphrase] = useState('')
-  // 解锁视图的口令输入
-  const [unlockPass, setUnlockPass] = useState('')
   const [showConfigForm, setShowConfigForm] = useState(false)
 
   const handleProviderChange = (opt: ProviderOption): void => {
@@ -100,28 +113,20 @@ export default function LLMConfigPanel(): JSX.Element {
 
   const handleSave = (): void => {
     const trimmedKey = apiKey.trim()
-    const trimmedPass = passphrase.trim()
-    if (trimmedKey.length === 0 || trimmedPass.length === 0) return
+    if (trimmedKey.length === 0) return
     const cfg: RuntimeLLMConfig = {
       provider: toProviderKind(providerOption),
       endpoint: endpoint.trim() || defaultEndpoint(providerOption),
       model: model.trim() || defaultModel(providerOption),
       apiKey: trimmedKey,
     }
-    void saveConfig(cfg, trimmedPass).then(() => {
+    void saveConfig(cfg).then(() => {
       setApiKey('')
-      setPassphrase('')
       setShowConfigForm(false)
     })
   }
 
-  const handleUnlock = (): void => {
-    const pass = unlockPass.trim()
-    if (pass.length === 0) return
-    void unlockConfig(pass).then(() => setUnlockPass(''))
-  }
-
-  // 已解锁：显示当前配置 + 锁定/重新配置入口
+  // ① 已加载（会话内存持有明文 apiKey）：显示当前配置 + 降级警告 + 重新配置入口
   if (configUnlocked && config) {
     return (
       <section className="panel llm-config-panel">
@@ -130,10 +135,12 @@ export default function LLMConfigPanel(): JSX.Element {
           <div><dt>供应商</dt><dd>{config.provider}</dd></div>
           <div><dt>模型</dt><dd>{config.model}</dd></div>
           <div><dt>Endpoint</dt><dd className="llm-config-panel__endpoint">{config.endpoint}</dd></div>
-          <div><dt>状态</dt><dd className="llm-config-panel__unlocked">已解锁（apiKey 仅存内存）</dd></div>
+          <div><dt>状态</dt><dd className="llm-config-panel__unlocked">已加载（apiKey 仅存内存）</dd></div>
         </dl>
+        {keyBackendWarning !== null && (
+          <p className="llm-config-panel__hint" role="alert">{keyBackendWarning}</p>
+        )}
         <div className="llm-config-panel__actions">
-          <button type="button" onClick={lockSession}>锁定会话</button>
           <button type="button" onClick={() => setShowConfigForm((v) => !v)} disabled={busy}>
             {showConfigForm ? '收起' : '重新配置'}
           </button>
@@ -143,47 +150,26 @@ export default function LLMConfigPanel(): JSX.Element {
     )
   }
 
-  // 有配置但未解锁：解锁入口
+  // ② 有配置但未加载（legacy/no-api-key）：提示重输 apiKey，预填非密钥字段
   if (hasConfig) {
     return (
       <section className="panel llm-config-panel">
         <h2 className="panel__title">LLM 配置</h2>
-        <p className="llm-config-panel__hint">检测到已保存的加密配置，请输入口令解锁。</p>
-        <div className="llm-config-panel__field">
-          <label htmlFor="unlock-pass">口令</label>
-          <input
-            id="unlock-pass"
-            type="password"
-            value={unlockPass}
-            onChange={(e) => setUnlockPass(e.target.value)}
-            disabled={busy}
-            placeholder="输入解锁口令"
-          />
-        </div>
-        <div className="llm-config-panel__actions">
-          <button
-            type="button"
-            onClick={handleUnlock}
-            disabled={busy || unlockPass.trim().length === 0}
-          >
-            解锁
-          </button>
-          <button type="button" onClick={() => setShowConfigForm((v) => !v)} disabled={busy}>
-            {showConfigForm ? '收起' : '重新配置（覆盖）'}
-          </button>
-        </div>
-        {showConfigForm && <ConfigForm />}
+        <p className="llm-config-panel__hint">
+          {userError ?? '检测到已保存的配置，但 apiKey 不可用（可能是旧版加密配置或凭证库无记录）。请重新输入 API Key。'}
+        </p>
+        <ConfigForm />
         {userError !== null && <ErrorInline message={userError} onDismiss={clearError} />}
       </section>
     )
   }
 
-  // 无配置：首次配置表单
+  // ③ 无配置：首次配置表单
   return (
     <section className="panel llm-config-panel">
       <h2 className="panel__title">LLM 配置（首次使用）</h2>
       <p className="llm-config-panel__hint">
-        配置将本地加密保存（apiKey 经 AES-GCM-256 加密落盘，明文仅存会话内存）。
+        apiKey 经操作系统凭证库加密保存（桌面端无需口令，重启自动加载）。
         推荐使用 DeepSeek v4-flash（便宜、高并发、支持缓存）。
       </p>
       <ConfigForm />
@@ -191,7 +177,7 @@ export default function LLMConfigPanel(): JSX.Element {
     </section>
   )
 
-  // —— 内联配置表单（首次 / 重新配置复用） ——
+  // —— 内联配置表单（首次 / 重新配置 / 重输 apiKey 复用） ——
   function ConfigForm(): JSX.Element {
     return (
       <div className="llm-config-panel__form">
@@ -243,24 +229,13 @@ export default function LLMConfigPanel(): JSX.Element {
             placeholder="sk-..."
           />
         </div>
-        <div className="llm-config-panel__field">
-          <label htmlFor="passphrase">加密口令（用于本地加密保存）</label>
-          <input
-            id="passphrase"
-            type="password"
-            value={passphrase}
-            onChange={(e) => setPassphrase(e.target.value)}
-            disabled={busy}
-            placeholder="设置一个口令"
-          />
-        </div>
         <div className="llm-config-panel__actions">
           <button
             type="button"
             onClick={handleSave}
-            disabled={busy || apiKey.trim().length === 0 || passphrase.trim().length === 0}
+            disabled={busy || apiKey.trim().length === 0}
           >
-            保存并解锁
+            保存并加载
           </button>
         </div>
       </div>

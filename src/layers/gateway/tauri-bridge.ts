@@ -1,11 +1,15 @@
 /**
  * Tauri IPC 桥（tauri-bridge.ts）— **唯一允许 import `@tauri-apps/api` 的层**。
  *
- * 封装 `invoke` 调用 commands.rs 的全部命令（fs_* 14 个 + crypto_* 2 个 +
- * llm_set_allowed_hosts 1 个），参数/返回值强类型化，对齐 Rust 签名与 src/types。
+ * 封装 `invoke` 调用 commands.rs 的全部命令（fs_* 14 个 +
+ * llm_key_* 3 个 + llm_config_* 2 个 + llm_set_allowed_hosts 1 个），
+ * 参数/返回值强类型化，对齐 Rust 签名与 src/types。
  *
  * 铁律（AGENTS.md）：除本目录外任何层不得直接 import `@tauri-apps/api`。
  * 上层（persistence/services 等）一律经此桥的封装函数调用。
+ *
+ * 去口令改造（robust-spinning-lampson「后续优化」）：旧 crypto_encrypt/decrypt_api_key
+ * 已删；apiKey 经 OS 凭证库（keyring）存取，非密钥字段经 llm_config_* 明文 JSON 落盘。
  *
  * @module layers/gateway/tauri-bridge
  */
@@ -15,15 +19,14 @@ import type {
   SaveManifest,
   WorldState,
 } from '@/types'
-import type { EncryptedPayload } from './bridge-types'
 // web 模式降级：isWebMode() 为 true 时改走 mock 实现（浏览器 vite dev 用）。
 // 这些 import 仅作为分支调用，Tauri 生产（isWebMode() false）完全不走。
 import { isWebMode } from './web-mode'
 import * as webFs from './web-mock-fs'
-import * as webCrypto from './web-mock-crypto'
+import * as webKeyStore from './web-mock-key-store'
 
 // =============================================================================
-// 类型契约：对齐 Rust 侧（crypto/aead.rs EncryptedPayload、error.rs AppError）
+// 类型契约：对齐 Rust 侧（error.rs AppError、commands.rs KeyStoreOutcome）
 // =============================================================================
 
 /**
@@ -31,6 +34,7 @@ import * as webCrypto from './web-mock-crypto'
  * tag=type、content=message（见 error.rs `#[serde(tag="type", content="message")]`）。
  *
  * LLM 错误的 content 为 { kind, message } 对象；Fs/Crypto/InvalidArg 的 content 为字符串。
+ * 注：去口令后 AppError::Crypto 变体保留（降级兜底路径仍用），但前端不再发起 crypto_*。
  */
 export type AppErrorPayload =
   | { type: 'fs'; message: string }
@@ -41,7 +45,19 @@ export type AppErrorPayload =
 /** LLM 错误四分类（error.rs LlmErrorKind.as_str() 的稳定字符串契约） */
 export type LlmErrorKindString = 'network' | 'api_key' | 'llm_error' | 'timeout'
 
-export type { EncryptedPayload } from './bridge-types'
+/**
+ * apiKey 存储结果（对齐 commands.rs `KeyStoreOutcome`）。
+ *
+ * - backend：实际落盘后端（"keyring" 或 "file_fallback"）。
+ * - warning：降级时的警告文案（含失败原因 + 降级文件路径，**绝不包含 apiKey**）。
+ *   keyring 成功时为 null。
+ */
+export interface KeyStoreOutcome {
+  /** 存储后端标识（前端 UI 据此提示降级警告） */
+  backend: 'keyring' | 'file_fallback'
+  /** 降级警告（仅 file_fallback 时有值；keyring 成功为 null） */
+  warning: string | null
+}
 
 // =============================================================================
 // fs 命令（14 个，对齐 commands.rs）
@@ -139,20 +155,62 @@ export function fsImportSave(newSaveId: string, zipPath: string): Promise<void> 
 }
 
 // =============================================================================
-// crypto 命令（2 个，对齐 commands.rs）
+// llm key / config 命令（5 个，去口令改造后替代旧 crypto_*）
 // =============================================================================
+//
+// 设计（去口令 A/B）：apiKey 经 OS 凭证库存取（keyring + 降级明文文件兜底），
+// 非密钥字段（provider/endpoint/model）经 llm_config_* 明文 JSON 原子写。
+// 应用层不再有 passphrase，桌面端无口令、重启自动加载。
 
-/** 加密 API key（返回可落盘的 EncryptedPayload；明文即用即抛，Rust 不缓存）。 */
-export function cryptoEncryptApiKey(password: string, plaintextKey: string): Promise<EncryptedPayload> {
-  // web 模式：WebCrypto PBKDF2+AES-GCM（参数对齐 Rust）
-  if (isWebMode()) return webCrypto.cryptoEncryptApiKey(password, plaintextKey)
-  return invoke<EncryptedPayload>('crypto_encrypt_api_key', { password, plaintextKey })
+/**
+ * 存 apiKey 到 OS 凭证库（keyring 失败时降级明文文件 + 警告）。
+ *
+ * @param apiKey 明文 API key（即用即抛，Rust 不缓存、不写日志）
+ * @returns KeyStoreOutcome（backend + 可选降级警告）
+ */
+export function llmKeySave(apiKey: string): Promise<KeyStoreOutcome> {
+  if (isWebMode()) return webKeyStore.llmKeySave(apiKey)
+  return invoke<KeyStoreOutcome>('llm_key_save', { apiKey })
 }
 
-/** 解密 API key（明文解密后即用即抛，绝不缓存）。 */
-export function cryptoDecryptApiKey(password: string, payload: EncryptedPayload): Promise<string> {
-  if (isWebMode()) return webCrypto.cryptoDecryptApiKey(password, payload)
-  return invoke<string>('crypto_decrypt_api_key', { password, payload })
+/**
+ * 读 apiKey（先 keyring，NoEntry/Error 再试降级文件）。
+ *
+ * @returns 明文 apiKey；无 key 返回 null（首次配置 / 已 delete）
+ */
+export function llmKeyLoad(): Promise<string | null> {
+  if (isWebMode()) return webKeyStore.llmKeyLoad()
+  return invoke<string | null>('llm_key_load')
+}
+
+/**
+ * 删 apiKey（幂等：keyring entry + 降级文件都清）。
+ *
+ * 前端"重新配置"流程调用：先 delete 旧 key，再 save 新 key。
+ */
+export function llmKeyDelete(): Promise<void> {
+  if (isWebMode()) return webKeyStore.llmKeyDelete()
+  return invoke<void>('llm_key_delete')
+}
+
+/**
+ * 读 LLM 配置文件 `<config>/llm-config.json`（非密钥字段：provider/endpoint/model）。
+ *
+ * @returns 原始 JSON 字符串（Rust 不解析语义）；文件不存在返回 null
+ */
+export function llmConfigRead(): Promise<string | null> {
+  if (isWebMode()) return webFs.llmConfigRead()
+  return invoke<string | null>('llm_config_read')
+}
+
+/**
+ * 原子写 LLM 配置文件 `<config>/llm-config.json`（非密钥字段，明文 JSON）。
+ *
+ * @param content 序列化好的 JSON 字符串（PersistedRuntimeConfig）
+ */
+export function llmConfigWrite(content: string): Promise<void> {
+  if (isWebMode()) return webFs.llmConfigWrite(content)
+  return invoke<void>('llm_config_write', { content })
 }
 
 // =============================================================================

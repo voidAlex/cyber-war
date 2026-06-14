@@ -2,8 +2,8 @@
  * 应用主布局（App.tsx）— M3 UI 层接线。
  *
  * 布局（PRD §4 / TDD §2 + M3 范围#6）：
- * - 未解锁 LLM 配置 → 显示 LLMConfigPanel 作为入口（占满中心）。
- * - 已解锁 → 三栏主界面：
+ * - 未加载 LLM 配置 → 显示 LLMConfigPanel 作为入口（占满中心）。
+ * - 已加载 → 三栏主界面：
  *   - 左栏：SaveListPanel + TurnControlPanel
  *   - 中栏：Sandbox
  *   - 右栏：按 phase 切换 CommandTerminal / BriefingPanel
@@ -34,18 +34,18 @@ export default function App(): JSX.Element {
   const context = useGameStore((s) => s.context)
   const configUnlocked = useGameStore((s) => s.configUnlocked)
   const config = useGameStore((s) => s.config)
-  const probeConfig = useGameStore((s) => s.probeConfig)
+  const loadConfig = useGameStore((s) => s.loadConfig)
   const refreshSaves = useGameStore((s) => s.refreshSaves)
 
   const phase = context?.game.phase ?? 'idle'
 
-  // 启动时探测配置是否存在 + 是否已解锁 + 刷新存档列表
+  // 启动时加载配置（读 config 文件 + keyring，无口令）+ 刷新存档列表
   useEffect(() => {
-    void probeConfig()
+    void loadConfig()
     void refreshSaves()
-  }, [probeConfig, refreshSaves])
+  }, [loadConfig, refreshSaves])
 
-  // 未解锁：配置面板作为入口（仅显示全局错误横幅）
+  // 未加载配置：配置面板作为入口（仅显示全局错误横幅）
   if (!configUnlocked) {
     return (
       <div className="app-shell app-shell--locked">

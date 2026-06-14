@@ -30,9 +30,8 @@ import { createLlmTheaterRole, createLlmCommanderRole, createLlmDirectorRole } f
 import { createTheaterRole, createCommanderRole, createDirectorRole } from '@/layers/agents/roles'
 import type { TheaterRole, CommanderRole, DirectorRole } from '@/layers/agents/roles'
 import {
-  saveEncryptedConfig,
-  unlockConfig,
-  clearSession,
+  saveConfig as gatewaySaveConfig,
+  loadConfig as gatewayLoadConfig,
   isSessionUnlocked,
   getSessionConfig,
   type RuntimeLLMConfig,
@@ -155,12 +154,19 @@ export interface GameStoreState {
   llmError: LlmErrorBanner | null
 
   // —— M3 运行时 LLM 配置解锁态 ——
-  /** 是否已加载过加密配置（存在落盘文件） */
+  /** 是否已加载过配置（存在落盘 config 文件 / keyring 记录） */
   hasConfig: boolean
-  /** 是否已解锁（会话内存持有明文 apiKey） */
+  /** 是否已加载（会话内存持有明文 apiKey） */
   configUnlocked: boolean
-  /** 解锁后的明文配置（仅 provider/endpoint/model，apiKey 不放 store 避免泄漏） */
+  /** 加载后的明文配置（仅 provider/endpoint/model，apiKey 不放 store 避免泄漏） */
   config: { provider: string; endpoint: string; model: string } | null
+  /**
+   * legacy/no-api-key 时从旧 config 文件读到的非密钥字段（供 UI 预填表单）。
+   * 用户重输 apiKey 后保存即清空。
+   */
+  pendingConfig: { provider: string; endpoint: string; model: string } | null
+  /** keyring 降级警告（apiKey 降级明文文件时 Rust 返回；UI 顶部提示） */
+  keyBackendWarning: string | null
 
   // —— M3 Agent 进度与流式战报（UI 可观测，非回放内容） ——
   /** 本回合各 Agent 实时进度（agentId → entry） */
@@ -195,14 +201,10 @@ export interface GameStoreState {
   clearError: () => void
 
   // —— M3 配置与进度动作 ——
-  /** 检测是否存在已保存的加密配置（启动时调用） */
-  probeConfig: () => Promise<void>
-  /** 保存并加密配置（落盘 + 会话解锁） */
-  saveConfig: (config: RuntimeLLMConfig, passphrase: string) => Promise<void>
-  /** 用口令解锁配置（读盘 + 解密 → 会话内存） */
-  unlockConfig: (passphrase: string) => Promise<void>
-  /** 锁定会话（清内存明文 apiKey，不删盘） */
-  lockSession: () => void
+  /** 启动加载配置（读 config 文件 + keyring，无口令；按错误码设状态） */
+  loadConfig: () => Promise<void>
+  /** 保存配置（apiKey→keyring，非密钥字段→config 文件；回写降级警告） */
+  saveConfig: (config: RuntimeLLMConfig) => Promise<void>
   /** 更新某 Agent 的实时进度（orchestrator onProgress 回调调用） */
   setAgentProgress: (entry: AgentProgressEntry) => void
   /** 追加流式战报文本片段 */
@@ -243,6 +245,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   hasConfig: false,
   configUnlocked: false,
   config: null,
+  pendingConfig: null,
+  keyBackendWarning: null,
 
   agentProgressById: {},
   liveReport: '',
@@ -423,69 +427,86 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   // M3 配置与进度动作
   // ===========================================================================
 
-  async probeConfig() {
-    // 会话内是否已解锁（同进程内此前解锁过则直接采信）
-    const unlocked = isSessionUnlocked()
-    set({
-      configUnlocked: unlocked,
-      config: sessionConfigView(),
-    })
-    // 探测落盘配置是否存在：用只读 persistRead 注入解锁流程，
-    // 读到内容即视为存在配置文件（不解密、不污染会话）。
-    let hasConfig = false
-    try {
-      await unlockConfig('__probe__', {
-        decrypt: async () => '',
-        persistRead: async () => {
-          hasConfig = true
-          // 抛出以中止后续解密（已判定存在）
-          throw new Error('__probe_done__')
-        },
+  async loadConfig() {
+    // 会话内是否已加载（同进程内此前加载过则直接采信）
+    if (isSessionUnlocked()) {
+      set({
+        configUnlocked: true,
+        hasConfig: true,
+        config: sessionConfigView(),
+        pendingConfig: null,
+        userError: null,
       })
-    } catch {
-      // 预期中止；hasConfig 已在 persistRead 内置位
+      return
     }
-    set({ hasConfig })
-  },
-
-  async saveConfig(config, passphrase) {
     set({ busy: true, userError: null })
     try {
-      await saveEncryptedConfig(config, passphrase)
-      // 保存后解锁到会话
-      await unlockConfig(passphrase)
+      const cfg = await gatewayLoadConfig()
+      // 成功：会话内存持有明文 apiKey
+      set({
+        configUnlocked: true,
+        hasConfig: true,
+        config: { provider: cfg.provider, endpoint: cfg.endpoint, model: cfg.model },
+        pendingConfig: null,
+        userError: null,
+        busy: false,
+      })
+    } catch (err) {
+      if (err instanceof RuntimeConfigError) {
+        const code = err.message
+        if (code === 'no-config') {
+          // 首次使用：无配置文件
+          set({
+            hasConfig: false,
+            configUnlocked: false,
+            config: null,
+            pendingConfig: null,
+            userError: null,
+            busy: false,
+          })
+        } else if (code === 'legacy-encrypted' || code === 'no-api-key') {
+          // 有配置但 apiKey 不可用：回写 pendingConfig 供 UI 预填表单
+          const pending = err.pending
+          set({
+            hasConfig: true,
+            configUnlocked: false,
+            config: null,
+            pendingConfig: pending
+              ? { provider: pending.provider, endpoint: pending.endpoint, model: pending.model }
+              : null,
+            userError:
+              code === 'legacy-encrypted'
+                ? '检测到旧版加密配置（口令已废弃），请重新输入 API Key 以完成迁移。'
+                : '已保存配置但 apiKey 不可用，请重新输入 API Key。',
+            busy: false,
+          })
+        } else {
+          // 配置损坏等其他错误
+          set({ busy: false, userError: `加载配置失败：${err.message}` })
+        }
+      } else {
+        set({ busy: false, userError: `加载配置失败：${String(err)}` })
+      }
+    }
+  },
+
+  async saveConfig(config) {
+    set({ busy: true, userError: null })
+    try {
+      const outcome = await gatewaySaveConfig(config)
+      // 成功：会话内存持有明文 apiKey；回写 keyring 降级警告
       set({
         hasConfig: true,
         configUnlocked: true,
         config: { provider: config.provider, endpoint: config.endpoint, model: config.model },
+        pendingConfig: null,
+        keyBackendWarning: outcome.warning,
+        userError: outcome.warning ?? null,
         busy: false,
       })
     } catch (err) {
       set({ busy: false, userError: `保存配置失败：${String(err)}` })
     }
-  },
-
-  async unlockConfig(passphrase) {
-    set({ busy: true, userError: null })
-    try {
-      const cfg = await unlockConfig(passphrase)
-      set({
-        configUnlocked: true,
-        hasConfig: true,
-        config: { provider: cfg.provider, endpoint: cfg.endpoint, model: cfg.model },
-        busy: false,
-      })
-    } catch (err) {
-      set({
-        busy: false,
-        userError: err instanceof RuntimeConfigError ? err.message : `解锁失败：${String(err)}`,
-      })
-    }
-  },
-
-  lockSession() {
-    clearSession()
-    set({ configUnlocked: false, config: null })
   },
 
   setAgentProgress(entry) {

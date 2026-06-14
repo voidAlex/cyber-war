@@ -9,11 +9,12 @@
  * - read/write world-state、snapshot、manifest、faction：直接覆盖（原子写语义在
  *   内存模型中等价于覆盖；localStorage 整体 serialize 落盘，刷新后恢复）。
  * - append event / diagnostics：真追加（`push` 到数组末尾，O(1)）。
- * - list saves：返回 Map 的 key（已含 manifest 的目录才返回；
- *   `__runtime_llm_config__` 这种伪 saveId 也会返回，由上层 isPlayerSaveId 过滤）。
+ * - list saves：返回 Map 的 key（已含 manifest 的目录才返回）。
  * - read event-log 分页：按 offset/limit 切片。
  * - unpack/export/import campaign：web 模式无法真解 ZIP，简化为内存占位返回成功
  *   （标 TODO；agent-browser 验证主流程不强依赖）。
+ * - llmConfigRead/Write：去口令后 LLM 非密钥字段明文 config（与 Rust `llm_config_*`
+ *   对齐，独立 localStorage key，不再借用伪 saveId）。
  *
  * **localStorage 持久化**：key 前缀 `cwmock:`，每次写操作后整体 serialize 落盘，
  * 浏览器刷新后从 localStorage 反序列化恢复（验证"重启恢复"用）。
@@ -219,8 +220,9 @@ export async function fsWriteManifest(saveId: string, content: string): Promise<
 
 /**
  * 列出所有存档的 saveId。
- * 对齐 Rust：扫描含 manifest.json 的目录。伪 saveId（如 `__runtime_llm_config__`）
- * 也会返回，由上层 `isPlayerSaveId` 过滤。
+ * 对齐 Rust：扫描含 manifest.json 的目录。
+ * （去口令后 runtime-config 不再用伪 saveId，但 `isPlayerSaveId` 兜底过滤保留
+ * 以兼容可能残留的旧版目录。）
  */
 export async function fsListSaves(): Promise<string[]> {
   ensureLoaded()
@@ -279,6 +281,43 @@ export async function fsImportSave(_newSaveId: string, _zipPath: string): Promis
 }
 
 // =============================================================================
+// llm config 命令（去口令改造后，非密钥字段明文 config，独立 localStorage key）
+// =============================================================================
+
+/** localStorage key（LLM 非密钥字段明文 config JSON） */
+const LLM_CONFIG_LS_KEY = 'cwmock:llm-config'
+
+/**
+ * 读 LLM 配置文件（mock：localStorage `cwmock:llm-config`）。
+ *
+ * 对齐 Rust `llm_config_read`：返回原始 JSON 字符串；不存在返回 null。
+ */
+export async function llmConfigRead(): Promise<string | null> {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const v = localStorage.getItem(LLM_CONFIG_LS_KEY)
+    return v
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 原子写 LLM 配置文件（mock：localStorage 覆盖写）。
+ *
+ * 对齐 Rust `llm_config_write`：接收序列化好的 JSON 字符串。
+ */
+export async function llmConfigWrite(content: string): Promise<void> {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(LLM_CONFIG_LS_KEY, content)
+    } catch {
+      // quota / 隐私模式：静默降级为纯内存
+    }
+  }
+}
+
+// =============================================================================
 // 测试/调试辅助（仅 web-mock 内部与测试用，不导出给 tauri-bridge）
 // =============================================================================
 
@@ -289,6 +328,7 @@ export function __webMockFsReset(): void {
   if (typeof localStorage !== 'undefined') {
     try {
       localStorage.removeItem(LS_KEY)
+      localStorage.removeItem(LLM_CONFIG_LS_KEY)
     } catch {
       // ignore
     }

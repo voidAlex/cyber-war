@@ -2,7 +2,7 @@
 //!
 //! 对应重写计划「command 接口清单」——前端通过 `invoke` 调用这些命令。
 //! 铁律：任何 command 里出现游戏规则计算（状态机/结算/情报/外交）即判违规。
-//! 本文件只做：参数校验 → 调 fs/crypto/llm 三模块 → 返回结果。
+//! 本文件只做：参数校验 → 调 fs/keyring_store/llm 模块 → 返回结果。
 //!
 //! 安全：
 //! - `api_key` 仅作参数，返回即 Drop，绝不写文件/日志。
@@ -14,13 +14,14 @@ use std::path::{Path, PathBuf};
 
 use tauri::{ipc::Channel, AppHandle, State};
 
-use crate::crypto::{self, EncryptedPayload};
 use crate::error::AppError;
 use crate::fs::{
     self,
-    paths::{files, SaveDir},
+    paths::{config_files, files, SaveDir},
 };
+use crate::keyring_store::{self, KeyBackend};
 use crate::llm::{self, ForwardRequest, LlmFinalResult, LlmStreamEvent, ProviderKind};
+use serde::Serialize;
 
 // =============================================================================
 // 共享状态：allowed_hosts（custom provider 白名单，由前端通过 settings 注入）
@@ -462,33 +463,90 @@ pub async fn fs_import_save(
 }
 
 // =============================================================================
-// crypto 命令
+// llm key / config 命令（去口令改造：apiKey 经 OS 凭证库，非密钥字段明文 config）
 // =============================================================================
 
-/// 加密 API key（返回可落盘的 EncryptedPayload）。
-/// 明文仅作参数，绝不缓存；密文格式 version/salt/nonce/cipher。
-#[tauri::command]
-pub async fn crypto_encrypt_api_key(
-    password: String,
-    plaintext_key: String,
-) -> Result<EncryptedPayload, AppError> {
-    // 加密在阻塞线程池（PBKDF2 600k 是 CPU 密集型）
-    tokio::task::spawn_blocking(move || crypto::encrypt(&password, plaintext_key.as_bytes()))
-        .await
-        .map_err(|e| AppError::Crypto(format!("任务调度失败: {e}")))?
+/// apiKey 存储结果（前端用于显示降级警告）。
+///
+/// - `backend`：实际落盘后端（"keyring" 或 "file_fallback"）。
+/// - `warning`：降级时的警告文案（含失败原因 + 降级文件路径，**绝不包含 apiKey**）。
+///   keyring 成功时为 None。
+#[derive(Debug, Clone, Serialize)]
+pub struct KeyStoreOutcome {
+    /// 存储后端标识（前端 KeyStoreOutcome.backend 契约）
+    pub backend: KeyBackend,
+    /// 降级警告（仅 file_fallback 时有值）
+    pub warning: Option<String>,
 }
 
-/// 解密 API key（明文解密后即用即抛，绝不缓存到结构体/全局）。
+/// 存 apiKey 到 OS 凭证库（keyring 失败时降级明文文件 + 警告）。
+///
+/// 前端 `saveConfig` 调用：apiKey → 本命令；provider/endpoint/model → `llm_config_write`。
+///
+/// # 安全
+/// apiKey 仅作参数透传给 `keyring_store::save`，本命令不缓存、不写日志。
+/// warning 由 keyring_store 构造，**只含路径与失败原因，不含 apiKey**。
 #[tauri::command]
-pub async fn crypto_decrypt_api_key(
-    password: String,
-    payload: EncryptedPayload,
-) -> Result<String, AppError> {
-    let bytes = tokio::task::spawn_blocking(move || crypto::decrypt(&password, &payload))
+pub async fn llm_key_save(
+    app: AppHandle,
+    api_key: String,
+) -> Result<KeyStoreOutcome, AppError> {
+    let (backend, warning) = keyring_store::save(&app, api_key).await?;
+    Ok(KeyStoreOutcome { backend, warning })
+}
+
+/// 读 apiKey（先 keyring，NoEntry/Error 再试降级文件）。
+///
+/// 前端 `loadConfig` 启动时调用：无 key 返回 None → 前端走首次配置表单。
+#[tauri::command]
+pub async fn llm_key_load(app: AppHandle) -> Result<Option<String>, AppError> {
+    keyring_store::load(&app).await
+}
+
+/// 删 apiKey（幂等：keyring entry + 降级文件都清）。
+///
+/// 前端"重新配置"流程调用：先 delete 旧 key，再 save 新 key。
+#[tauri::command]
+pub async fn llm_key_delete(app: AppHandle) -> Result<(), AppError> {
+    keyring_store::delete(&app).await
+}
+
+/// 读 LLM 配置文件 `<config>/llm-config.json`（非密钥字段：provider/endpoint/model）。
+///
+/// 返回原始 JSON 字符串（Rust 不解析语义）；文件不存在返回 None。
+#[tauri::command]
+pub async fn llm_config_read(app: AppHandle) -> Result<Option<String>, AppError> {
+    let config_root = fs::resolve_config_root(&app)?;
+    let path = config_root.join(config_files::LLM_CONFIG);
+    let content = tokio::task::spawn_blocking(move || -> Result<Option<String>, AppError> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| AppError::Fs(format!("读取 llm-config 失败: {e}")))?;
+        Ok(Some(text))
+    })
+    .await
+    .map_err(|e| AppError::Fs(format!("任务调度失败: {e}")))??;
+    Ok(content)
+}
+
+/// 原子写 LLM 配置文件 `<config>/llm-config.json`（非密钥字段，明文 JSON）。
+///
+/// 复用 `fs::write_atomic_text`（临时文件 + rename，崩溃不写半截）。
+#[tauri::command]
+pub async fn llm_config_write(
+    app: AppHandle,
+    content: String,
+) -> Result<(), AppError> {
+    let config_root = fs::resolve_config_root(&app)?;
+    // 确保 config 目录存在（首次写入前置条件）
+    ensure_dir(&config_root)?;
+    let path = config_root.join(config_files::LLM_CONFIG);
+    tokio::task::spawn_blocking(move || fs::write_atomic_text(&path, &content))
         .await
-        .map_err(|e| AppError::Crypto(format!("任务调度失败: {e}")))??;
-    // 明文立即转字符串返回（调用方用完即 Drop）
-    String::from_utf8(bytes).map_err(|e| AppError::Crypto(format!("明文非 UTF-8: {e}")))
+        .map_err(|e| AppError::Fs(format!("任务调度失败: {e}")))??;
+    Ok(())
 }
 
 // =============================================================================

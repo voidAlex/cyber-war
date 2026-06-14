@@ -1,6 +1,7 @@
 # =============================================================================
 # 赛博战争模拟器 — Rust 后端（爪牙）
-# Tauri 2 桌面壳的后端，只做三件事：本地文件 IO / LLM 真流式转发 / 加密原语。
+# Tauri 2 桌面壳的后端，只做两件事：本地文件 IO / LLM 真流式转发。
+# （去口令改造：apiKey 经 OS 凭证库 keyring crate 存取，不再保留加密原语。）
 # 铁律：零业务逻辑。任何 command 中出现游戏规则计算即判违规。
 # =============================================================================
 [package]
@@ -37,14 +38,13 @@ futures-util = "0.3"
 # URL 解析（用于 SSRF 守卫解析 endpoint）
 url = "2"
 
-# --- 加密原语（与前端 key-encryption.ts 等参数：pbkdf2-SHA256-600k + AES-256-GCM）---
-aes-gcm = "0.10"
-pbkdf2 = { version = "0.12", features = ["simple"] }
-hmac = "0.12"
-sha2 = "0.10"
-rand = "0.8"
-# base64 编解码（constant-time 实现，适合处理密文相关数据）
-base64ct = { version = "1", features = ["alloc"] }
+# --- OS 凭证库（apiKey 改 OS 凭证库存取，去口令）---
+# keyring 2.x 跨平台默认全开：
+#   Linux secret-service（D-Bus，无 daemon 时返回 PlatformFailure 触发降级）
+#   macOS Keychain / Windows Credential Manager
+# 后端通过 spawn_blocking 包裹 keyring 调用（D-Bus 同步阻塞），
+# 失败时降级写 <app_data_dir>/config/api-key.txt 明文 + 返回警告。
+keyring = "2"
 
 # --- 序列化 ---
 serde = { version = "1", features = ["derive"] }

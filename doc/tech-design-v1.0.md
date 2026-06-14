@@ -3,7 +3,7 @@
 > 
 > 审核日期： 2026-03-08
 > 
-> **重写修订说明**：本文档已按"完全重写为 Tauri 2 桌面应用"计划更新——OPFS→本地文件系统（Rust `app_data_dir`，原子写）；后端 Node HTTP→Tauri Rust 后端（仅 LLM 转发 + 本地文件 IO + 加密，零业务逻辑）；WebCrypto→Rust（pbkdf2-600k + aes-256-gcm）；新增确定性两层、人格数值基底、DeepSeek v4 + 缓存极致优化、SSRF 防御、内置战役生成器与数据模型 schema。
+> **重写修订说明**：本文档已按"完全重写为 Tauri 2 桌面应用"计划更新——OPFS→本地文件系统（Rust `app_data_dir`，原子写）；后端 Node HTTP→Tauri Rust 后端（仅 LLM 转发 + 本地文件 IO，零业务逻辑）；apiKey 经 OS 凭证库加密保存（去口令改造后替代旧 pbkdf2/aes-gcm，见 §3.8）；新增确定性两层、人格数值基底、DeepSeek v4 + 缓存极致优化、SSRF 防御、内置战役生成器与数据模型 schema。
 
 ---
 
@@ -11,7 +11,7 @@
 > 
 > ### 1.1 目标
 > - 基于自然语言指令构建 WEGO（同步回合制）战争推演闭环。
-> - **完全重写为 Tauri 2 桌面应用**：前端承载全部核心业务逻辑与渲染，**Tauri Rust 后端仅做三件事**——① 本地文件 IO ② LLM 真流式转发 ③ 加密原语，**零业务逻辑**（硬约束，见 §1.5）。
+> - **完全重写为 Tauri 2 桌面应用**：前端承载全部核心业务逻辑与渲染，**Tauri Rust 后端仅做两件事**——① 本地文件 IO ② LLM 真流式转发，**零业务逻辑**（硬约束，见 §1.5）。apiKey 经 OS 凭证库加密保存（见 §3.8）。
 > - **持久化介质改为本地文件系统**（Rust `app_data_dir`，**原子写 = 临时文件 + rename**，event-log.jsonl 真追加 O(1)）。OPFS 全部替换，桌面化后 Safari 配额/清除风险消失。
 > - 支持 **ZIP 文件导入导出**战役包（放弃 GitHub 在线加载)。
 > - 实现多 Agent 层级博弈（玩家侧参谋、战区司令、敌/盟统帅、导演部裁判)。
@@ -66,7 +66,7 @@
 > 3. **领域层**：战斗结算、迷雾情报、外交与人格决策
 > 4. **Agent 层**：参谋/司令/统帅/导演部代理协议与执行器
 > 5. **持久化层**：**本地文件系统（Rust `app_data_dir`）**、JSON 状态原子写入（临时文件 + rename）、event-log.jsonl 真追加、快照与导入导出
-> 6. **网关层（Tauri Rust 后端）**：**仅做三件事**——LLM provider 路由与真流式转发 + 本地文件 IO + 加密原语；**零业务逻辑**，不存储密钥
+> 6. **网关层（Tauri Rust 后端）**：**仅做两件事**——LLM provider 路由与真流式转发 + 本地文件 IO（含 apiKey 经 OS 凭证库存取）；**零业务逻辑**，不存储密钥
 > 
 > ### 2.2 运行时组件
 > - `Command Interpreter`：自然语言 -> 结构化意图
@@ -215,13 +215,15 @@
             - **流式战报区**: 导演部生成战报时流式输出
             - **可取消按钮**: 鷳过动画(如果已缓存结果)
 > 
-> ### 3.8 api Key 本地加密策略（Rust 加密原语）
-> - 用户输入主密码 (passphrase) 作为解锁因子
-> - **使用 Rust crypto 模块**（`src-tauri/src/crypto/`）：**pbkdf2-600k 迭代 + aes-256-gcm**（`kdf.rs` + `aead.rs`），参数与原 `key-encryption.ts` 一致
-> - api key 以密文形式写入本地文件系统（含盐值与版本头）
-> - 仅在会话内解密驻留内存，不写明文到磁盘；**明文即用即抛，Rust 不缓存**（key 仅作函数参数，返回即 Drop）
+> ### 3.8 apiKey 本地存储策略（OS 凭证库，去口令改造后）
+> - **无应用层 passphrase**：桌面端单用户场景，passphrase 口令解锁边际价值低（能读磁盘往往能 dump 内存、每次输口令烦），改用 **OS 凭证库**（Linux Secret Service / macOS Keychain / Windows Credential Manager）透明加密，桌面端无需口令、重启自动加载。
+> - **使用 Rust `keyring_store` 模块**（`src-tauri/src/keyring_store.rs`，基于 `keyring = "2"` crate）：service 名固定 `cyber-war-simulator`、account 名固定 `llm-api-key`。`save(app, api_key)` / `load(app)` / `delete(app)` 三函数；keyring 调用一律包 `tokio::task::spawn_blocking`（D-Bus 同步阻塞）。
+> - **降级路径（关键）**：keyring 不可用时（WSL2/Linux 无 Secret Service daemon，返回 `keyring::Error::PlatformFailure`）→ 明文存 `<app_data_dir>/config/api-key.txt` + 返回 `KeyStoreOutcome.warning`（含失败原因 + 降级文件路径，**绝不包含 apiKey**）；`load` 先试 keyring 再试降级文件；`delete` 幂等清理两位置。
+> - **非密钥字段明文 config**：provider/endpoint/model 经 `llm_config_read` / `llm_config_write` 明文 JSON 落盘 `<config>/llm-config.json`（Rust 原子写，无敏感性）。
+> - **仅会话内内存持有明文 apiKey**：加载后存会话内存（`runtime-config.ts` 单例 session），`clearSession()` 立即置空；apiKey 不进 store state 持久字段、不写 world-state/event-log/snapshot/diagnostics。**明文即用即抛，Rust 不缓存**（key 仅作函数参数，返回即 Drop）。
+> - **旧版迁移（legacy）**：检测到旧版 `encryptedApiKey` 字段 → 提示"检测到旧版加密配置（口令已废弃），请重新输入 API Key"，预填 provider/endpoint/model（旧文件这些明文仍可用）→ 用户输新 apiKey → `saveConfig` 覆盖新格式（完成一次性迁移）。不提供旧口令解密路径（passphrase UI 已删，且易丢）。
 > 
-> > **说明**: 前端/Tauri 本地加密可降低"静态泄露"风险，但无法防御已控制运行时的恶意脚本。crypto 模块**不存 passphrase**。
+> > **安全说明**：apiKey 经 OS 凭证库加密保存（OS 透明加密），比应用层 passphrase + PBKDF2/AES-GCM 更贴合桌面（无口令、防静态泄露、跨进程隔离）。降级明文文件仅在 keyring 不可用时启用，UI 顶部显示警告。crypto 原语（pbkdf2/aes-gcm）已从依赖中移除。
 > 
 > ### 3.9 战役插件: zip 导入导出
 > - **导入**: 校验 zip 结构与 schema 后写入本地文件系统
@@ -439,7 +441,7 @@
 > 
 > 本地仓库现状: 当前仅 prd,属于绿地项目。
 > 
-> 本地文件系统（Rust `app_data_dir`）、Rust 加密（pbkdf2/aes-gcm）、zip、agent 编排与状态机方案均有可行实现路径。
+> 本地文件系统（Rust `app_data_dir`）、Rust keyring（OS 凭证库 + 降级明文文件兜底）、zip、agent 编排与状态机方案均有可行实现路径。
 > 
 > 高风险主要集中于:
 > - 回放漂移(重复调用 llm) → **对策: 仅重放命令与 seed + LLM 产物只读 log 不重算 + CI event-log 哈希门（详见 §3.1）**

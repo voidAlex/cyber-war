@@ -68,8 +68,23 @@ vi.mock('@/layers/gateway/tauri-bridge', () => ({
     throw new Error('无快照')
   }),
   fsAppendDiagnostics: vi.fn(async (): Promise<void> => {}),
-  cryptoEncryptApiKey: vi.fn(async () => ({ salt: '', nonce: '', ciphertext: '', version: 1 })),
-  cryptoDecryptApiKey: vi.fn(async () => ''),
+  // 去口令改造后：apiKey 经 keyring mock，非密钥字段经 config mock
+  llmKeySave: vi.fn(async (apiKey: string) => {
+    memoryStore.set('__llm_api_key__', apiKey)
+    return { backend: 'keyring', warning: null }
+  }),
+  llmKeyLoad: vi.fn(async (): Promise<string | null> => {
+    return memoryStore.get('__llm_api_key__') ?? null
+  }),
+  llmKeyDelete: vi.fn(async (): Promise<void> => {
+    memoryStore.delete('__llm_api_key__')
+  }),
+  llmConfigRead: vi.fn(async (): Promise<string | null> => {
+    return memoryStore.get('__llm_config__') ?? null
+  }),
+  llmConfigWrite: vi.fn(async (content: string): Promise<void> => {
+    memoryStore.set('__llm_config__', content)
+  }),
   llmSetAllowedHosts: vi.fn(async (): Promise<void> => {}),
   isAppErrorPayload: vi.fn(() => false),
 }))

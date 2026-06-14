@@ -1,26 +1,14 @@
 /**
  * Gateway 桥类型契约（bridge-types.ts）— 与 Rust 侧 serde 结构一一对齐。
  *
- * 这些类型镜像 Rust 源码（crypto/aead.rs、llm/stream.rs、llm/router.rs、error.rs），
+ * 这些类型镜像 Rust 源码（keyring_store.rs、llm/stream.rs、llm/router.rs、error.rs），
  * 作为前后端 IPC 的强类型契约。**修改 Rust 侧时务必同步此处**。
+ *
+ * 去口令改造后：旧 `EncryptedPayload`（对齐 crypto/aead.rs）已删，apiKey 经
+ * OS 凭证库存取，非密钥字段明文 JSON 落盘。
  *
  * @module layers/gateway/bridge-types
  */
-
-/**
- * 加密密文载荷（对齐 crypto/aead.rs `EncryptedPayload`）。
- * 所有字节字段以 base64 字符串存储，便于嵌入 JSON。
- */
-export interface EncryptedPayload {
-  /** 格式版本 */
-  version: number
-  /** PBKDF2 salt（base64） */
-  salt: string
-  /** AES-GCM nonce（base64） */
-  nonce: string
-  /** 密文（base64，含 GCM 认证标签） */
-  cipher: string
-}
 
 /**
  * LLM provider 标识（对齐 llm/router.rs `ProviderKind`，serde rename_all="lowercase"）。

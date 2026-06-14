@@ -152,8 +152,8 @@
 
 ## 9. 产品形态
 
-- **桌面应用（Tauri 2）**：**Tauri 2 桌面应用**形态。前端 React + TypeScript 负责所有业务逻辑和渲染，**Rust 后端仅做三件事**：① 本地文件 IO（原子写 + 真追加） ② LLM 真流式转发 ③ 加密原语（pbkdf2 / AES-256-GCM）。Rust 后端零行业务逻辑。Windows/Linux 跨平台打包。
-- **玩家自带 API Key**：不提供 LLM API 服务，玩家自行输入 API Key 后才能进行游戏。⚠️ Rust 后端仅转发请求、不存储 API Key（明文即用即抛），并做 host 白名单 + 私网/元数据 IP 拒绝（SSRF 防御）。本项目开源，代码可供审计。
+- **桌面应用（Tauri 2）**：**Tauri 2 桌面应用**形态。前端 React + TypeScript 负责所有业务逻辑和渲染，**Rust 后端仅做两件事**：① 本地文件 IO（原子写 + 真追加） ② LLM 真流式转发。Rust 后端零行业务逻辑。Windows/Linux 跨平台打包。
+- **玩家自带 API Key**：不提供 LLM API 服务，玩家自行输入 API Key 后才能进行游戏。⚠️ Rust 后端仅转发请求、不存储 API Key（明文即用即抛），并做 host 白名单 + 私网/元数据 IP 拒绝（SSRF 防御）。**apiKey 经操作系统凭证库加密保存**（Linux Secret Service / macOS Keychain / Windows Credential Manager；keyring 不可用时降级明文文件 + 警告），桌面端无需应用层口令、重启自动加载。本项目开源，代码可供审计。
 - **推荐供应商：DeepSeek v4**：
   - **deepseek-v4-flash**：默认供应商。便宜、并发高、支持非思考/思考模式切换。OpenAI 兼容格式，base_url `https://api.deepseek.com`。
   - **deepseek-v4-pro**：高质量决策，仅用于导演部终裁、关键超常规奇招等需要强推理的场景。

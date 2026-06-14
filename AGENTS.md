@@ -7,11 +7,11 @@
 
 玩家扮演最高统帅，通过自然语言与 AI 参谋长交互，在战争迷雾中进行盲盒博弈。
 
-本项目已完成**完全重写为 Tauri 2 桌面应用**（详见重写计划 `robust-spinning-lampson.md`）。重写动机是旧网页版虽硬指标全绿，但关键环节多为半成品或埋雷（持久化死链、命令无视状态机阶段、Agent 并发破坏确定性、伪流式、OPFS 伪追加、LLM 转发 SSRF、错误分类全错等）。现以 PRD/TDD 为权威蓝图重写：业务逻辑全前端 TS，Rust 后端只做 fs/llm/crypto 三件事零业务逻辑，存储落在本地文件系统。
+本项目已完成**完全重写为 Tauri 2 桌面应用**（详见重写计划 `robust-spinning-lampson.md`）。重写动机是旧网页版虽硬指标全绿，但关键环节多为半成品或埋雷（持久化死链、命令无视状态机阶段、Agent 并发破坏确定性、伪流式、OPFS 伪追加、LLM 转发 SSRF、错误分类全错等）。现以 PRD/TDD 为权威蓝图重写：业务逻辑全前端 TS，Rust 后端只做 fs/llm 两件事零业务逻辑（apiKey 经 OS 凭证库 keyring_store 加密保存，去口令），存储落在本地文件系统。
 
 ## 技术栈
 
-本项目为 **Tauri 2 桌面应用**：前端 React19+TS+Vite 跑在 Tauri WebView 中，沙盘用 PixiJS，物理引擎跑在 Web Worker，Rust 作桌面后端只做 fs/llm/crypto 三件事，存储落在本地文件系统（取代旧的 OPFS）。
+本项目为 **Tauri 2 桌面应用**：前端 React19+TS+Vite 跑在 Tauri WebView 中，沙盘用 PixiJS，物理引擎跑在 Web Worker，Rust 作桌面后端只做 fs/llm 两件事（apiKey 经 OS 凭证库 keyring_store 加密保存，去口令），存储落在本地文件系统（取代旧的 OPFS）。
 
 - **运行时/壳**: Tauri 2（桌面应用，跨平台）
 - **包管理器**: pnpm 8+（前端）/ cargo（Rust 侧）
@@ -27,7 +27,7 @@
 ### 关键依赖
 
 - **前端（package.json）**：`@tauri-apps/api`、`@tauri-apps/plugin-fs`、`react`、`pixi.js`、`zustand`、`ajv`、`seedrandom`
-- **Rust 侧（src-tauri/Cargo.toml）**：`tauri`、`reqwest`、`aes-gcm`、`pbkdf2`、`serde`、`zip`、`tokio`
+- **Rust 侧（src-tauri/Cargo.toml）**：`tauri`、`reqwest`、`keyring`、`serde`、`zip`、`tokio`
 
 - **插件化**: ZIP 战役包（Rust 安全解包，防 zip-slip）
 
@@ -47,7 +47,7 @@
   - `domain/`：全纯函数 — combat / intelligence / diplomacy / physics-rules / victory
   - `agents/`：protocol + roles（chief/theater/commander/director）+ orchestrator（确定性序）+ director（终裁 + 兜底）
   - `persistence/`：repository / event-log / snapshot / replay / campaign-zip / diagnostics
-  - `gateway/`：唯一允许 import `@tauri-apps/api` 的层 — tauri-bridge / llm-client / crypto-client
+  - `gateway/`：唯一允许 import `@tauri-apps/api` 的层 — tauri-bridge / llm-client / runtime-config（apiKey 经 OS 凭证库 keyring + 非密钥字段明文 config 会话管理）/ web-mock-* （浏览器 vite dev 降级）
 - **沙盘渲染**: PixiJS 2D 网格地图（高亮、路径预演、热力图、动画/粒子）
 - **通信终端**: 自然语言对话界面
 - **左侧看板**: 部队信息、后勤状态
@@ -55,11 +55,11 @@
 
 ### Rust = 爪牙（仅三个模块，铁律：零业务逻辑）
 
-`src-tauri/src/` 下只做三件事，任何 command 里出现游戏规则计算即判违规：
+`src-tauri/src/` 下只做两件事（apiKey 经 OS 凭证库存取已并入 fs 模块族），任何 command 里出现游戏规则计算即判违规：
 
 - **`fs/`**：本地文件 IO（`atomic.rs` 临时文件+rename 原子写 / `append.rs` OpenOptions::append 真追加 O(1) / `paths.rs`）
 - **`llm/`**：LLM 转发（`router.rs` / `stream.rs` reqwest SSE 真流式 / `guard.rs` host 白名单 + 私网/元数据 IP 拒绝 = SSRF 防御 / `retry.rs`）。不缓存 key、不懂 payload、不做游戏判定。
-- **`crypto/`**：加密原语（`kdf.rs` pbkdf2-600k / `aead.rs` aes-256-gcm）。不存 passphrase，明文即用即抛。
+- **`keyring_store/`**：apiKey 经 OS 凭证库存取（基于 `keyring = "2"` crate，Linux secret-service / macOS Keychain / Windows Credential Manager）。不缓存 key、不写日志；keyring 不可用时降级明文文件 + 警告。明文即用即抛。**去口令改造后替代旧 `crypto/`（pbkdf2/aes-gcm 已删）。**
 
 ### 纯/React 边界铁律
 
