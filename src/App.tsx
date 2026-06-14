@@ -27,7 +27,7 @@
  */
 
 import { useEffect, type JSX } from 'react'
-import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector, IntelligencePanel, DiplomacyPanel, CollapsibleSection } from '@/layers/ui'
+import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector, IntelligencePanel, DiplomacyPanel, ForcesPanel, UnitDetailPanel, CollapsibleSection } from '@/layers/ui'
 import TitleScreen from '@/layers/ui/title/TitleScreen'
 import SandboxErrorBoundary from '@/layers/ui/sandbox/SandboxErrorBoundary'
 import { useGameStore } from '@/store/game-store'
@@ -160,9 +160,11 @@ export default function App(): JSX.Element {
             </div>
           </CollapsibleSection>
 
-          {/* 信息组：情报 + 外交（查看型，默认收起） */}
+          {/* 信息组：部队 + 情报 + 外交（查看型，默认收起）。
+              部队 ForcesPanel 放最前（玩家最常用：点单位看详情 + 沙盘高亮）。 */}
           <CollapsibleSection title="信息" defaultOpen={false}>
             <div className="collapsible-group__panels">
+              <ForcesPanel />
               <IntelligencePanel />
               <DiplomacyPanel />
             </div>
@@ -186,6 +188,9 @@ export default function App(): JSX.Element {
           <SandboxErrorBoundary>
             <Sandbox />
           </SandboxErrorBoundary>
+          {/* C 单位详情：选中单位浮层（覆盖沙盘右上，selectedUnitId 非空时显示）。
+              UnitDetailPanel 内部据 selectedUnitId 判断渲染 null / 浮层，无需此处条件。 */}
+          <UnitDetailPanel />
         </div>
 
         <div className="app-shell__right">

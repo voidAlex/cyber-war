@@ -26,6 +26,8 @@ export { default as ErrorBanner } from './ErrorBanner'
 export { default as AgentInspector } from './inspector/AgentInspector'
 export { default as IntelligencePanel } from './IntelligencePanel'
 export { default as DiplomacyPanel } from './DiplomacyPanel'
+export { default as ForcesPanel } from './ForcesPanel'
+export { default as UnitDetailPanel } from './units/UnitDetailPanel'
 export { default as CollapsibleSection } from './CollapsibleSection'
 // A 标题屏主菜单（UI 重构第 2 批）：configUnlocked && context===null 时显示
 export { default as TitleScreen } from './title/TitleScreen'

@@ -83,6 +83,7 @@ import {
   factionColorToNumber,
 } from './theme'
 import { logger } from '@/utils/logger'
+import { UNIT_TYPE_GLYPH } from '@/layers/ui/units/unit-glyph'
 
 /** 沙盘交互回调集合（由 Sandbox.tsx 注入，渲染层不持有 store）。 */
 export interface SandboxCallbacks {
@@ -144,6 +145,13 @@ export class SandboxRenderer {
   /** 单位残影标签 [T-Nh] Text 集合（单位层重绘时清理释放）。 */
   private ghostLabels: Text[] = []
 
+  /**
+   * 单位类型 glyph Text 集合（"步"/"装"/"炮" 等单字标识，画在军标中心）。
+   * C 单位详情：所有可见单位（formation/full/own）都标 glyph，便于辨识。
+   * 单位层重绘时一并清理释放。
+   */
+  private unitGlyphLabels: Text[] = []
+
   /** 当前世界快照（updateWorld 写入，redraw 读取）。 */
   private world: SandboxWorld | null = null
   /** 当前预演订单（updatePreview 写入）。 */
@@ -151,6 +159,13 @@ export class SandboxRenderer {
 
   private selected: { col: number; row: number } | null = null
   private hover: { col: number; row: number } | null = null
+
+  /**
+   * C 单位详情：当前选中单位 id（来自 store.selectedUnitId）。
+   * redrawUnits 据此给该单位画青光描边 + 强化的类型 glyph。
+   * null=无选中单位（不画描边，但仍画常规类型 glyph 标识）。
+   */
+  private selectedUnitId: string | null = null
 
   private readonly callbacks: SandboxCallbacks
 
@@ -228,6 +243,18 @@ export class SandboxRenderer {
   setSelected(coord: { col: number; row: number } | null): void {
     this.selected = coord
     this.redrawHighlight()
+  }
+
+  /**
+   * C 单位详情：设置选中单位 id（来自 store.selectedUnitId）。
+   *
+   * 触发单位层重绘——选中单位画青光描边 + 放大类型 glyph。
+   * null 清除选中描边。
+   */
+  setSelectedUnitId(unitId: string | null): void {
+    if (this.selectedUnitId === unitId) return
+    this.selectedUnitId = unitId
+    this.redrawUnits()
   }
 
   /** 设置悬停 cell（null 清除），触发高亮重绘。 */
@@ -431,12 +458,17 @@ export class SandboxRenderer {
   private redrawUnits(): void {
     const g = this.unitGraphics
     g.clear()
-    // 清理上一轮残影标签（释放纹理）
+    // 清理上一轮残影标签 + 类型 glyph 标签（释放纹理）
     for (const t of this.ghostLabels) {
       this.unitLayer.removeChild(t)
       t.destroy()
     }
     this.ghostLabels = []
+    for (const t of this.unitGlyphLabels) {
+      this.unitLayer.removeChild(t)
+      t.destroy()
+    }
+    this.unitGlyphLabels = []
 
     const world = this.world
     if (world === null) return
@@ -535,6 +567,38 @@ export class SandboxRenderer {
         g.rect(barX, barY, barW * ratio, barH).fill({ color: fgColor, alpha })
       }
 
+      // C 单位详情：类型 glyph 文字标识（formation/full/own 都画，便于辨识）。
+      // L1 热力脉冲不画 glyph（仅模糊存在性，已 continue 跳过）。
+      if (decision.mode === 'formation' || decision.mode === 'full' || decision.mode === 'own') {
+        const glyph = UNIT_TYPE_GLYPH[unit.type]
+        const glyphText = new Text({
+          text: glyph,
+          style: new TextStyle({
+            fontFamily: 'monospace',
+            fontSize: 10,
+            fill: UNIT_GLYPH_COLOR,
+            fontWeight: 'bold',
+          }),
+        })
+        glyphText.anchor.set(0.5)
+        glyphText.x = x
+        glyphText.y = y
+        glyphText.alpha = alpha
+        this.unitLayer.addChild(glyphText)
+        this.unitGlyphLabels.push(glyphText)
+      }
+
+      // C 单位详情：选中单位青光描边高亮（来自 store.selectedUnitId）。
+      // 在军标外圈画一圈青光，比 cell 级 selected 描边更聚焦于单位本身。
+      if (this.selectedUnitId !== null && unit.id === this.selectedUnitId) {
+        const ringHalf = half + 3
+        g.rect(x - ringHalf, y - ringHalf, ringHalf * 2, ringHalf * 2).stroke({
+          color: SELECTED_COLOR,
+          width: SELECTED_UNIT_RING_WIDTH,
+          alpha: SELECTED_UNIT_RING_ALPHA,
+        })
+      }
+
       // 残影标签 [T-Nh]（仅 ghost 态）
       if (decision.ghost) {
         const label = ghostLabel(decision)
@@ -617,6 +681,15 @@ export class SandboxRenderer {
 
 /** 选中 cell 填充色（白色，与 SELECTED_COLOR 配合）。 */
 const SELECTED_FILL = 0xffffff
+
+/** 类型 glyph 文字色（白色，叠在阵营色军标上对比清晰）。 */
+const UNIT_GLYPH_COLOR = 0xffffff
+
+/** 选中单位青光描边宽度（比 cell 级 selected 更粗，聚焦单位本身）。 */
+const SELECTED_UNIT_RING_WIDTH = 2.5
+
+/** 选中单位青光描边透明度（醒目但不遮挡军标）。 */
+const SELECTED_UNIT_RING_ALPHA = 1
 
 /** 判断坐标是否在网格范围内。 */
 function inBounds(coord: { col: number; row: number }, cols: number, rows: number): boolean {

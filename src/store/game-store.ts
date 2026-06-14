@@ -183,6 +183,16 @@ export interface GameStoreState {
   /** 本回合是否降级结算（规则引擎兜底） */
   degraded: boolean
 
+  // —— C 单位详情（UI 重构第 3 批）：选中单位 id ——
+  // 沙盘点击单位 / 左栏 ForcesPanel 点击单位 → 写入此 id；
+  // UnitDetailPanel 据此显示浮层，SandboxRenderer 据此画青光描边高亮。
+  // null=未选中（关闭详情面板）。
+  /**
+   * 当前选中的单位 id（UnitDetailPanel + 沙盘高亮共用）。
+   * 切换存档/回合推进不自动清空（保持选中态便于连续操作）。
+   */
+  selectedUnitId: string | null
+
   // —— 动作 ——
   /** dispatch 一个纯 action 到 reducer（守卫拒绝时设 userError） */
   dispatch: (action: StateMachineAction) => boolean
@@ -222,6 +232,12 @@ export interface GameStoreState {
   setLlmError: (err: LlmErrorBanner | null) => void
   /** 清空本回合进度/直播状态（新回合开始时） */
   resetTurnProgress: () => void
+
+  // —— C 单位详情：选中单位动作 ——
+  /** 选中某单位（写 selectedUnitId；UnitDetailPanel + 沙盘高亮响应）。 */
+  setSelectedUnitId: (unitId: string | null) => void
+  /** 清除选中单位（关闭 UnitDetailPanel）。 */
+  clearSelectedUnit: () => void
 }
 
 // 存档过滤谓词（纯函数，从 save-filter 导入；拆分以避免测试 import store 时触发 Worker）
@@ -262,6 +278,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     degradedCount: 0,
   },
   degraded: false,
+
+  selectedUnitId: null,
 
   dispatch(action) {
     const ctx = get().context
@@ -554,6 +572,14 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       liveEnvelopes: [],
       degraded: false,
     })
+  },
+
+  setSelectedUnitId(unitId) {
+    set({ selectedUnitId: unitId })
+  },
+
+  clearSelectedUnit() {
+    set({ selectedUnitId: null })
   },
 }))
 

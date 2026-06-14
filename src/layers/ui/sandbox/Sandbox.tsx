@@ -35,7 +35,7 @@ import {
   SandboxRenderer,
   type SandboxWorld,
 } from './SandboxRenderer'
-import { CELL_SIZE, gridPixelSize } from './coords'
+import { CELL_SIZE, gridPixelSize, cellIdFromCoord } from './coords'
 import { getPlayerFactionId } from './intel-visibility'
 import { logger } from '@/utils/logger'
 
@@ -90,9 +90,17 @@ export default function Sandbox(): JSX.Element {
     let initDone = false
     const renderer = new SandboxRenderer({
       onCellClick: (cellId) => {
-        // M2：先 console，后续接命令握手 store
-        // eslint-disable-next-line no-console
-        console.log('[sandbox] cell clicked:', cellId)
+        // C 单位详情（UI 重构第 3 批）：点击 cell → 找该 cell 上的单位 → setSelectedUnitId。
+        // 若该 cell 无单位，清除选中（点空地关闭详情面板）。
+        const ctx = useGameStore.getState().context
+        const units = ctx?.game.world.units ?? []
+        // cellId 形如 "C3"，与 unit.coord 通过 cellIdFromCoord 对齐。
+        // 直接用 col/row 比较（cellId 解析容错；renderer 已传 cellId，这里反查单位）。
+        const hit = units.find((u) => {
+          const id = cellIdFromCoord(u.coord.col, u.coord.row)
+          return id === cellId
+        })
+        useGameStore.getState().setSelectedUnitId(hit?.id ?? null)
       },
     })
 
@@ -132,6 +140,8 @@ export default function Sandbox(): JSX.Element {
       }
       renderer.updateWorld(world)
       renderer.updatePreview(pendingOrders)
+      // C 单位详情：每次 world 重绘后回填当前选中单位 id（renderer 内部画青光描边）。
+      renderer.setSelectedUnitId(useGameStore.getState().selectedUnitId)
     }
 
     /**
@@ -310,7 +320,7 @@ export default function Sandbox(): JSX.Element {
       }
     })()
 
-    // —— 2. store 订阅：worldState / pendingOrders 变化时增量重绘 ——
+    // —— 2. store 订阅：worldState / pendingOrders / selectedUnitId 变化时增量重绘 ——
     const unsubscribe = useGameStore.subscribe((state, prev) => {
       if (app === null || disposed) return
       const ctx = state.context
@@ -319,7 +329,14 @@ export default function Sandbox(): JSX.Element {
       const prevWorld = prevCtx?.game.world
       const worldChanged = world !== prevWorld
       const ordersChanged = ctx?.pendingOrders !== prevCtx?.pendingOrders
-      if (!worldChanged && !ordersChanged) return
+      // C 单位详情：选中单位变化 → renderer 重画单位层（青光描边高亮）
+      const selectionChanged = state.selectedUnitId !== prev.selectedUnitId
+      if (!worldChanged && !ordersChanged) {
+        if (selectionChanged) {
+          renderer.setSelectedUnitId(state.selectedUnitId)
+        }
+        return
+      }
 
       // —— 诊断日志：store 变化触发重绘（真机黑屏排查：world 加载后是否到达 Sandbox）——
       // 仅在 worldChanged 时记 info（ordersChanged 高频，记 debug）。
