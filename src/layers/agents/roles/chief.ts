@@ -150,8 +150,11 @@ export function createLlmChiefRole(
       try {
         return await parseCommandWithLlm(input, ctx, llmService, config)
       } catch (err) {
+        // LLM 失败：回退 mock 规则解析（绝不伪造，绝不卡死游戏）。
+        // 记录错误便于排查（原静默 fallback 难定位失败原因）。
+        // eslint-disable-next-line no-console
+        console.error('[chief] LLM 解析失败，回退 mock 规则解析:', err)
         if (isLlmCallError(err)) {
-          // LLM 失败：回退 mock 规则解析（绝不伪造，绝不卡死游戏）
           return parseCommandMock(input, ctx)
         }
         throw err
