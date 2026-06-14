@@ -25,6 +25,10 @@ import type {
   LlmErrorKindString,
   ProviderKindString,
 } from './bridge-types'
+// web 模式降级：isWebMode() 为 true 时改走 web-mock-llm（经 vite proxy 真调 DeepSeek）。
+// 不破坏 Tauri 生产路径（false 时完全走原 invoke）与 vitest（jsdom 下 false）。
+import { isWebMode } from './web-mode'
+import { webStreamForward } from './web-mock-llm'
 
 // =============================================================================
 // 共享类型：流式结果（含命中率统计）
@@ -266,6 +270,27 @@ export class StreamChatHandle
         this.opts.signal.addEventListener('abort', this.abortListener)
       }
     }
+
+    // === web 模式分支：经 vite proxy 真调 DeepSeek，事件经 handleEvent 复用同一模型 ===
+    if (isWebMode()) {
+      // webStreamForward 内部已推送 done/error 事件并返回 finalResult（含 degraded）
+      webStreamForward(
+        this.opts,
+        (event) => this.handleEvent(event),
+        this.opts.signal,
+      )
+        .then((result) => {
+          this.finalResult = result
+          this.maybeResolveResult()
+        })
+        .catch((err: unknown) => {
+          // abort 抛 AbortError 时流可能已部分交付，setError 内部会兜底
+          this.setError(err)
+        })
+      return
+    }
+
+    // === Tauri 模式（生产 + vitest）：原 invoke 路径，行为不变 ===
 
     // 构造 payload（OpenAI/DeepSeek 兼容 chat 格式）
     const payload: Record<string, unknown> = {

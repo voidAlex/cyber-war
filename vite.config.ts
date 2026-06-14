@@ -38,6 +38,15 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
+      // web 模式（浏览器 vite dev，供 agent-browser 验证）LLM 经此 proxy 真调 DeepSeek：
+      // 浏览器直连 api.deepseek.com 有 CORS 限制，proxy 在 dev server 侧 changeOrigin 转发。
+      // /deepseek/chat/completions → https://api.deepseek.com/chat/completions
+      // 仅 web 模式（isWebMode() true）启用；Tauri 生产走 Rust reqwest，不经过此 proxy。
+      '/deepseek': {
+        target: 'https://api.deepseek.com',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/deepseek/, ''),
+      },
     },
   },
   build: {
