@@ -159,8 +159,13 @@ export default function Sandbox(): JSX.Element {
         })
         if (disposed) {
           // 组件在 await 期间已卸载：立即销毁新建的 app，避免泄漏
-          // 此时 init 已完成，destroy 安全
-          app.destroy(true, { children: true })
+          // destroy 加 try/catch：headless/StrictMode 下 app.init() 可能半完成，
+          // destroy 访问未挂载的内部属性（如 _cancelResize）会抛错，忽略以免污染降级日志
+          try {
+            app.destroy(true, { children: true })
+          } catch {
+            // 忽略半初始化 app 的 destroy 错误（不阻断降级流程）
+          }
           app = null
           return
         }
