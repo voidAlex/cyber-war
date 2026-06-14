@@ -86,6 +86,23 @@ export const UNIT_BORDER_COLOR = 0x111111
 /** 单位军标描边宽度。 */
 export const UNIT_BORDER_WIDTH = 1.5
 
+// ===== 情报 4 级渲染配色（M4-B）=====
+
+/** L1 热力脉冲填充透明度（模糊色块，半透明）。 */
+export const HEAT_PULSE_FILL_ALPHA = 0.32
+
+/** L1 热力脉冲外圈描边透明度（暗示「热力」）。 */
+export const HEAT_PULSE_RING_ALPHA = 0.5
+
+/** L2 编制确认虚线边框色（白色，与阵营填充对比，暗示「未确认」）。 */
+export const INTEL_DASH_COLOR = 0xf5f5f5
+
+/** L2 编制确认虚线描边宽度。 */
+export const INTEL_DASH_WIDTH = 1.5
+
+/** 残影标签 [T-Nh] 文本颜色（暖灰，提示信息已过期）。 */
+export const GHOST_LABEL_COLOR = 0xd4a04a
+
 /** 强度条背景色（深底）。 */
 export const STRENGTH_BAR_BG = 0x1a1a1a
 

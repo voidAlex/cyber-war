@@ -26,6 +26,19 @@ import {
   canSubmitNow,
   canEnterHandshake,
 } from '@/layers/application/orchestrator/handshake-flow'
+import {
+  resolveDiplomaticResponse,
+  rollDiplomaticResponse,
+  inferRequestKind,
+  describeRequestKind,
+  describeResponseType,
+  responseColor,
+  type DiplomaticRequest,
+  type DiplomaticResponseType,
+  type DiplomaticRequestResult,
+} from '@/layers/domain/diplomacy-request'
+import { inferStance } from '@/layers/domain/diplomacy'
+import { commanderRole } from '@/layers/agents/roles/commander'
 import type {
   ParseCommandResult,
   ParsedCommand,
@@ -54,6 +67,10 @@ export default function CommandTerminal(): JSX.Element {
   const [draft, setDraft] = useState('')
   const [candidate, setCandidate] = useState<ParseCommandResult | null>(null)
   const [parsing, setParsing] = useState(false)
+
+  // 外交请求流程状态（M4-B）
+  const [diplomatic, setDiplomatic] = useState<DiplomaticRequestResult | null>(null)
+  const [diplomaticPending, setDiplomaticPending] = useState(false)
 
   const phase = context?.game.phase ?? 'idle'
 
@@ -133,6 +150,88 @@ export default function CommandTerminal(): JSX.Element {
     }
   }, [context])
 
+  /**
+   * 提交外交请求 → 盟友统帅（commander Agent）响应 → 信任度变化（M4-B）。
+   *
+   * 流程：
+   * 1. 推断请求类别（inferRequestKind）+ 定位盟友阵营。
+   * 2. 调 commander Agent.resolve 取 disobeying（盟友统帅抗命态）。
+   * 3. rollDiplomaticResponse：按盟友对玩家信任度 + 抗命决定 accept/reject/flake。
+   * 4. resolveDiplomaticResponse：结算信任度变化（履约 +8 / 毁约 -20）。
+   * 5. UI 展示请求卡片 + 响应结果 + 信任度变化。
+   *
+   * 信任度数值落盘由后续 orchestrator 统一处理（本流程仅展示 + 写 lastResolution 提示）。
+   */
+  const handleDiplomatic = useCallback(async (): Promise<void> => {
+    if (context === null) return
+    const input = draft.trim()
+    if (input.length === 0) return
+    const cur = useGameStore.getState().context
+    if (cur === null) return
+
+    const world = cur.game.world
+    const playerFaction = world.factions.find((f) => f.side === 'player')
+    const allyFaction = world.factions.find((f) => f.side === 'ally')
+    if (playerFaction === undefined || allyFaction === undefined) {
+      useGameStore.setState({ userError: '未找到玩家或盟友阵营，无法发起外交请求' })
+      return
+    }
+
+    setDiplomaticPending(true)
+    try {
+      const request: DiplomaticRequest = {
+        turn: world.turnIndex,
+        fromFactionId: playerFaction.id,
+        toFactionId: allyFaction.id,
+        kind: inferRequestKind(input),
+        text: input,
+      }
+
+      // 调盟友统帅 Agent 取 disobeying（信任度概率的输入之一）
+      const commanderResult = await commanderRole.resolve({
+        world,
+        factionId: allyFaction.id,
+        turn: world.turnIndex,
+        scenarioSeed: world.scenarioSeed,
+      })
+      const disobeying = commanderResult.disobeying
+
+      // 盟友对玩家的信任度（决定拒绝率/flake 概率）
+      const trustValue = allyFaction.trust[playerFaction.id] ?? 50
+      // 确定性随机：基于场景种子 + 回合（可回放）
+      const seedHash = hashSeed(world.scenarioSeed, world.turnIndex, input)
+      const rand = (seedHash % 1000) / 1000
+      const responseType: DiplomaticResponseType = rollDiplomaticResponse(
+        trustValue,
+        rand,
+        disobeying,
+      )
+
+      // 构造盟友统帅响应文本（mock 规则文本，LLM 接入后可替换）
+      const message = buildAllyMessage(responseType, disobeying, request.kind, trustValue)
+
+      // 构造 DiplomacyTrust 摘要（从 faction.trust 数值还原）
+      const trustRecord = {
+        trust: trustValue,
+        stance: inferStance(trustValue),
+        honoredCount: 0,
+        brokenCount: 0,
+        lastChangeTurn: 0,
+      } as DiplomaticRequestResult['trustAfter']
+      const result = resolveDiplomaticResponse(trustRecord, {
+        request,
+        type: responseType,
+        message,
+        disobeying,
+      })
+
+      setDiplomatic(result)
+      setDraft('')
+    } finally {
+      setDiplomaticPending(false)
+    }
+  }, [context, draft])
+
   // 未加载存档
   if (context === null) {
     return (
@@ -188,6 +287,36 @@ export default function CommandTerminal(): JSX.Element {
           onModify={handleModify}
         />
       )}
+
+      {/* 外交请求流程（M4-B）：玩家向盟友统帅发起请求，任何阶段可用 */}
+      <div className="command-terminal__diplomacy">
+        <h3>外交请求</h3>
+        <div className="command-terminal__input-row">
+          <input
+            type="text"
+            className="command-terminal__input"
+            placeholder="如：请求盟友空中支援 / 增援 / 情报共享"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={diplomaticPending}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !diplomaticPending && draft.trim().length > 0) {
+                void handleDiplomatic()
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void handleDiplomatic()}
+            disabled={diplomaticPending || draft.trim().length === 0 || context === null}
+          >
+            {diplomaticPending ? '请求中…' : '发起外交'}
+          </button>
+        </div>
+        {diplomatic !== null && (
+          <DiplomaticCard result={diplomatic} onDismiss={() => setDiplomatic(null)} />
+        )}
+      </div>
 
       {/* 已入队命令列表 */}
       {context.pendingOrders.length > 0 && (
@@ -288,6 +417,51 @@ function formatEnvelope(env: ActionEnvelope): string {
 // 子组件
 // ============================================================================
 
+/**
+ * 外交请求结果卡片（M4-B）。
+ *
+ * 展示：请求类别 + 玩家文本 → 盟友统帅响应（accept/reject/flake）+ 信任度变化提示。
+ */
+function DiplomaticCard({
+  result,
+  onDismiss,
+}: {
+  result: DiplomaticRequestResult
+  onDismiss: () => void
+}): JSX.Element {
+  const { response, trustAfter, delta, defectionRisk } = result
+  const color = responseColor(response.type)
+  const deltaText = delta > 0 ? `+${delta}` : `${delta}`
+  const kindName = describeRequestKind(response.request.kind)
+  return (
+    <div
+      className="command-terminal__diplomatic-card"
+      role="status"
+      style={{ borderColor: color }}
+    >
+      <div className="command-terminal__diplomatic-header">
+        <strong>{kindName}</strong>
+        <span style={{ color }}>{describeResponseType(response.type)}</span>
+      </div>
+      <p className="command-terminal__diplomatic-request">
+        「{response.request.text}」
+      </p>
+      <p className="command-terminal__diplomatic-message">{response.message}</p>
+      <div className="command-terminal__diplomatic-trust">
+        <span>信任度</span>
+        <strong style={{ color: delta > 0 ? '#4caf50' : delta < 0 ? '#e53935' : '#9e9e9e' }}>
+          {deltaText}
+        </strong>
+        <span>→ {trustAfter.trust}</span>
+        {defectionRisk && (
+          <span className="command-terminal__diplomatic-warn">（倒戈风险）</span>
+        )}
+      </div>
+      <button type="button" onClick={onDismiss}>知道了</button>
+    </div>
+  )
+}
+
 /** 候选命令卡片（玩家确认/修改） */
 function CandidateCard({
   command,
@@ -349,4 +523,48 @@ function ClarifyCard({
       <button type="button" onClick={onDismiss}>重新输入</button>
     </div>
   )
+}
+
+/**
+ * 确定性种子哈希（FNV-1a 变体），用于外交响应的确定性随机源。
+ *
+ * 同一 (scenarioSeed, turn, text) 永远产出同一 rand → 可回放。
+ */
+function hashSeed(scenarioSeed: string, turn: number, text: string): number {
+  let h = 2166136261
+  const str = `${scenarioSeed}:${turn}:${text}`
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return Math.abs(h)
+}
+
+/**
+ * 构造盟友统帅的响应文本（mock 规则文本，LLM 接入后可替换）。
+ *
+ * 绝不伪造承诺外的事实——文本仅描述响应类别与请求类别。
+ */
+function buildAllyMessage(
+  type: DiplomaticResponseType,
+  disobeying: boolean,
+  kind: DiplomaticRequest['kind'],
+  trustValue: number,
+): string {
+  const kindName = describeRequestKind(kind)
+  switch (type) {
+    case 'accept':
+      return `同意你的${kindName}请求。我们会全力配合。`
+    case 'reject':
+      if (trustValue < 30) {
+        return `恕难答应${kindName}请求。考虑到我们的关系，这并非易事。`
+      }
+      return `这次${kindName}请求我们无法配合，请谅解。`
+    case 'flake':
+      return disobeying
+        ? `虽答应${kindName}请求，但前线抗命，未能如期履约。`
+        : `答应${kindName}请求，但后勤受阻，未能兑现承诺。`
+    default:
+      return ''
+  }
 }

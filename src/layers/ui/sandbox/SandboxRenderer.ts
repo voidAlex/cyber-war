@@ -43,6 +43,14 @@ import {
   isMoveLikeOrder,
 } from './payload'
 import {
+  computeIntelRender,
+  ghostAlpha,
+  ghostLabel,
+  type IntelRenderDecision,
+  type IntelRenderMode,
+  getPlayerFactionId,
+} from './intel-visibility'
+import {
   GRID_LINE_ALPHA,
   GRID_LINE_COLOR,
   GRID_LINE_WIDTH,
@@ -67,6 +75,11 @@ import {
   TERRAIN_FALLBACK_COLOR,
   UNIT_BORDER_COLOR,
   UNIT_BORDER_WIDTH,
+  HEAT_PULSE_FILL_ALPHA,
+  HEAT_PULSE_RING_ALPHA,
+  INTEL_DASH_COLOR,
+  INTEL_DASH_WIDTH,
+  GHOST_LABEL_COLOR,
   factionColorToNumber,
 } from './theme'
 
@@ -81,6 +94,15 @@ export interface SandboxWorld {
   map: GameMap
   units: Unit[]
   factions: Faction[]
+  /**
+   * 观察方阵营 id（通常为玩家阵营）。敌方单位按此方对其的 IntelLevel 渲染。
+   * 缺省时回退取首个 side=player 阵营；仍无则全量渲染（无观察方）。
+   */
+  observerFactionId?: string
+  /** 当前回合索引（计算残影用）。缺省取 0。 */
+  currentTurn?: number
+  /** 情报半衰回合数（残影判定用）。缺省取 3。 */
+  halfLifeTurns?: number
 }
 
 /**
@@ -117,6 +139,9 @@ export class SandboxRenderer {
 
   /** 坐标标签独立 Text 集合（clear 时一并 destroy 释放纹理）。 */
   private labels: Text[] = []
+
+  /** 单位残影标签 [T-Nh] Text 集合（单位层重绘时清理释放）。 */
+  private ghostLabels: Text[] = []
 
   /** 当前世界快照（updateWorld 写入，redraw 读取）。 */
   private world: SandboxWorld | null = null
@@ -387,10 +412,16 @@ export class SandboxRenderer {
     }
   }
 
-  /** 重绘单位军标 + 强度条。 */
+  /** 重绘单位军标 + 强度条（按观察方情报级别渲染敌方，己方恒 L3）。 */
   private redrawUnits(): void {
     const g = this.unitGraphics
     g.clear()
+    // 清理上一轮残影标签（释放纹理）
+    for (const t of this.ghostLabels) {
+      this.unitLayer.removeChild(t)
+      t.destroy()
+    }
+    this.ghostLabels = []
 
     const world = this.world
     if (world === null) return
@@ -398,34 +429,109 @@ export class SandboxRenderer {
     const factionById = new Map<string, Faction>()
     for (const f of factions) factionById.set(f.id, f)
 
+    // 观察方确定：显式注入 > 首个 player 阵营；都无则全量渲染（无观察方）
+    const observerFactionId =
+      world.observerFactionId && world.observerFactionId.length > 0
+        ? world.observerFactionId
+        : getPlayerFactionId(factions)
+    const currentTurn = world.currentTurn ?? 0
+    const halfLifeTurns = world.halfLifeTurns ?? 3
+
     for (const unit of units) {
+      // 无观察方时（测试/空场景）：按己方全量渲染（不隐藏任何单位）
+      const decision: IntelRenderDecision =
+        observerFactionId.length === 0
+          ? {
+              unitId: unit.id,
+              mode: 'own' as IntelRenderMode,
+              level: 3,
+              ghost: false,
+              ghostTurns: 0,
+              staleTurns: 0,
+              lastSeenTurn: currentTurn,
+            }
+          : computeIntelRender(unit, observerFactionId, currentTurn, halfLifeTurns)
+
+      // L0 盲区：完全不显示（玩家不知道该单位存在）
+      if (decision.mode === 'hidden') continue
+
+      const alpha = ghostAlpha(decision)
       const faction = factionById.get(unit.factionId)
       const fill = factionColorToNumber(faction?.color)
       const { x, y } = cellCenter(unit.coord.col, unit.coord.row)
-      // 军标形状按 type 区分：装甲/炮兵用矩形，其余用圆形（M2 简易区分）
       const half = CELL_SIZE / 2 - 6
-      if (unit.type === 'armor' || unit.type === 'artillery') {
-        g.rect(x - half, y - half, half * 2, half * 2)
-          .fill({ color: fill })
-          .stroke({ color: UNIT_BORDER_COLOR, width: UNIT_BORDER_WIDTH })
-      } else {
+
+      // L1 热力脉冲：仅模糊色块（不画军标形状/类型/数值）
+      if (decision.mode === 'heat-pulse') {
+        // 半透明圆形热力块 + 脉冲外圈（两层同心圆暗示「热力」）
         g.circle(x, y, half)
-          .fill({ color: fill })
-          .stroke({ color: UNIT_BORDER_COLOR, width: UNIT_BORDER_WIDTH })
+          .fill({ color: fill, alpha: HEAT_PULSE_FILL_ALPHA * alpha })
+        g.circle(x, y, half + 2)
+          .stroke({ color: fill, width: 1.5, alpha: HEAT_PULSE_RING_ALPHA * alpha })
+        // 热力脉冲不显示类型/强度条/残影标签（仅模糊存在性）
+        continue
       }
 
-      // 强度条（单位下方）：背景 + 前景按 strength 比例
-      const ratio = clamp01(unit.strength / 100)
-      const barW = half * 2
-      const barH = 3
-      const barX = x - half
-      const barY = y + half + 2
-      g.rect(barX, barY, barW, barH).fill({ color: STRENGTH_BAR_BG })
-      const fgColor = ratio > 0.5 ? STRENGTH_COLOR_HIGH : STRENGTH_COLOR_LOW
-      g.rect(barX, barY, barW * ratio, barH).fill({ color: fgColor })
+      // L2 编制确认 / L3 全量透视 / 己方：画军标形状
+      const isFormation = decision.mode === 'formation'
+      if (unit.type === 'armor' || unit.type === 'artillery') {
+        g.rect(x - half, y - half, half * 2, half * 2)
+          .fill({ color: fill, alpha })
+          .stroke({
+            color: isFormation ? INTEL_DASH_COLOR : UNIT_BORDER_COLOR,
+            width: isFormation ? INTEL_DASH_WIDTH : UNIT_BORDER_WIDTH,
+            alpha,
+          })
+      } else {
+        g.circle(x, y, half)
+          .fill({ color: fill, alpha })
+          .stroke({
+            color: isFormation ? INTEL_DASH_COLOR : UNIT_BORDER_COLOR,
+            width: isFormation ? INTEL_DASH_WIDTH : UNIT_BORDER_WIDTH,
+            alpha,
+          })
+      }
 
-      // 诱饵/欺骗单位加虚线外框标记（M2 提示，情报规则在 M4 细化）
-      if (unit.deception === true) {
+      // L2 编制确认：用虚线描边覆盖（PIXI 8 stroke 无原生 dashed，补画虚线轮廓）
+      if (isFormation) {
+        drawDashedRect(g, x, y, half + 1, fill, alpha)
+      }
+
+      // 强度条：仅 L3/己方显示精确数值（L2 编制确认不显示血量）
+      if (decision.mode === 'full' || decision.mode === 'own') {
+        const ratio = clamp01(unit.strength / 100)
+        const barW = half * 2
+        const barH = 3
+        const barX = x - half
+        const barY = y + half + 2
+        g.rect(barX, barY, barW, barH).fill({ color: STRENGTH_BAR_BG })
+        const fgColor = ratio > 0.5 ? STRENGTH_COLOR_HIGH : STRENGTH_COLOR_LOW
+        g.rect(barX, barY, barW * ratio, barH).fill({ color: fgColor, alpha })
+      }
+
+      // 残影标签 [T-Nh]（仅 ghost 态）
+      if (decision.ghost) {
+        const label = ghostLabel(decision)
+        if (label.length > 0) {
+          const t = new Text({
+            text: label,
+            style: new TextStyle({
+              fontFamily: 'monospace',
+              fontSize: 9,
+              fill: GHOST_LABEL_COLOR,
+            }),
+          })
+          t.anchor.set(0.5, 0)
+          t.x = x
+          t.y = y - half - 12
+          t.alpha = alpha
+          this.unitLayer.addChild(t)
+          this.ghostLabels.push(t)
+        }
+      }
+
+      // 诱饵/欺骗单位：己方可见的虚线外框提示（仅 own/full 模式下提示）
+      if (unit.deception === true && (decision.mode === 'own' || decision.mode === 'full')) {
         drawDashedLine(
           g,
           x - half - 1,
@@ -436,11 +542,11 @@ export class SandboxRenderer {
           2,
           0xffffff,
           1,
-          0.8,
+          0.8 * alpha,
         )
       }
 
-      void unitKey // 保留 key 函数引用（M2 全量重画，预留增量优化）
+      void unitKey // 保留 key 函数引用（全量重画，预留增量优化）
     }
   }
 
@@ -517,4 +623,27 @@ function drawDashedLine(
       .stroke({ color, width, alpha })
     traveled += step
   }
+}
+
+/**
+ * 在 Graphics 上画一个虚线矩形边框（L2 编制确认军标用）。
+ *
+ * 四条边各用 drawDashedLine 画虚线，中心 (x,y)、半径 half。
+ */
+function drawDashedRect(
+  g: Graphics,
+  x: number,
+  y: number,
+  half: number,
+  color: number,
+  alpha: number,
+): void {
+  const left = x - half
+  const right = x + half
+  const top = y - half
+  const bottom = y + half
+  drawDashedLine(g, left, top, right, top, 4, 3, color, INTEL_DASH_WIDTH, alpha)
+  drawDashedLine(g, right, top, right, bottom, 4, 3, color, INTEL_DASH_WIDTH, alpha)
+  drawDashedLine(g, right, bottom, left, bottom, 4, 3, color, INTEL_DASH_WIDTH, alpha)
+  drawDashedLine(g, left, bottom, left, top, 4, 3, color, INTEL_DASH_WIDTH, alpha)
 }

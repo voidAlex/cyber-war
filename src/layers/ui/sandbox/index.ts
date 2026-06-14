@@ -37,3 +37,18 @@ export {
   readString,
 } from './payload'
 export { TERRAIN_COLORS, factionColorToNumber } from './theme'
+export {
+  computeIntelRender,
+  decideRenderMode,
+  ghostLabel,
+  ghostAlpha,
+  visibleFieldsFor,
+  listObservedEnemyUnits,
+  toIntelSnapshot,
+  getPlayerFactionId,
+  shouldRefreshOnRecon,
+} from './intel-visibility'
+export type {
+  IntelRenderMode,
+  IntelRenderDecision,
+} from './intel-visibility'

@@ -78,3 +78,22 @@ export {
   inferStance,
   buildDiplomacyEvent,
 } from './diplomacy'
+
+// 外交请求流程（M4-B：玩家→盟友统帅响应→信任度变化）
+export {
+  resolveDiplomaticResponse,
+  rollDiplomaticResponse,
+  describeRequestKind,
+  describeResponseType,
+  responseColor,
+  inferRequestKind,
+  HONOR_DELTA,
+  BREAK_DELTA,
+} from './diplomacy-request'
+export type {
+  DiplomaticRequestKind,
+  DiplomaticResponseType,
+  DiplomaticRequest,
+  DiplomaticResponse,
+  DiplomaticRequestResult,
+} from './diplomacy-request'

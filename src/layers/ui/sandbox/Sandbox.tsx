@@ -28,6 +28,7 @@ import {
   type SandboxWorld,
 } from './SandboxRenderer'
 import { CELL_SIZE, gridPixelSize } from './coords'
+import { getPlayerFactionId } from './intel-visibility'
 import type { CSSProperties } from 'react'
 
 /** 容器最小尺寸（避免 0×0 时 PixiJS 报错）。 */
@@ -86,9 +87,12 @@ export default function Sandbox(): JSX.Element {
       units: Unit[],
       factions: Faction[],
       pendingOrders: ActionEnvelope[],
+      currentTurn: number,
+      halfLifeTurns: number,
     ): void => {
+      const observerFactionId = getPlayerFactionId(factions)
       const world: SandboxWorld | null =
-        map === undefined ? null : { map, units, factions }
+        map === undefined ? null : { map, units, factions, observerFactionId, currentTurn, halfLifeTurns }
       renderer.updateWorld(world)
       renderer.updatePreview(pendingOrders)
     }
@@ -181,6 +185,8 @@ export default function Sandbox(): JSX.Element {
         initialCtx?.game.world.units ?? [],
         initialCtx?.game.world.factions ?? [],
         initialCtx?.pendingOrders ?? [],
+        initialCtx?.game.world.turnIndex ?? 0,
+        initialCtx?.game.world.intel.decayRule.halfLifeTurns ?? 3,
       )
       if (initialMap !== undefined) {
         resizeToContainer(initialMap.cols, initialMap.rows)
@@ -212,6 +218,8 @@ export default function Sandbox(): JSX.Element {
         world?.units ?? [],
         world?.factions ?? [],
         ctx?.pendingOrders ?? [],
+        world?.turnIndex ?? 0,
+        world?.intel.decayRule.halfLifeTurns ?? 3,
       )
       // 网格尺寸可能变（换存档/换战役），重算 hitArea + 居中
       if (map !== undefined) {
