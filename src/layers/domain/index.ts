@@ -77,7 +77,11 @@ export {
   isAtDefectionRisk,
   inferStance,
   buildDiplomacyEvent,
+  computeTrustTrend,
+  trustRecordFromValue,
+  RECENT_TREND_WINDOW,
 } from './diplomacy'
+export type { TrustTrend } from './diplomacy'
 
 // 外交请求流程（M4-B：玩家→盟友统帅响应→信任度变化）
 export {
@@ -89,6 +93,7 @@ export {
   inferRequestKind,
   HONOR_DELTA,
   BREAK_DELTA,
+  applyDiplomacyResultToFaction,
 } from './diplomacy-request'
 export type {
   DiplomaticRequestKind,

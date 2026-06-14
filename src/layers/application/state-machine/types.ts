@@ -89,7 +89,13 @@ export type StateMachineAction =
   | { type: 'CONFIRM_HANDSHAKE' } // handshake → locked
   | { type: 'LOCK_ORDERS' } // handshake → locked（命令锁定；与 CONFIRM_HANDSHAKE 等价，保留语义别名供 UI 选择）
   | { type: 'ENTER_RESOLUTION' } // locked → resolution
-  | { type: 'FINISH_RESOLUTION'; resolution: ResolutionSummary } // resolution → briefing
+  | {
+      type: 'FINISH_RESOLUTION'
+      resolution: ResolutionSummary
+      // M4-D 上下文压缩（每 5 回合）：可选的压缩产物，更新 worldState.contextSummaries。
+      // 仅当 shouldCompressContext(turn) 时由编排器注入；缺失时不改 contextSummaries。
+      contextSummary?: { turn: number; text: string }
+    } // resolution → briefing
   | { type: 'ENTER_PERSIST' } // briefing → persist
   | { type: 'PERSIST_COMPLETE' } // persist → idle（persist-gate 守卫此信号，置 persistCompleted=true）
   | { type: 'NEXT_TURN' } // idle → idle 且 turnIndex+1（受 persistCompleted 守卫）

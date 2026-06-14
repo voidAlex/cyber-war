@@ -17,6 +17,9 @@ import {
   isAtDefectionRisk,
   inferStance,
   buildDiplomacyEvent,
+  computeTrustTrend,
+  trustRecordFromValue,
+  RECENT_TREND_WINDOW,
   TRUST_MIN,
   TRUST_MAX,
   REJECT_RATE_THRESHOLD,
@@ -159,5 +162,52 @@ describe('阈值常量一致性', () => {
   it('常量与文档草案一致', () => {
     expect(REJECT_RATE_THRESHOLD).toBe(30)
     expect(DEFECTION_THRESHOLD).toBe(15)
+  })
+})
+
+describe('computeTrustTrend（趋势推断）', () => {
+  it('从未变动（lastChangeTurn=0）恒 stable', () => {
+    const trust = makeTrust({ honoredCount: 3, brokenCount: 0, lastChangeTurn: 0 })
+    expect(computeTrustTrend(trust, 1)).toBe('stable')
+    expect(computeTrustTrend(trust, 10)).toBe('stable')
+  })
+  it('近期履约多于毁约 → rising', () => {
+    const trust = makeTrust({ honoredCount: 2, brokenCount: 0, lastChangeTurn: 4 })
+    expect(computeTrustTrend(trust, 5)).toBe('rising')
+    // 刚好在窗口边界（recentChange === RECENT_TREND_WINDOW）
+    expect(computeTrustTrend(trust, 4 + RECENT_TREND_WINDOW)).toBe('rising')
+  })
+  it('近期毁约多于履约 → falling', () => {
+    const trust = makeTrust({ honoredCount: 0, brokenCount: 2, lastChangeTurn: 4 })
+    expect(computeTrustTrend(trust, 5)).toBe('falling')
+  })
+  it('履约毁约持平 → stable', () => {
+    const trust = makeTrust({ honoredCount: 1, brokenCount: 1, lastChangeTurn: 4 })
+    expect(computeTrustTrend(trust, 5)).toBe('stable')
+  })
+  it('超出近期窗口 → stable', () => {
+    const trust = makeTrust({ honoredCount: 5, brokenCount: 0, lastChangeTurn: 2 })
+    // recentChange = 5 - 2 = 3 > 2 窗口
+    expect(computeTrustTrend(trust, 5)).toBe('stable')
+  })
+})
+
+describe('trustRecordFromValue（兜底构造）', () => {
+  it('按数值构造记录，计数归零、趋势 stable', () => {
+    const rec = trustRecordFromValue(60)
+    expect(rec.trust).toBe(60)
+    expect(rec.stance).toBe('ally')
+    expect(rec.honoredCount).toBe(0)
+    expect(rec.brokenCount).toBe(0)
+    expect(rec.lastChangeTurn).toBe(0)
+    expect(computeTrustTrend(rec, 5)).toBe('stable')
+  })
+  it('显式 stance 覆盖推断', () => {
+    const rec = trustRecordFromValue(60, 'neutral')
+    expect(rec.stance).toBe('neutral')
+  })
+  it('钳制超界数值', () => {
+    expect(trustRecordFromValue(150).trust).toBe(100)
+    expect(trustRecordFromValue(-5).trust).toBe(0)
   })
 })

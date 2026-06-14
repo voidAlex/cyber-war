@@ -33,7 +33,8 @@ import { wegoReducer } from '@/layers/application/state-machine/reducer'
 import type { PersistenceService } from '@/layers/application/services/persistence-service'
 import type { PhysicsEngineClient } from '@/layers/application/services/worker-service'
 import type { ResolutionResult } from '@/layers/domain/combat'
-import type { DirectorRole } from '@/layers/agents/roles/director'
+import type { DirectorRole, ContextCompressor } from '@/layers/agents/roles/director'
+import { shouldCompressContext } from '@/layers/agents/roles/context-compression'
 
 /**
  * 编排器所需的副作用服务句柄（依赖注入，便于 mock 测试）。
@@ -52,6 +53,13 @@ export interface TurnOrchestratorServices {
   resolve?: (ctx: StateMachineContext, signal: AbortSignal) => Promise<{
     resolution: ResolutionSummary
     events: AgentAction[]
+    /**
+     * M4-D 上下文压缩产物（可选，每 5 回合）。
+     * 仅当 shouldCompressContext(turn) 时由 resolver 注入：
+     * 含 { turn, text }，编排器据此在 FINISH_RESOLUTION 更新 worldState.contextSummaries。
+     * 压缩事件已包含在 events 中（source:'rule-engine'，回放采信）。
+     */
+    contextSummary?: { turn: number; text: string }
   }>
 }
 
@@ -144,11 +152,14 @@ export async function advanceTurn(
 
   // resolution：调用结算服务（M1 空回合，产出空 ResolutionResult + 空 events）
   const resolve = services.resolve ?? defaultEmptyResolution
-  const { resolution, events } = await resolve(cur, signal)
+  const { resolution, events, contextSummary } = await resolve(cur, signal)
 
-  // resolution → briefing
-  cur = step(cur, { type: 'FINISH_RESOLUTION', resolution }, signal)
-  actions.push({ type: 'FINISH_RESOLUTION', resolution })
+  // resolution → briefing（M4-D：可选注入上下文压缩产物，更新 worldState.contextSummaries）
+  const finishAction: StateMachineAction = contextSummary
+    ? { type: 'FINISH_RESOLUTION', resolution, contextSummary }
+    : { type: 'FINISH_RESOLUTION', resolution }
+  cur = step(cur, finishAction, signal)
+  actions.push(finishAction)
 
   // briefing → persist
   cur = step(cur, { type: 'ENTER_PERSIST' }, signal)
@@ -188,7 +199,11 @@ export async function advanceTurn(
 async function defaultEmptyResolution(
   ctx: StateMachineContext,
   _signal: AbortSignal,
-): Promise<{ resolution: ResolutionSummary; events: AgentAction[] }> {
+): Promise<{
+  resolution: ResolutionSummary
+  events: AgentAction[]
+  contextSummary?: { turn: number; text: string }
+}> {
   const resolution: ResolutionSummary = {
     turn: ctx.game.world.turnIndex,
     casualties: {},
@@ -223,6 +238,15 @@ async function defaultEmptyResolution(
 export function createDefaultResolver(
   workerService: PhysicsEngineClient,
   director: DirectorRole,
+  /**
+   * M4-D 上下文压缩器（可选，每 5 回合触发）。
+   * 注入后，当 shouldCompressContext(turn) 时产出压缩产物（事件 + 新 contextSummaries）。
+   * 落盘（写 factions/{factionId}/context-summary.md）经 writeFactionFile 完成。
+   */
+  compressionDeps?: {
+    compressor: ContextCompressor
+    writeFactionFile: (factionId: string, content: string) => Promise<void>
+  },
 ): NonNullable<TurnOrchestratorServices['resolve']> {
   return async (ctx, _signal) => {
     const world = ctx.game.world
@@ -249,10 +273,29 @@ export function createDefaultResolver(
       turn,
     })
 
-    // 4. 返回战报摘要 + 事件（落盘 event-log，source:'physics'）
+    const events: AgentAction[] = [...directorResult.directorEvents]
+    let contextSummary: { turn: number; text: string } | undefined
+
+    // 4. M4-D 上下文压缩（每 5 回合，TDD §3.6）
+    if (compressionDeps && shouldCompressContext(turn)) {
+      const { summary, event } = await compressionDeps.compressor.compress(
+        world,
+        world.scenarioSeed,
+        turn,
+      )
+      // 落盘 context-summary.md 到每个阵营目录（经 gateway fs_write_faction_file）
+      for (const f of world.factions) {
+        await compressionDeps.writeFactionFile(f.id, summary)
+      }
+      events.push(event)
+      contextSummary = { turn, text: summary }
+    }
+
+    // 5. 返回战报摘要 + 事件（落盘 event-log，source:'physics'）+ 可选压缩产物
     return {
       resolution: directorResult.resolutionSummary,
-      events: directorResult.directorEvents,
+      events,
+      contextSummary,
     }
   }
 }
@@ -291,6 +334,15 @@ export interface MultiAgentResolverDeps {
   onProgress?: (entry: TurnResolutionProgress) => void
   /** 流式战报增量回调（可选）：透传给导演部 streamTextWithDeltas。 */
   onReportChunk?: (chunk: string) => void
+  /**
+   * M4-D 上下文压缩（可选，每 5 回合 TDD §3.6）。
+   * 注入后，当 shouldCompressContext(turn) 时产出压缩产物。
+   * 落盘（写 factions/{factionId}/context-summary.md）经 writeFactionFile 完成。
+   */
+  compressionDeps?: {
+    compressor: ContextCompressor
+    writeFactionFile: (factionId: string, content: string) => Promise<void>
+  }
 }
 
 /**
@@ -336,9 +388,27 @@ export function createMultiAgentResolver(
       : result.resolution
 
     // 事件直接采用编排器产出（已按 source 分源标记）。
+    const events: AgentAction[] = [...result.events]
+    let contextSummary: { turn: number; text: string } | undefined
+
+    // M4-D 上下文压缩（每 5 回合，TDD §3.6）
+    if (deps.compressionDeps && shouldCompressContext(world.turnIndex)) {
+      const { summary, event } = await deps.compressionDeps.compressor.compress(
+        world,
+        world.scenarioSeed,
+        world.turnIndex,
+      )
+      for (const f of world.factions) {
+        await deps.compressionDeps.writeFactionFile(f.id, summary)
+      }
+      events.push(event)
+      contextSummary = { turn: world.turnIndex, text: summary }
+    }
+
     return {
       resolution,
-      events: result.events,
+      events,
+      contextSummary,
     }
   }
 }

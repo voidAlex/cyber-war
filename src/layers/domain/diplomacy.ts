@@ -173,3 +173,63 @@ export function buildDiplomacyEvent(
 ): DiplomacyEvent {
   return { turn, fromFactionId, toFactionId, kind, delta, trustAfter }
 }
+
+/**
+ * 信任度趋势类别（供 UI 渲染与 director 提示）。
+ *
+ * - rising：近期履约多于毁约，信任度上升
+ * - stable：近期无变动或履约/毁约持平
+ * - falling：近期毁约多于履约，信任度下降
+ */
+export type TrustTrend = 'rising' | 'stable' | 'falling'
+
+/**
+ * 根据信任度记录推断趋势（M4-D 激活，纯函数）。
+ *
+ * 推断规则（基于 DiplomacyTrust 持久化字段）：
+ * - 若 lastChangeTurn 为 0（从未变动）或距当前回合 > RECENT_TREND_WINDOW(2)：stable。
+ * - 否则按 honoredCount/brokenCount 比较：honored > broken → rising；
+ *   broken > honored → falling；持平 → stable。
+ *
+ * 数值锚而非纯随机漂移（重写计划修订点 C 同源思想）。
+ *
+ * @param trust 信任度记录（DiplomacyTrust）
+ * @param currentTurn 当前回合
+ */
+export const RECENT_TREND_WINDOW = 2
+
+export function computeTrustTrend(
+  trust: DiplomacyTrust,
+  currentTurn: number,
+): TrustTrend {
+  const recentChange = currentTurn - trust.lastChangeTurn
+  // 从未变动（lastChangeTurn===0）或近期窗口外：稳定
+  if (trust.lastChangeTurn === 0 || recentChange > RECENT_TREND_WINDOW) {
+    return 'stable'
+  }
+  if (trust.honoredCount > trust.brokenCount) return 'rising'
+  if (trust.brokenCount > trust.honoredCount) return 'falling'
+  return 'stable'
+}
+
+/**
+ * 从信任度数值 + stance 兜底构造 DiplomacyTrust 记录（无历史记录时用）。
+ *
+ * 当阵营 trustRecords 缺失某 key 时，以此构造一份默认记录，
+ * 保证 computeTrustTrend 等富语义函数可用（趋势恒为 stable）。
+ *
+ * @param trustValue 信任度数值
+ * @param stance 关系分类（默认按数值推断）
+ */
+export function trustRecordFromValue(
+  trustValue: number,
+  stance: DiplomaticStance = inferStance(trustValue),
+): DiplomacyTrust {
+  return {
+    trust: clampTrust(trustValue),
+    stance,
+    honoredCount: 0,
+    brokenCount: 0,
+    lastChangeTurn: 0,
+  }
+}

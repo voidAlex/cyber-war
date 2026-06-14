@@ -8,6 +8,8 @@
  * @module types/faction
  */
 
+import type { DiplomacyTrust } from './diplomacy'
+
 /**
  * 阵营立场（决定控制方与外交倾向）。
  *
@@ -82,6 +84,15 @@ export interface Faction {
    * 详细记录见 DiplomacyTrust，此处仅存数值用于快速渲染。
    */
   trust: Record<string, number>
+  /**
+   * 对外信任度富语义记录（M4-D 外交趋势持久化）：key=对方 factionId。
+   *
+   * 与 `trust` 数值并行——`trust` 保留快速渲染数值，`trustRecords` 持久化
+   * honoredCount/brokenCount/lastChangeTurn/stance 等趋势推断所需字段。
+   * 缺失某 key 时由 domain/infrastructure 兜底构造（以 `trust` 数值 + 默认 stance）。
+   * 可选字段：旧存档/无外交交互的阵营可省略。
+   */
+  trustRecords?: Record<string, DiplomacyTrust>
   /** 学说标签（阵营级，汇总各指挥官 doctrineTags） */
   doctrineTags: string[]
   /** 阵营描述（可选） */

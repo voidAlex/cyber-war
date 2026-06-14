@@ -16,11 +16,11 @@ import {
   computeRejectRate,
   isAtDefectionRisk,
   inferStance,
+  computeTrustTrend,
+  trustRecordFromValue,
 } from '@/layers/domain/diplomacy'
-import type { Faction } from '@/types'
-
-/** 信任度趋势类别 */
-type TrustTrend = 'rising' | 'stable' | 'falling'
+import type { Faction, DiplomacyTrust } from '@/types'
+import type { TrustTrend } from '@/layers/domain/diplomacy'
 
 /** 关系分类中文 */
 const STANCE_NAMES: Record<string, string> = {
@@ -28,31 +28,6 @@ const STANCE_NAMES: Record<string, string> = {
   neutral: '中立',
   enemy: '敌对',
   war: '交战',
-}
-
-/**
- * 推断信任度趋势（基于 DiplomacyTrust 摘要字段，纯函数）。
- *
- * - 若最近变动在 2 回合内：honoredCount > brokenCount → rising；反之 falling。
- * - 否则 stable（近期无变动或履约/毁约持平）。
- *
- * @param honoredCount 累计履约次数
- * @param brokenCount 累计毁约次数
- * @param lastChangeTurn 最近变动回合
- * @param currentTurn 当前回合
- */
-function computeTrustTrend(
-  honoredCount: number,
-  brokenCount: number,
-  lastChangeTurn: number,
-  currentTurn: number,
-): TrustTrend {
-  const recentChange = currentTurn - lastChangeTurn
-  // 近期（<=2 回合）有变动才判定方向
-  if (recentChange > 2 || lastChangeTurn === 0) return 'stable'
-  if (honoredCount > brokenCount) return 'rising'
-  if (brokenCount > honoredCount) return 'falling'
-  return 'stable'
 }
 
 /** 趋势符号 */
@@ -112,9 +87,11 @@ export default function DiplomacyPanel(): JSX.Element {
       // 对方阵营对玩家的信任度（决定对方是否响应玩家请求）
       const trustValue = f.trust[playerFactionId] ?? 0
       const stance = inferStance(trustValue)
-      // DiplomacyTrust 的 honored/brokenCount 摘要：当前 WorldState 未持久化，
-      // 用 faction.trust 数值 + lastChangeTurn 近似（M4-B 简化：趋势用 lastChangeTurn 推断）
-      const trend = computeTrustTrend(0, 0, 0, currentTurn)
+      // M4-D：从持久化的 trustRecords 读取富语义记录推断趋势；
+      // 缺失时用 trustRecordFromValue 兜底（趋势恒 stable）。
+      const record: DiplomacyTrust =
+        f.trustRecords?.[playerFactionId] ?? trustRecordFromValue(trustValue, stance)
+      const trend = computeTrustTrend(record, currentTurn)
       const rejectRate = computeRejectRate(trustValue)
       const defectionRisk = isAtDefectionRisk(trustValue)
       return {
@@ -124,7 +101,7 @@ export default function DiplomacyPanel(): JSX.Element {
         trend,
         rejectRate,
         defectionRisk,
-        lastChangeTurn: 0, // 当前 schema 未持久化 lastChangeTurn，预留
+        lastChangeTurn: record.lastChangeTurn,
       }
     })
 

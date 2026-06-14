@@ -27,6 +27,7 @@ import {
 import type {
   DiplomacyTrust,
   DiplomacyEvent,
+  Faction,
 } from '@/types'
 
 /**
@@ -161,6 +162,35 @@ export function resolveDiplomaticResponse(
     delta,
     event,
     defectionRisk: isAtDefectionRisk(trustAfter.trust),
+  }
+}
+
+/**
+ * 把外交结算结果应用回阵营（更新 faction.trust 数值 + trustRecords 富语义记录）。
+ *
+ * M4-D 外交趋势持久化：调用方（编排器/CommandTerminal）在 resolveDiplomaticResponse
+ * 后调本函数，把 trustAfter（DiplomacyTrust）落回 faction，使 DiplomacyPanel 能
+ * 显示真实趋势（computeTrustTrend 读 honoredCount/brokenCount/lastChangeTurn）。
+ *
+ * 纯函数：返回新 faction（不可变产出），不原地改。
+ *
+ * @param faction 待更新的阵营（toFaction，即信任度记录的持有方）
+ * @param result 外交结算结果（含 trustAfter）
+ * @param fromFactionId 信任度的对方（玩家）factionId（trustRecords 的 key）
+ * @returns 更新后的新 faction（trust + trustRecords 同步更新）
+ */
+export function applyDiplomacyResultToFaction(
+  faction: Faction,
+  result: DiplomaticRequestResult,
+  fromFactionId: string,
+): Faction {
+  const trustValue = result.trustAfter.trust
+  const trustRecords = { ...(faction.trustRecords ?? {}) }
+  trustRecords[fromFactionId] = result.trustAfter
+  return {
+    ...faction,
+    trust: { ...faction.trust, [fromFactionId]: trustValue },
+    trustRecords,
   }
 }
 

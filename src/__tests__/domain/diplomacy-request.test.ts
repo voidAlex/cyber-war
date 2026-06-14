@@ -15,13 +15,14 @@ import {
   describeRequestKind,
   describeResponseType,
   responseColor,
+  applyDiplomacyResultToFaction,
   HONOR_DELTA,
   BREAK_DELTA,
   type DiplomaticRequest,
   type DiplomaticResponse,
   type DiplomaticResponseType,
 } from '@/layers/domain/diplomacy-request'
-import type { DiplomacyTrust } from '@/types'
+import type { DiplomacyTrust, Faction } from '@/types'
 
 /** 构造信任度记录 */
 function makeTrust(overrides: Partial<DiplomacyTrust> = {}): DiplomacyTrust {
@@ -170,5 +171,75 @@ describe('describeRequestKind / describeResponseType / responseColor', () => {
     expect(responseColor('accept')).toBe('#4caf50')
     expect(responseColor('reject')).toBe('#9e9e9e')
     expect(responseColor('flake')).toBe('#e53935')
+  })
+})
+
+describe('applyDiplomacyResultToFaction（信任度记录持久化）', () => {
+  /** 构造最小阵营（含 trust 数值，无 trustRecords） */
+  function makeFaction(overrides: Partial<Faction> = {}): Faction {
+    return {
+      id: 'ally',
+      name: '盟友',
+      color: '#0F0',
+      side: 'ally',
+      commander: {
+        id: 'c1', name: '指挥官', personality: '', aggression: 0.5,
+        obedience: 0.5, preferredTempo: 'balanced', doctrineTags: [],
+      },
+      theaterCommanders: [],
+      supply: { supplies: 80, ammunition: 80, fuel: 80 },
+      trust: { player: 60 },
+      doctrineTags: [],
+      ...overrides,
+    }
+  }
+
+  it('履约：trust 数值 + trustRecords 同步更新（honoredCount+1）', () => {
+    const faction = makeFaction()
+    const response = makeResponse({ type: 'accept' })
+    const result = resolveDiplomaticResponse(makeTrust({ trust: 60 }), response)
+    const updated = applyDiplomacyResultToFaction(faction, result, 'player')
+    // trust 数值更新
+    expect(updated.trust['player']).toBe(result.trustAfter.trust)
+    // trustRecords 富语义记录更新（honoredCount 累加）
+    expect(updated.trustRecords).toBeDefined()
+    expect(updated.trustRecords!['player'].honoredCount).toBe(1)
+    expect(updated.trustRecords!['player'].brokenCount).toBe(0)
+    expect(updated.trustRecords!['player'].trust).toBe(result.trustAfter.trust)
+  })
+
+  it('毁约：brokenCount+1', () => {
+    const faction = makeFaction()
+    const response = makeResponse({ type: 'flake' })
+    const result = resolveDiplomaticResponse(makeTrust({ trust: 60 }), response)
+    const updated = applyDiplomacyResultToFaction(faction, result, 'player')
+    expect(updated.trustRecords!['player'].brokenCount).toBe(1)
+    expect(updated.trustRecords!['player'].honoredCount).toBe(0)
+  })
+
+  it('不可变：不原地改输入 faction', () => {
+    const faction = makeFaction()
+    const response = makeResponse({ type: 'accept' })
+    const result = resolveDiplomaticResponse(makeTrust({ trust: 60 }), response)
+    applyDiplomacyResultToFaction(faction, result, 'player')
+    // 原对象的 trustRecords 仍为 undefined（未被原地添加）
+    expect(faction.trustRecords).toBeUndefined()
+    expect(faction.trust['player']).toBe(60)
+  })
+
+  it('保留其他对方阵营的信任记录', () => {
+    const faction = makeFaction({
+      trust: { player: 60, enemy: 5 },
+      trustRecords: {
+        enemy: { trust: 5, stance: 'enemy', honoredCount: 0, brokenCount: 2, lastChangeTurn: 3 },
+      },
+    })
+    const response = makeResponse({ type: 'accept' })
+    const result = resolveDiplomaticResponse(makeTrust({ trust: 60 }), response)
+    const updated = applyDiplomacyResultToFaction(faction, result, 'player')
+    // enemy 记录保留，player 记录新增
+    expect(updated.trustRecords!['enemy'].brokenCount).toBe(2)
+    expect(updated.trustRecords!['player']).toBeDefined()
+    expect(updated.trust['enemy']).toBe(5)
   })
 })

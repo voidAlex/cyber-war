@@ -160,9 +160,21 @@ export function wegoReducer(
 
     case 'FINISH_RESOLUTION': {
       // resolution → briefing（写入结算结果；M1 空回合 events 为空但仍走完）
+      // M4-D：可选注入上下文压缩产物，更新 worldState.contextSummaries（新 L2 稳定前缀）
+      const summary = action.contextSummary
+      const world =
+        summary !== undefined
+          ? {
+              ...ctx.game.world,
+              contextSummaries: {
+                ...ctx.game.world.contextSummaries,
+                [summary.turn]: summary.text,
+              },
+            }
+          : ctx.game.world
       const next: StateMachineContext = {
         ...ctx,
-        game: { ...ctx.game, phase: 'briefing' },
+        game: { ...ctx.game, phase: 'briefing', world },
         lastResolution: action.resolution,
         error: null,
       }

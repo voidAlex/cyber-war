@@ -38,11 +38,29 @@ export type {
   CommanderResolvedDecision,
   LlmCommanderRole,
 } from './commander'
-export { directorRole, createDirectorRole, createLlmDirectorRole } from './director'
+export { directorRole, createDirectorRole, createLlmDirectorRole, createDefaultContextCompressor } from './director'
 export type {
   DirectorRole,
   DirectorAdjudicateParams,
   DirectorAdjudicateResult,
+  ContextCompressionOutput,
+  ContextCompressor,
   LlmDirectorRole,
 } from './director'
 export type { LlmCallConfig } from './llm-role-base'
+
+// 上下文压缩（M4-D，TDD §3.6 每 5 回合压缩）
+export {
+  CONTEXT_COMPRESSION_INTERVAL,
+  CONTEXT_COMPRESSION_WINDOW,
+  shouldCompressContext,
+  compressionWindowStart,
+  generateRuleEngineSummary,
+  compressContextWithRuleEngine,
+  applyContextSummary,
+} from './context-compression'
+export type {
+  ContextSummarySource,
+  ContextSummaryResult,
+  CompressContextParams,
+} from './context-compression'

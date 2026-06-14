@@ -23,6 +23,7 @@ import type {
 import { saveRepository } from '@/layers/persistence/repository'
 import { validateCampaignPayload } from '@/layers/persistence/campaign-zip'
 import { verdunCampaign } from '@/data/verdun-1916'
+import { trustRecordFromValue } from '@/layers/domain/diplomacy'
 
 // =============================================================================
 // 跨文件一致性校验（schema 层之上的引用完整性）
@@ -157,6 +158,13 @@ export function buildInitialWorldState(
       .map((id) => commanderById.get(id))
       .filter((c): c is NonNullable<typeof c> => c !== undefined)
       .map((c) => toCommanderProfile(c))
+    // M4-D：trust 数值 + 并行 trustRecords 富语义记录。
+    // 开局按 trust 数值兜底构造（honored/broken=0、lastChangeTurn=0），趋势恒 stable。
+    const trustNums = { ...(f.trust ?? {}) }
+    const trustRecords: NonNullable<Faction['trustRecords']> = {}
+    for (const [otherId, value] of Object.entries(trustNums)) {
+      trustRecords[otherId] = trustRecordFromValue(value)
+    }
     return {
       id: f.id,
       name: f.name,
@@ -165,7 +173,8 @@ export function buildInitialWorldState(
       commander: toCommanderProfile(commander),
       theaterCommanders,
       supply: { ...f.supply },
-      trust: { ...(f.trust ?? {}) },
+      trust: trustNums,
+      trustRecords,
       doctrineTags: [...f.doctrineTags],
       description: f.description,
     }

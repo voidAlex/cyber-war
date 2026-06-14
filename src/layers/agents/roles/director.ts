@@ -37,6 +37,10 @@ import {
 import { parseLLMJson } from '@/layers/agents/protocol/schema'
 import { LlmJsonParseError } from '@/layers/agents/protocol/schema'
 import { isLlmCallError } from './role-errors'
+import {
+  generateRuleEngineSummary,
+  applyContextSummary,
+} from './context-compression'
 
 /**
  * 导演部终裁入参（M3 接 LLM 时在此扩展 prompt 上下文）。
@@ -98,6 +102,33 @@ export interface DirectorRole {
   adjudicate(params: DirectorAdjudicateParams): Promise<DirectorAdjudicateResult>
 }
 
+/** 压缩上下文产物（ContextCompressor.compress 返回） */
+export interface ContextCompressionOutput {
+  /** 摘要文本（~500 tokens） */
+  summary: string
+  /** 压缩事件（入 event-log，回放采信） */
+  event: AgentAction
+  /** 更新后的 contextSummaries（深拷贝 + 追加本轮 summary） */
+  contextSummaries: Record<number, string>
+}
+
+/**
+ * 上下文压缩器（TDD §3.6，每 5 回合 briefing 阶段）。
+ *
+ * 独立于 DirectorRole（避免在 DirectorRole 上加方法破坏既有 mock）。
+ * 编排器在 briefing 阶段当 shouldCompressContext(turn) 时调用。
+ *
+ * 默认实现 compressContextWithRuleEngine（规则引擎模板，source:'rule-engine'）。
+ * 落盘（写 factions/{factionId}/context-summary.md）由编排器经 gateway 完成。
+ */
+export interface ContextCompressor {
+  compress(
+    world: WorldState,
+    scenarioSeed: string,
+    turn: number,
+  ): Promise<ContextCompressionOutput>
+}
+
 /**
  * 创建 M2 mock 导演部（直接采信物理结果）。
  *
@@ -107,6 +138,20 @@ export function createDirectorRole(): DirectorRole {
   return {
     async adjudicate(params) {
       return adjudicateMock(params)
+    },
+  }
+}
+
+/**
+ * 创建默认上下文压缩器（规则引擎模板，source:'rule-engine'）。
+ *
+ * 编排器在 briefing 阶段当 shouldCompressContext(turn) 时调用。
+ * 落盘（写 factions/{factionId}/context-summary.md）由编排器经 gateway 完成。
+ */
+export function createDefaultContextCompressor(): ContextCompressor {
+  return {
+    async compress(world, scenarioSeed, turn) {
+      return compressContextMock(world, scenarioSeed, turn)
     },
   }
 }
@@ -394,6 +439,48 @@ function adjudicateMock(params: DirectorAdjudicateParams): DirectorAdjudicateRes
   const directorEvents = physicsEventsToAgentActions(finalResult.events, scenarioSeed, turn)
 
   return { finalResult, resolutionSummary, directorEvents }
+}
+
+/**
+ * 上下文压缩（M4-D，TDD §3.6 每 5 回合）。
+ *
+ * 规则引擎模板产出 ~500 tokens 态势总结（source:'rule-engine'，稳定可回放）：
+ * 1. generateRuleEngineSummary 汇总近 {WINDOW} 回合关键事件 + 阵营态势 + 节点控制。
+ * 2. applyContextSummary 产出新 contextSummaries（不可变）。
+ * 3. 压缩事件标 source:'rule-engine'，sequence 用 director 段位 3999（回放采信）。
+ *
+ * 落盘（写 factions/{factionId}/context-summary.md）由编排器经 gateway 完成
+ * （本方法不直接调 Tauri；保持纯逻辑边界）。
+ */
+async function compressContextMock(
+  world: WorldState,
+  scenarioSeed: string,
+  turn: number,
+): Promise<ContextCompressionOutput> {
+  const summary = generateRuleEngineSummary(world, turn)
+  const newWorld = applyContextSummary(world, turn, summary)
+  // 压缩事件（source:'rule-engine'，回放采信；sequence 用 director 段位 3999）
+  const sequence = 3999
+  const event: AgentAction = {
+    id: `evt:${sequence}:context-summary:${turn}`,
+    turn,
+    agentId: 'director-rule-engine',
+    agentRole: 'director',
+    kind: 'report',
+    source: 'rule-engine',
+    payload: {
+      kind: 'report',
+      keyEvents: [`上下文压缩：第 ${turn} 回合态势总结（~500 tokens）`],
+    },
+    text: summary,
+    sequence,
+    seed: `${scenarioSeed}:${turn}:${sequence}`,
+  }
+  return {
+    summary,
+    event,
+    contextSummaries: newWorld.contextSummaries,
+  }
 }
 
 /**
