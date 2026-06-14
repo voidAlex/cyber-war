@@ -40,6 +40,7 @@ import {
 } from '@/layers/domain/diplomacy-request'
 import { inferStance } from '@/layers/domain/diplomacy'
 import { commanderRole } from '@/layers/agents/roles/commander'
+import { logger } from '@/utils/logger'
 import type {
   ParseCommandResult,
   ParsedCommand,
@@ -102,6 +103,12 @@ export default function CommandTerminal(): JSX.Element {
         cur = useGameStore.getState().context!
       }
 
+      logger.info('ui/command/parse', '参谋解析命令', {
+        scope: 'save',
+        saveId: cur.game.world.saveId,
+        turn: cur.game.world.turnIndex,
+        useLlm: buildLlmCallConfig() !== null,
+      })
       // 角色选择：解锁用真 LLM chief，未解锁用 mock（与 advance 同源决策）
       // createLlmChiefRole 内部 LLM 失败自动回退 mock，绝不让游戏卡死。
       const llmConfig = buildLlmCallConfig()
@@ -114,6 +121,11 @@ export default function CommandTerminal(): JSX.Element {
         playerFactionId: getPlayerFactionId(cur.game.world),
       })
       setCandidate(result)
+      logger.debug('ui/command/parse_done', `解析结果: ${result.kind}`, {
+        scope: 'save',
+        saveId: cur.game.world.saveId,
+        resultKind: result.kind,
+      })
     } finally {
       setParsing(false)
     }
@@ -158,6 +170,12 @@ export default function CommandTerminal(): JSX.Element {
     try {
       const next = lockOrders(cur)
       useGameStore.setState({ context: next, userError: null })
+      logger.info('ui/command/lock', '玩家锁定命令进入结算', {
+        scope: 'save',
+        saveId: cur.game.world.saveId,
+        turn: cur.game.world.turnIndex,
+        orderCount: cur.pendingOrders.length,
+      })
     } catch (err) {
       useGameStore.setState({ userError: (err as Error).message })
     }

@@ -112,6 +112,18 @@ export function fsAppendDiagnostics(saveId: string, line: string): Promise<void>
   return invoke<void>('fs_append_diagnostics', { saveId, line })
 }
 
+/**
+ * 真追加一行到全局应用日志 `<app_data_dir>/logs/app.log`（跨存档）。
+ *
+ * 用于跨存档的全局事件（启动、配置加载/降级/legacy、致命错误、未捕获异常），
+ * 与存档级 diagnostics.log 互补。零业务逻辑：Rust 仅 ensure logs 目录 + 追加。
+ * 安全：line 由前端 logger 脱敏后序列化的 JSON，Rust 不解析内容。
+ */
+export function fsAppendAppLog(line: string): Promise<void> {
+  if (isWebMode()) return webFs.fsAppendAppLog(line)
+  return invoke<void>('fs_append_app_log', { line })
+}
+
 /** 原子写入 manifest.json。 */
 export function fsWriteManifest(saveId: string, content: string): Promise<void> {
   if (isWebMode()) return webFs.fsWriteManifest(saveId, content)

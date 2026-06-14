@@ -37,9 +37,19 @@ LLM 驱动的硬核大战略战争策略游戏，Tauri 2 桌面应用，**完全
 src-tauri/        Rust 后端：fs/(原子写/真追加) llm/(router/stream/guard) keyring_store/(OS凭证库存取+降级)
 src/layers/       六层：ui(application(domain(agents(persistence(gateway
 src/types/        前后端权威类型契约
+src/utils/        logger.ts（统一日志：console + best-effort 落 app.log/diagnostics.log）
 src/workers/      physics.worker.ts（物理引擎，隔离主线程）
 doc/              PRD/TDD 权威蓝图（只读，不动）
 ```
+
+## 日志（排查问题用）
+
+统一 logger（`src/utils/logger.ts`）：`logger.info/warn/error(category, message, {scope, saveId, turn, ...})`，
+console + best-effort 落盘（脱敏 apiKey/payload/Bearer/token，绝不写明文 key；失败只 console.warn 不阻塞）。
+
+- **全局 `logs/app.log`**（跨存档）：启动、配置加载/降级/legacy、致命错误、未捕获异常。
+- **存档 `saves/<saveId>/diagnostics.log`**：回合编排、Agent 批次、物理、LLM、用户操作。
+- 桌面端路径与让用户提供日志的步骤见 `doc/packaging.md` §6。
 
 ## 里程碑
 

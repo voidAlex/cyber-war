@@ -17,7 +17,7 @@ use tauri::{ipc::Channel, AppHandle, State};
 use crate::error::AppError;
 use crate::fs::{
     self,
-    paths::{config_files, files, SaveDir},
+    paths::{config_files, files, log_files, SaveDir},
 };
 use crate::keyring_store::{self, KeyBackend};
 use crate::llm::{self, ForwardRequest, LlmFinalResult, LlmStreamEvent, ProviderKind};
@@ -209,6 +209,27 @@ pub async fn fs_append_diagnostics(
     let dir = save_dir(&app, &save_id)?;
     ensure_dir(&dir.dir)?;
     let path = dir.diagnostics();
+    tokio::task::spawn_blocking(move || fs::append_line(&path, &line))
+        .await
+        .map_err(|e| AppError::Fs(format!("任务调度失败: {e}")))??;
+    Ok(())
+}
+
+/// 真追加一行到全局应用日志 `<app_data_dir>/logs/app.log`（跨存档）。
+///
+/// 用于跨存档的全局事件（应用启动、配置加载/降级/legacy、致命错误、未捕获异常），
+/// 与存档级 `diagnostics.log` 互补（后者写存档内状态/Agent/物理/LLM 事件）。
+///
+/// 零业务逻辑：仅 ensure logs 目录 + 追加一行（前端序列化好的 JSON）。
+/// 安全：本命令不解析 line 内容；脱敏由前端 logger 在序列化前完成。
+#[tauri::command]
+pub async fn fs_append_app_log(
+    app: AppHandle,
+    line: String,
+) -> Result<(), AppError> {
+    let logs_root = fs::resolve_logs_root(&app)?;
+    ensure_dir(&logs_root)?;
+    let path = build_app_log_path(&logs_root);
     tokio::task::spawn_blocking(move || fs::append_line(&path, &line))
         .await
         .map_err(|e| AppError::Fs(format!("任务调度失败: {e}")))??;
@@ -614,6 +635,13 @@ fn ensure_dir(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
+/// 拼装全局应用日志文件路径：`<logs_root>/app.log`（纯函数，便于单测）。
+///
+/// 抽成独立函数以便在无 AppHandle 的单测中验证路径拼装正确性。
+fn build_app_log_path(logs_root: &Path) -> PathBuf {
+    logs_root.join(log_files::APP_LOG)
+}
+
 /// ZIP 解包的 zip-slip 防御核心（纯函数，便于单测）。
 ///
 /// 给定 sandbox、其 canonicalize 路径、一个 ZIP entry 名（已由 `enclosed_name` 规范化），
@@ -739,6 +767,43 @@ mod tests {
         assert!(
             r.is_err(),
             "符号链接逃逸 sandbox 必须被 canonicalize 校验拒绝"
+        );
+    }
+
+    /// `build_app_log_path` 应拼出 `<logs_root>/app.log`。
+    #[test]
+    fn build_app_log_path_correct() {
+        let tmp = tempfile::tempdir().expect("创建 tempdir 失败");
+        let logs_root = tmp.path().join("logs");
+        let path = build_app_log_path(&logs_root);
+        assert_eq!(path, logs_root.join("app.log"));
+    }
+
+    /// 全局应用日志真追加语义：多次 append 顺序正确，文件自动创建。
+    ///
+    /// 验证 `fs_append_app_log` 的核心链路（ensure_dir + append_line）：
+    /// 模拟 logs 目录不存在时命令应自动创建并追加。
+    #[test]
+    fn app_log_append_creates_and_orders() {
+        let tmp = tempfile::tempdir().expect("创建 tempdir 失败");
+        let logs_root = tmp.path().join("logs");
+        // logs 目录尚未存在
+        assert!(!logs_root.exists());
+
+        // ensure_dir + append（对齐 fs_append_app_log 内部逻辑）
+        ensure_dir(&logs_root).expect("ensure logs 目录失败");
+        let path = build_app_log_path(&logs_root);
+        fs::append_line(&path, r#"{"level":"info","category":"app","message":"start"}"#)
+            .expect("追加首行失败");
+        fs::append_line(&path, r#"{"level":"error","category":"app","message":"crash"}"#)
+            .expect("追加次行失败");
+
+        let content = std::fs::read_to_string(&path).expect("读取 app.log 失败");
+        assert_eq!(
+            content,
+            "{\"level\":\"info\",\"category\":\"app\",\"message\":\"start\"}\n\
+             {\"level\":\"error\",\"category\":\"app\",\"message\":\"crash\"}\n",
+            "app.log 追加顺序与换行应正确"
         );
     }
 }

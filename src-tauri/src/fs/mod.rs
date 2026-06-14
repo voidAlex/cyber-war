@@ -15,4 +15,4 @@ pub mod paths;
 // 重新导出常用项，方便上层 `use crate::fs::*`
 pub use append::{append_bytes, append_line};
 pub use atomic::{write_atomic, write_atomic_text};
-pub use paths::{resolve_config_root, resolve_save_dir, resolve_saves_root, SaveDir};
+pub use paths::{resolve_config_root, resolve_logs_root, resolve_save_dir, resolve_saves_root, SaveDir};

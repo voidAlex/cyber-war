@@ -45,6 +45,7 @@ import type {
 import { theaterActionToEnvelope, commanderDecisionToEnvelope } from '@/layers/agents/roles'
 import { allocateSequences, SEQUENCE_BASE, makeSeed } from './sequence-allocator'
 import { ruleEngineFallback, type RuleEngineFallbackResult } from '@/layers/agents/director/rule-engine-fallback'
+import { logger } from '@/utils/logger'
 
 // =============================================================================
 // 编排产物类型
@@ -183,17 +184,30 @@ export async function orchestrateTurnResolution(
   // 所有 envelope（最终按 sequence 升序输出）
   const allEnvelopes: ActionEnvelope[] = []
 
+  // 存档级日志上下文（saveId/turn），便于排查特定存档/回合
+  const logCtx = { scope: 'save' as const, saveId: worldState.saveId, turn }
+
   // -------------------------------------------------------------------------
   // 步骤1：物理引擎先算 rawResults（确定性）
   // -------------------------------------------------------------------------
   const playerLocked = (lockedOrders[playerFactionId] ?? []).slice().sort(
     (a, b) => a.sequence - b.sequence,
   )
+  logger.info('orch/resolve/physics_start', '物理引擎结算开始', {
+    ...logCtx,
+    lockedCount: playerLocked.length,
+    scenarioSeed,
+  })
   const rawResults: ResolutionResult = await workerService.simulateTurn(
     worldState,
     playerLocked,
     scenarioSeed,
   )
+  logger.info('orch/resolve/physics_done', '物理引擎结算完成', {
+    ...logCtx,
+    rawEvents: rawResults.events.length,
+    physicsSuccess: rawResults.success,
+  })
 
   // -------------------------------------------------------------------------
   // 步骤2：批次1 参谋长（玩家侧）— chief envelopes（seq 0+，已在握手阶段预分配）
@@ -312,6 +326,13 @@ export async function orchestrateTurnResolution(
 
   // 全部 envelope 按 sequence 升序（确定性输出顺序）
   allEnvelopes.sort((a, b) => a.sequence - b.sequence)
+  logger.info('orch/resolve/agents_done', '战区+敌盟统帅并行批次完成', {
+    ...logCtx,
+    chiefCount: chiefEnvelopes.length,
+    theaterCount: theaterOut.envelopes.length,
+    commanderCount: commanderOuts.reduce((n, o) => n + o.envelopes.length, 0),
+    totalEnvelopes: allEnvelopes.length,
+  })
 
   // -------------------------------------------------------------------------
   // 步骤4：批次4 导演部终裁（最后，串行）
@@ -336,6 +357,15 @@ export async function orchestrateTurnResolution(
     if (onProgress) {
       onProgress({ agentId: 'director', role: 'director', status: 'done' })
     }
+    logger.info('orch/resolve/director_done', '导演部终裁完成', {
+      ...logCtx,
+      overrides: isDirectorRealResult(directorResult)
+        ? (directorResult.appliedOverrides ?? []).length
+        : 0,
+      keyEvents: isDirectorRealResult(directorResult)
+        ? (directorResult.keyEvents ?? []).length
+        : 0,
+    })
   } catch (err) {
     // 导演部异常（非 LLM 类）：切规则引擎兜底（绝不卡死游戏）
     if (onProgress) {
@@ -347,6 +377,10 @@ export async function orchestrateTurnResolution(
       })
     }
     degraded = true
+    logger.warn('orch/resolve/director_fallback', '导演部异常，切规则引擎兜底', {
+      ...logCtx,
+      error: err instanceof Error ? err.message : String(err),
+    })
     directorResult = ruleEngineFallback({
       physicsResult: rawResults,
       envelopes: allEnvelopes,
@@ -369,6 +403,16 @@ export async function orchestrateTurnResolution(
     ? (directorResult.keyEvents ?? [])
     : []
 
+  const cacheStats = llmService.getCacheStats()
+  logger.info('orch/resolve/complete', '回合编排完成', {
+    ...logCtx,
+    degraded,
+    eventsOut: directorResult.directorEvents.length,
+    cacheHitTokens: cacheStats.totalHitTokens,
+    cacheMissTokens: cacheStats.totalMissTokens,
+    callCount: cacheStats.callCount,
+  })
+
   return {
     result: directorResult.finalResult,
     resolution: directorResult.resolutionSummary,
@@ -376,7 +420,7 @@ export async function orchestrateTurnResolution(
     events: directorResult.directorEvents,
     appliedOverrides,
     keyEvents,
-    cacheStats: llmService.getCacheStats(),
+    cacheStats,
     degraded,
   }
 }

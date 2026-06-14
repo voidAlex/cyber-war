@@ -6,13 +6,15 @@
 //! ├── config/                          # 应用配置根（去口令后新增）
 //! │   ├── llm-config.json              # LLM 配置（provider/endpoint/model，非密钥字段明文）
 //! │   └── api-key.txt                  # apiKey 降级明文（仅 keyring 不可用时）
+//! ├── logs/                            # 跨存档全局日志根（排查启动/配置/致命错误）
+//! │   └── app.log                      # 全局应用日志（真追加 O(1)）
 //! └── saves/                           # 所有存档的根目录
 //!     └── <saveId>/                    # 单个存档目录
 //!         ├── manifest.json            # 存档清单（scenarioId/seed/创建时间…）
 //!         ├── world-state.json         # 当前世界状态（唯一真相源）
 //!         ├── snapshot.json            # 快照（检查点）
 //!         ├── event-log.jsonl          # 事件日志（真追加）
-//!         ├── diagnostics.log          # 诊断日志（只写 status code）
+//!         ├── diagnostics.log          # 诊断日志（只写 status code，存档内事件）
 //!         ├── factions/<id>.json       # 各阵营文件
 //!         └── campaign/                # 已解包的战役包内容
 //! ```
@@ -73,6 +75,26 @@ pub fn resolve_config_root(app: &AppHandle) -> Result<PathBuf, AppError> {
         .app_data_dir()
         .map_err(|e| AppError::Fs(format!("解析 app_data_dir 失败: {e}")))?;
     Ok(data_dir.join("config"))
+}
+
+/// 全局日志文件名常量：跨存档应用日志（启动/配置/致命错误）。
+pub mod log_files {
+    /// 全局应用日志文件名（真追加 O(1)）。
+    pub const APP_LOG: &str = "app.log";
+}
+
+/// 解析全局日志根目录：`<app_data_dir>/logs`。
+///
+/// 用于存放跨存档的全局应用日志 `app.log`（启动事件、配置加载/降级、致命错误、
+/// 未捕获异常）。与存档级 `diagnostics.log`（每存档内事件）互补。
+///
+/// 若该目录不存在会被 setup hook 创建；本函数仅负责路径解析，不创建目录。
+pub fn resolve_logs_root(app: &AppHandle) -> Result<PathBuf, AppError> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Fs(format!("解析 app_data_dir 失败: {e}")))?;
+    Ok(data_dir.join("logs"))
 }
 
 /// 单个存档目录的便捷句柄（封装 saveId 与各标准文件路径解析）。

@@ -208,3 +208,60 @@ pnpm tauri dev
 ```
 
 dev 模式不产出安装包，仅用于开发调试。
+
+---
+
+## 6. 日志文件路径（排查问题用）
+
+应用运行时会把**详细日志**落到本地文件，出问题时用户可把这些文件交给开发者排查。
+
+### 6.1 存储根
+
+所有数据（存档 + 配置 + 日志）都在 OS 标准应用数据目录 `app_data_dir` 下：
+
+- **Linux / WSL2**：`~/.local/share/com.cyberwar.simulator/`（或 `$XDG_DATA_HOME` 下）
+- **Windows**：`C:\Users\<用户>\AppData\Roaming\com.cyberwar.simulator\`
+
+布局：
+
+```text
+<app_data_dir>/
+├── config/                  # LLM 配置（provider/endpoint/model，明文）
+│   ├── llm-config.json
+│   └── api-key.txt          # 仅 keyring 不可用时降级（含明文 key，勿外发）
+├── logs/
+│   └── app.log              # 全局应用日志（启动/配置/致命错误/未捕获异常）
+└── saves/
+    └── <saveId>/
+        ├── diagnostics.log  # 存档内日志（state/Agent/物理/LLM/用户操作）
+        ├── world-state.json
+        └── ...
+```
+
+### 6.2 两类日志文件
+
+| 文件 | 范围 | 内容 | 何时看 |
+|---|---|---|---|
+| `logs/app.log` | **跨存档全局** | 应用启动、LLM 配置加载/降级/legacy、致命错误、未捕获异常（window.onerror/unhandledrejection） | 应用启动失败、配置异常、崩溃 |
+| `saves/<saveId>/diagnostics.log` | **单个存档** | 该存档的回合编排（phase 转换/persist）、Agent 批次（chief/theater/commander/director）、物理结算、LLM 调用统计、用户操作（命令/推演/外交） | 特定存档回合异常、Agent 行为异常 |
+
+### 6.3 日志格式与安全
+
+- 每条日志为**单行 JSON**：`{ts, level, category, message, context, turn?}`，便于 grep。
+  - `category` 为点分路径（如 `orch/turn/persist`、`llm/call/error`、`ui/command/parse`）。
+  - `context` 含结构化业务字段（saveId/turn/provider/model/cacheStats 等）。
+- **脱敏**：`apiKey` / `payload` / `Bearer` / `token` / `password` 等敏感字段在落盘前
+  被替换为 `***`，**绝不写明文 key**（双保险：logger 脱敏 + Rust 不解析内容）。
+  - 例外：`config/api-key.txt` 是 keyring 不可用时的降级文件，本身含明文 key
+    （仅本地兜底，**请勿随日志外发**）。
+- **best-effort**：写日志失败绝不阻塞游戏循环，只 console.warn。
+
+### 6.4 让用户提供日志
+
+排查问题时，请用户：
+
+1. 复现问题（启动/开局/推演/崩溃）。
+2. 把 `logs/app.log` 和（若涉及特定存档）`saves/<saveId>/diagnostics.log`
+   一起打包发给开发者。
+3. 若担心 `config/api-key.txt` 含 key，**只发 logs/ 与 saves/ 下的 .log 文件**即可。
+

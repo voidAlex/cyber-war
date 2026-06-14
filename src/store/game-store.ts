@@ -42,6 +42,7 @@ import type { CacheStats } from '@/layers/application/services/llm-service'
 import type { LlmErrorBanner } from '@/layers/application/services/llm-service'
 import type { ActionEnvelope, AgentRole } from '@/types'
 import type { LlmCallConfig } from '@/layers/agents/roles'
+import { logger } from '@/utils/logger'
 
 /**
  * 物理引擎 Worker 客户端（单例，主线程持有 Worker 句柄）。
@@ -395,7 +396,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     } catch (err) {
       set({ streamingReport: false })
       // 四分类 LLM 错误：映射为横幅（绝不把 ApiKey 误报为网络）
-      set({ llmError: errorToBanner(err), cacheStats: llmService.getCacheStats() })
+      const banner = errorToBanner(err)
+      set({ llmError: banner, cacheStats: llmService.getCacheStats() })
+      logger.error(
+        'store/advance/failed',
+        `回合推进失败（${banner.kind}）`,
+        { scope: 'save', saveId: ctx.game.world.saveId, turn: ctx.game.world.turnIndex, kind: banner.kind },
+      )
       // 落盘失败等：上下文可能已被部分推进，从 error.context 恢复（若存在）
       const maybeCtx = (err as { context?: StateMachineContext }).context
       if (maybeCtx) {

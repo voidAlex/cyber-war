@@ -20,6 +20,7 @@
 import type { WorldState, ActionEnvelope } from '@/types'
 import type { ResolutionResult } from '@/layers/domain/combat'
 import type { PhysicsWorkerRequest, PhysicsWorkerResponse } from '@/workers/physics.worker'
+import { logger } from '@/utils/logger'
 
 /**
  * 物理引擎客户端（主线程持有 Worker 句柄的封装）。
@@ -76,22 +77,46 @@ export class PhysicsEngineClient {
       turn,
     }
 
+    logger.debug('worker/simulate/input', '物理结算请求', {
+      scope: 'save',
+      saveId: worldState.saveId,
+      turn,
+      lockedCount: lockedOrders.length,
+    })
+
     return new Promise<ResolutionResult>((resolve, reject) => {
       const onMessage = (event: MessageEvent<PhysicsWorkerResponse>) => {
         const data = event.data
         if (data.type === 'RESOLVE_COMPLETE') {
           worker.removeEventListener('message', onMessage)
           worker.removeEventListener('error', onError)
+          logger.debug('worker/simulate/output', '物理结算完成', {
+            scope: 'save',
+            saveId: worldState.saveId,
+            turn,
+            events: data.result.events.length,
+            success: data.result.success,
+          })
           resolve(data.result)
         } else if (data.type === 'ERROR') {
           worker.removeEventListener('message', onMessage)
           worker.removeEventListener('error', onError)
+          logger.error('worker/simulate/error', `Worker 报错: ${data.message}`, {
+            scope: 'save',
+            saveId: worldState.saveId,
+            turn,
+          })
           reject(new Error(`PhysicsEngine Worker: ${data.message}`))
         }
       }
       const onError = (err: ErrorEvent) => {
         worker.removeEventListener('message', onMessage)
         worker.removeEventListener('error', onError)
+        logger.error('worker/simulate/error', `Worker 错误事件: ${err.message}`, {
+          scope: 'save',
+          saveId: worldState.saveId,
+          turn,
+        })
         reject(new Error(`PhysicsEngine Worker 错误: ${err.message}`))
       }
 

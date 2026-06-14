@@ -211,6 +211,25 @@ export async function fsAppendDiagnostics(saveId: string, line: string): Promise
   persist()
 }
 
+/**
+ * 真追加一行到全局应用日志 app.log（跨存档；mock：localStorage 数组）。
+ *
+ * 对齐 Rust `fs_append_app_log`：写 `<app_data_dir>/logs/app.log`。
+ * web 模式用 localStorage key `cwmock:app-log` 存行数组（agent-browser
+ * 可读 localStorage 验证 app.log 写入），push 真追加 O(1)。
+ */
+export async function fsAppendAppLog(line: string): Promise<void> {
+  if (typeof localStorage === 'undefined') return
+  try {
+    const raw = localStorage.getItem(APP_LOG_LS_KEY)
+    const arr: string[] = raw ? (JSON.parse(raw) as string[]) : []
+    arr.push(line)
+    localStorage.setItem(APP_LOG_LS_KEY, JSON.stringify(arr))
+  } catch {
+    // quota / 隐私模式：静默降级为忽略（best-effort 日志）
+  }
+}
+
 /** 原子写入 manifest.json（覆盖；写后落盘）。 */
 export async function fsWriteManifest(saveId: string, content: string): Promise<void> {
   const dir = getOrCreate(saveId)
@@ -287,6 +306,9 @@ export async function fsImportSave(_newSaveId: string, _zipPath: string): Promis
 /** localStorage key（LLM 非密钥字段明文 config JSON） */
 const LLM_CONFIG_LS_KEY = 'cwmock:llm-config'
 
+/** localStorage key（全局应用日志 app.log 行数组，agent-browser 验证用） */
+const APP_LOG_LS_KEY = 'cwmock:app-log'
+
 /**
  * 读 LLM 配置文件（mock：localStorage `cwmock:llm-config`）。
  *
@@ -329,6 +351,7 @@ export function __webMockFsReset(): void {
     try {
       localStorage.removeItem(LS_KEY)
       localStorage.removeItem(LLM_CONFIG_LS_KEY)
+      localStorage.removeItem(APP_LOG_LS_KEY)
     } catch {
       // ignore
     }

@@ -26,6 +26,7 @@ import { isAppErrorPayload, type AppErrorPayload } from '@/layers/gateway/tauri-
 import { parseLLMJson, LlmJsonParseError } from '@/layers/agents/protocol/schema'
 import type { LlmErrorKindString } from '@/layers/gateway/bridge-types'
 import { appendDiagnostic, type DiagnosticEntry } from '@/layers/persistence/diagnostics'
+import { logger } from '@/utils/logger'
 
 // =============================================================================
 // typed errors（按四分类 + 降级 + schema 校验失败）
@@ -364,6 +365,16 @@ export function createLlmService(
 
   return {
     async streamText(opts: StreamChatOptions): Promise<StreamChatResult> {
+      const sinkSaveId = _diagnosticSink?.saveId
+      const logCtx = sinkSaveId
+        ? { scope: 'save' as const, saveId: sinkSaveId }
+        : { scope: 'app' as const }
+      const startedAt = Date.now()
+      logger.debug('llm/call/start', 'LLM 调用开始', {
+        ...logCtx,
+        provider: opts.provider,
+        model: opts.model,
+      })
       let result: StreamChatResult
       try {
         result = await _stream(opts)
@@ -371,15 +382,31 @@ export function createLlmService(
         const typed = toLlmCallError(err)
         // P2-2：错误分类路径落 diagnostics.log（仅概要，绝不写 key/payload）
         await appendLlmDiagnostic(_diagnosticSink, typed)
+        logger.error(
+          'llm/call/error',
+          `LLM 调用失败（${typed.name}）`,
+          { ...logCtx, kind: typed.name, durationMs: Date.now() - startedAt },
+        )
         throw typed
       }
       accumulate(result.stats)
+      logger.debug('llm/call/done', 'LLM 调用完成', {
+        ...logCtx,
+        model: opts.model,
+        inputTokens: result.stats.inputTokens,
+        outputTokens: result.stats.outputTokens,
+        cacheHit: result.stats.promptCacheHitTokens,
+        cacheMiss: result.stats.promptCacheMissTokens,
+        degraded: result.stats.degraded,
+        durationMs: Date.now() - startedAt,
+      })
       // 降级信号：Rust 3 次重试均失败 → 切规则引擎
       if (result.stats.degraded) {
         const degradedErr = new LlmDegradedError(
           'LLM 3 次重试均失败，切规则引擎兜底（degraded:true）',
         )
         await appendLlmDiagnostic(_diagnosticSink, degradedErr)
+        logger.warn('llm/call/degraded', 'LLM 三次重试失败，降级规则引擎', logCtx)
         throw degradedErr
       }
       return result

@@ -23,6 +23,7 @@ import { useEffect, type JSX } from 'react'
 import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector, IntelligencePanel, DiplomacyPanel } from '@/layers/ui'
 import SandboxErrorBoundary from '@/layers/ui/sandbox/SandboxErrorBoundary'
 import { useGameStore } from '@/store/game-store'
+import { logger } from '@/utils/logger'
 
 /** 应用版本号（HUD 右下显示）。 */
 const APP_VERSION = 'v0.4.0'
@@ -45,9 +46,37 @@ export default function App(): JSX.Element {
 
   // 启动时加载配置（读 config 文件 + keyring，无口令）+ 刷新存档列表
   useEffect(() => {
+    // 应用启动事件（写 app.log，便于排查启动/配置问题）
+    logger.info('app/startup', '应用启动', { scope: 'app', version: APP_VERSION })
     void loadConfig()
     void refreshSaves()
   }, [loadConfig, refreshSaves])
+
+  // 全局未捕获错误：写 app.log（best-effort，便于排查致命崩溃）
+  useEffect(() => {
+    const onError = (event: ErrorEvent): void => {
+      logger.error('app/window/onerror', `未捕获错误: ${event.message}`, {
+        scope: 'app',
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+      })
+    }
+    const onRejection = (event: PromiseRejectionEvent): void => {
+      const reason = event.reason
+      logger.error(
+        'app/window/unhandledrejection',
+        `未处理的 Promise 拒绝: ${reason instanceof Error ? reason.message : String(reason)}`,
+        { scope: 'app' },
+      )
+    }
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onRejection)
+    return () => {
+      window.removeEventListener('error', onError)
+      window.removeEventListener('unhandledrejection', onRejection)
+    }
+  }, [])
 
   // 未加载配置：配置面板作为入口（仅显示全局错误横幅）
   if (!configUnlocked) {

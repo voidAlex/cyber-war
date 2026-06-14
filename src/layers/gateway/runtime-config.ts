@@ -30,6 +30,7 @@ import {
   llmConfigWrite,
   type KeyStoreOutcome,
 } from './tauri-bridge'
+import { logger } from '@/utils/logger'
 
 // =============================================================================
 // 类型契约
@@ -133,6 +134,18 @@ export async function saveConfig(
 
   // 1. apiKey 存 OS 凭证库（keyring / 降级明文文件）
   const outcome = await keySave(config.apiKey)
+  // 配置保存事件（scope=app，跨存档）。apiKey 不写日志（logger 脱敏兜底也剔除）。
+  logger.info('config/save', 'LLM 配置已保存', {
+    scope: 'app',
+    provider: config.provider,
+    model: config.model,
+    keyBackend: outcome.backend,
+  })
+  if (outcome.backend === 'file_fallback') {
+    logger.warn('config/save/keyring_fallback', 'keyring 不可用，apiKey 降级明文文件', {
+      scope: 'app',
+    })
+  }
 
   // 2. 非密钥字段明文落盘（含 keyBackend 供 UI 提示降级）
   const persisted: PersistedRuntimeConfig = {
@@ -177,6 +190,7 @@ export async function loadConfig(
   // 1. 读非密钥字段配置文件
   const raw = await configRead()
   if (raw === null) {
+    logger.info('config/load/no-config', '首次使用（无配置文件）', { scope: 'app' })
     throw new RuntimeConfigError('no-config')
   }
 
@@ -184,6 +198,7 @@ export async function loadConfig(
   try {
     persisted = JSON.parse(raw) as PersistedRuntimeConfig
   } catch (e) {
+    logger.error('config/load/corrupt', '配置文件 JSON 损坏', { scope: 'app' })
     throw new RuntimeConfigError(
       `配置文件损坏（JSON 解析失败）: ${e instanceof Error ? e.message : String(e)}`,
     )
@@ -194,6 +209,10 @@ export async function loadConfig(
   if (
     typeof (persisted as { encryptedApiKey?: unknown }).encryptedApiKey !== 'undefined'
   ) {
+    logger.warn('config/load/legacy', '检测到旧版加密配置，需重输 apiKey 迁移', {
+      scope: 'app',
+      provider: persisted.provider,
+    })
     throw new RuntimeConfigError('legacy-encrypted', {
       provider: persisted.provider,
       endpoint: persisted.endpoint,
@@ -205,6 +224,10 @@ export async function loadConfig(
   const apiKey = await keyLoad()
   if (apiKey === null) {
     // 挂上读到的非密钥字段供 UI 预填（用户只需重输 apiKey）
+    logger.warn('config/load/no-api-key', '配置存在但 keyring 无 apiKey', {
+      scope: 'app',
+      provider: persisted.provider,
+    })
     throw new RuntimeConfigError('no-api-key', {
       provider: persisted.provider,
       endpoint: persisted.endpoint,
@@ -220,6 +243,12 @@ export async function loadConfig(
     apiKey,
   }
   session.set(config)
+  logger.info('config/load/ok', 'LLM 配置加载成功', {
+    scope: 'app',
+    provider: config.provider,
+    model: config.model,
+    keyBackend: persisted.keyBackend,
+  })
   return config
 }
 

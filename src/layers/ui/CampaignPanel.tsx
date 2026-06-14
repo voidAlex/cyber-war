@@ -33,6 +33,7 @@ import {
 } from '@/layers/persistence'
 import type { CampaignPayload } from '@/types'
 import CampaignGeneratorPanel from './CampaignGeneratorPanel'
+import { logger } from '@/utils/logger'
 
 /** 凡尔登玩家可选阵营 */
 const VERDUN_FACTIONS = [
@@ -67,11 +68,20 @@ export default function CampaignPanel(): JSX.Element {
     try {
       // saveId 用 scenarioId + 时间戳避免冲突
       const newSaveId = `verdun-1916-${Date.now()}`
+      logger.info('ui/campaign/start_verdun', '开局凡尔登默认包', {
+        scope: 'app',
+        saveId: newSaveId,
+        faction: verdunFaction,
+      })
       const world = await startDefaultCampaign(newSaveId, verdunFaction)
       setFromWorld(world, newSaveId)
       await refreshSaves()
       setMessage(`已开局凡尔登战役（${verdunFaction === 'france' ? '法国' : '德国'}），存档 ${newSaveId}`)
     } catch (err) {
+      logger.error('ui/campaign/start_verdun_failed', `凡尔登开局失败: ${formatErr(err)}`, {
+        scope: 'app',
+        faction: verdunFaction,
+      })
       setMessage(`开局失败：${formatErr(err)}`)
     }
   }
@@ -134,12 +144,17 @@ export default function CampaignPanel(): JSX.Element {
       return
     }
     const newSaveId = `imported-${Date.now()}`
+    logger.info('ui/save/import', '玩家导入存档 ZIP', { scope: 'app', saveId: newSaveId })
     try {
       await importSaveZip(newSaveId, path)
       await refreshSaves()
       setMessage(`存档 ZIP 已导入为 ${newSaveId}`)
       setImportSavePath('')
     } catch (err) {
+      logger.error('ui/save/import_failed', `存档导入失败: ${formatErr(err)}`, {
+        scope: 'app',
+        saveId: newSaveId,
+      })
       setMessage(`存档导入失败：${formatErr(err)}`)
     }
   }
@@ -157,11 +172,16 @@ export default function CampaignPanel(): JSX.Element {
       setMessage('请输入导出 ZIP 的绝对路径')
       return
     }
+    logger.info('ui/save/export', '玩家导出存档 ZIP', { scope: 'app', saveId })
     try {
       await exportSaveAsZip(saveId, path)
       setMessage(`存档 ${saveId} 已导出到 ${path}`)
       setExportSavePath('')
     } catch (err) {
+      logger.error('ui/save/export_failed', `存档导出失败: ${formatErr(err)}`, {
+        scope: 'app',
+        saveId,
+      })
       setMessage(`存档导出失败：${formatErr(err)}`)
     }
   }

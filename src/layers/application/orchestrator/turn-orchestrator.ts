@@ -36,6 +36,7 @@ import type { ResolutionResult } from '@/layers/domain/combat'
 import type { DirectorRole, ContextCompressor } from '@/layers/agents/roles/director'
 import { shouldCompressContext } from '@/layers/agents/roles/context-compression'
 import { appendDiagnostic } from '@/layers/persistence/diagnostics'
+import { logger } from '@/utils/logger'
 
 /**
  * 编排器所需的副作用服务句柄（依赖注入，便于 mock 测试）。
@@ -134,6 +135,16 @@ export async function advanceTurn(
   const actions: StateMachineAction[] = []
   let cur = ctx
 
+  // 存档级日志上下文（saveId/turn），便于排查特定存档/回合
+  const saveId = cur.game.world.saveId
+  const turn0 = cur.game.world.turnIndex
+  logger.info('orch/turn/start', `开始推进回合（turn=${turn0}）`, {
+    scope: 'save',
+    saveId,
+    turn: turn0,
+    phaseStart: cur.game.phase,
+  })
+
   // 若在 idle，先 START_TURN 进入 planning（空转演示友好）
   if (cur.game.phase === 'idle') {
     cur = step(cur, { type: 'START_TURN' }, signal)
@@ -155,6 +166,11 @@ export async function advanceTurn(
   // locked → resolution（从 locked 起：玩家已握手锁定，或从 planning 空转至此）
   cur = step(cur, { type: 'ENTER_RESOLUTION' }, signal)
   actions.push({ type: 'ENTER_RESOLUTION' })
+  logger.info('orch/turn/phase', 'phase → resolution（结算）', {
+    scope: 'save',
+    saveId,
+    turn: turn0,
+  })
 
   // resolution：调用结算服务（M1 空回合，产出空 ResolutionResult + 空 events）
   const resolve = services.resolve ?? defaultEmptyResolution
@@ -166,6 +182,13 @@ export async function advanceTurn(
     : { type: 'FINISH_RESOLUTION', resolution }
   cur = step(cur, finishAction, signal)
   actions.push(finishAction)
+  logger.info('orch/turn/resolved', `结算完成（events=${events.length}）`, {
+    scope: 'save',
+    saveId,
+    turn: turn0,
+    eventsCount: events.length,
+    degraded: resolution.degraded,
+  })
 
   // briefing → persist
   cur = step(cur, { type: 'ENTER_PERSIST' }, signal)
@@ -198,6 +221,12 @@ export async function advanceTurn(
       turnIndex: world.turnIndex + 1,
     }
     await services.persistence.writeTurn(persistedWorld, phaseBeforePersist, events)
+    logger.info('orch/turn/persist', `落盘成功（turn ${turn0}→${turn0 + 1}）`, {
+      scope: 'save',
+      saveId,
+      turn: turn0,
+      eventsCount: events.length,
+    })
   } catch (err) {
     // 落盘失败回路：persist → briefing，等待重试；抛错供 UI 提示
     // P2-2：落一条诊断（category=persist，level=error，仅概要 message，绝不写 key/payload）
@@ -206,6 +235,11 @@ export async function advanceTurn(
       level: 'error',
       category: 'persist',
       message: `writeTurn 失败: ${String(err)}`,
+    })
+    logger.error('orch/turn/persist_failed', `落盘失败: ${String(err)}`, {
+      scope: 'save',
+      saveId,
+      turn: turn0,
     })
     cur = step(cur, { type: 'PERSIST_FAILED', reason: String(err) }, signal)
     actions.push({ type: 'PERSIST_FAILED', reason: String(err) })
@@ -222,6 +256,11 @@ export async function advanceTurn(
   // idle → NEXT_TURN（turnIndex+1；persist-gate 守卫已过）
   cur = step(cur, { type: 'NEXT_TURN' }, signal)
   actions.push({ type: 'NEXT_TURN' })
+  logger.info('orch/turn/done', `回合推进完成（turn ${turn0}→${turn0 + 1}）`, {
+    scope: 'save',
+    saveId,
+    turn: turn0 + 1,
+  })
 
   return { context: cur, actions }
 }

@@ -18,6 +18,7 @@
 import { type JSX } from 'react'
 import { useGameStore } from '@/store/game-store'
 import { isActionAllowed, canAdvanceTurn } from '@/layers/application/state-machine'
+import { logger } from '@/utils/logger'
 
 /** phase 中文显示名 */
 const PHASE_NAMES: Record<string, string> = {
@@ -82,12 +83,31 @@ export default function TurnControlPanel(): JSX.Element {
       <div className="turn-control-panel__actions">
         <button
           type="button"
-          onClick={() => dispatch({ type: 'START_TURN' })}
+          onClick={() => {
+            logger.info('ui/turn/start_planning', '玩家开始规划', {
+              scope: 'save',
+              saveId: context.game.world.saveId,
+              turn,
+            })
+            dispatch({ type: 'START_TURN' })
+          }}
           disabled={!canStart}
         >
           开始规划
         </button>
-        <button type="button" onClick={() => void advance()} disabled={!canAdvance}>
+        <button
+          type="button"
+          onClick={() => {
+            logger.info('ui/turn/advance', '玩家推进回合', {
+              scope: 'save',
+              saveId: context.game.world.saveId,
+              turn,
+              fromPhase: phase,
+            })
+            void advance()
+          }}
+          disabled={!canAdvance}
+        >
           {phase === 'locked' ? '推演结算下一天' : '锁定并推演下一天'}
         </button>
       </div>

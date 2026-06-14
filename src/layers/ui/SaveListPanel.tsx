@@ -15,6 +15,7 @@
 
 import { useEffect, useState, type JSX } from 'react'
 import { useGameStore } from '@/store/game-store'
+import { logger } from '@/utils/logger'
 
 /**
  * 存档列表面板组件。
@@ -38,6 +39,7 @@ export default function SaveListPanel(): JSX.Element {
   const handleCreate = (): void => {
     const name = draftName.trim()
     if (name.length === 0) return
+    logger.info('ui/save/create', '玩家创建存档', { scope: 'app', saveId: name })
     void createSave(name, name)
     setDraftName('')
   }
@@ -68,12 +70,22 @@ export default function SaveListPanel(): JSX.Element {
           <li key={id} className="save-list-panel__item">
             <span className="save-list-panel__name">{id}</span>
             {saveId === id && <span className="save-list-panel__tag">[当前]</span>}
-            <button type="button" onClick={() => void loadSave(id)} disabled={busy}>
+            <button
+              type="button"
+              onClick={() => {
+                logger.info('ui/save/load', '玩家载入存档', { scope: 'app', saveId: id })
+                void loadSave(id)
+              }}
+              disabled={busy}
+            >
               载入
             </button>
             <button
               type="button"
-              onClick={() => void deleteSave(id)}
+              onClick={() => {
+                logger.info('ui/save/delete', '玩家删除存档', { scope: 'app', saveId: id })
+                void deleteSave(id)
+              }}
               disabled={busy}
               className="save-list-panel__delete"
             >
