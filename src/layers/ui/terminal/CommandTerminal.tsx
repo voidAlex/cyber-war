@@ -17,8 +17,9 @@
  */
 
 import { useState, useCallback, type JSX } from 'react'
-import { useGameStore } from '@/store/game-store'
-import { chiefRole } from '@/layers/agents/roles/chief'
+import { useGameStore, buildLlmCallConfig } from '@/store/game-store'
+import { chiefRole, createLlmChiefRole } from '@/layers/agents/roles/chief'
+import { llmService } from '@/layers/application/services/llm-service'
 import {
   submitOrder,
   lockOrders,
@@ -79,7 +80,13 @@ export default function CommandTerminal(): JSX.Element {
   // 是否可进入握手（planning 阶段首次输入时自动触发）
   const canEnter = context !== null && canEnterHandshake(context)
 
-  /** 调参谋长解析命令（planning 时先进入 handshake）。 */
+  /**
+   * 调参谋长解析命令（planning 时先进入 handshake）。
+   *
+   * 解锁状态下用真 LLM chief（createLlmChiefRole + 真 LLM 调用，失败回退 mock），
+   * 否则用 mock chief（规则解析，离线/降级可玩）。llmService 与 advance 同源（模块单例），
+   * config 由 buildLlmCallConfig() 从会话取明文 apiKey（即用即抛，不进 store）。
+   */
   const handleParse = useCallback(async (): Promise<void> => {
     if (context === null) return
     const input = draft.trim()
@@ -95,8 +102,14 @@ export default function CommandTerminal(): JSX.Element {
         cur = useGameStore.getState().context!
       }
 
-      // 调参谋长 mock 解析（基于真实世界状态校验目标）
-      const result = await chiefRole.parseCommand(input, {
+      // 角色选择：解锁用真 LLM chief，未解锁用 mock（与 advance 同源决策）
+      // createLlmChiefRole 内部 LLM 失败自动回退 mock，绝不让游戏卡死。
+      const llmConfig = buildLlmCallConfig()
+      const role = llmConfig !== null
+        ? createLlmChiefRole(llmService, llmConfig)
+        : chiefRole
+
+      const result = await role.parseCommand(input, {
         world: cur.game.world,
         playerFactionId: getPlayerFactionId(cur.game.world),
       })
