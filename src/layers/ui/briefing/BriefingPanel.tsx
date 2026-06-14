@@ -17,6 +17,7 @@
 import { type JSX } from 'react'
 import { useGameStore, type AgentProgressEntry } from '@/store/game-store'
 import { isActionAllowed } from '@/layers/application/state-machine'
+import { AlertTriangle } from '@/layers/ui/icons'
 import type { ResolutionSummary } from '@/types'
 
 /** Agent 角色中文显示名 */
@@ -100,7 +101,7 @@ export default function BriefingPanel(): JSX.Element {
 
       {(resolution.degraded || degraded) && (
         <p className="briefing-panel__degraded" role="alert">
-          ⚠ 本回合为降级结算（规则引擎兜底，无叙事润色）
+          <AlertTriangle size={14} aria-hidden /> 本回合为降级结算（规则引擎兜底，无叙事润色）
         </p>
       )}
 

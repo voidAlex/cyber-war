@@ -489,7 +489,9 @@ function CandidateCard({
     <div className="command-terminal__candidate" role="status">
       <div className="command-terminal__candidate-header">
         <strong>候选命令</strong>
-        <span className="command-terminal__intent">{INTENT_NAMES[command.intent] ?? command.intent}</span>
+        <span className={`command-terminal__intent command-terminal__intent--${command.intent}`}>
+          {INTENT_NAMES[command.intent] ?? command.intent}
+        </span>
       </div>
       <p className="command-terminal__summary">{command.summary}</p>
       <dl className="command-terminal__details">

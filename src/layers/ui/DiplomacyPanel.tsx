@@ -196,7 +196,14 @@ function TrustRow({
 
       <div className="diplomacy-panel__bar">
         <div
-          className="diplomacy-panel__bar-fill"
+          className={
+            // 低值偏红、中值偏黄、高值青蓝渐变（与 CSS modifier 对应）
+            trustValue < 30
+              ? 'diplomacy-panel__bar-fill diplomacy-panel__bar-fill--low'
+              : trustValue < 60
+                ? 'diplomacy-panel__bar-fill diplomacy-panel__bar-fill--mid'
+                : 'diplomacy-panel__bar-fill'
+          }
           style={{ width: `${trustValue}%` }}
         />
       </div>

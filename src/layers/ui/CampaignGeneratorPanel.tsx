@@ -17,6 +17,7 @@
 
 import { useState, type JSX } from 'react'
 import { useGameStore, buildLlmCallConfig } from '@/store/game-store'
+import { Play, AlertTriangle } from '@/layers/ui/icons'
 import { createLlmService } from '@/layers/application/services/llm-service'
 import {
   generateCampaign,
@@ -163,8 +164,9 @@ export default function CampaignGeneratorPanel(): JSX.Element {
       {/* 阶段进度 */}
       {generating && stage && (
         <div className="campaign-generator-panel__stage">
-          <span>
-            ▶ {STAGE_LABELS[stage]}
+          <span className="campaign-generator-panel__spinner" aria-hidden />
+          <span className="campaign-generator-panel__stage-active">
+            <Play size={11} aria-hidden /> {STAGE_LABELS[stage]}
             {stageDetail ? `：${stageDetail}` : ''}
           </span>
         </div>
@@ -240,7 +242,9 @@ function CampaignPreview(props: CampaignPreviewProps): JSX.Element {
       {warnings.length > 0 && (
         <ul className="campaign-generator-panel__warnings">
           {warnings.map((w, i) => (
-            <li key={i}>⚠ {w}</li>
+            <li key={i}>
+              <AlertTriangle size={12} aria-hidden /> {w}
+            </li>
           ))}
         </ul>
       )}

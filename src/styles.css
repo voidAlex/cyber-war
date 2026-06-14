@@ -626,6 +626,13 @@ a {
 .briefing-panel__degraded {
   color: var(--warn);
   margin: var(--space-2) 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.briefing-panel__degraded svg {
+  flex-shrink: 0;
 }
 
 .briefing-panel__progress {
@@ -1170,4 +1177,971 @@ th {
   .app-shell__status-dot--on {
     animation: none;
   }
+
+  /* 新增动画（UI-B）全部降级 */
+  .intelligence-panel__row,
+  .diplomacy-panel__warn--defect,
+  .campaign-generator-panel__stage-active {
+    animation: none !important;
+  }
 }
+
+/* ============================================================
+ * 18. 情报置信度看板（.intelligence-panel*）— UI-B 赛博朋克
+ *
+ * 设计：情报级别 L0-L3 青蓝色阶（L0 盲区灰暗 → L3 全量青亮），
+ * 单位行卡片青光描边 hover，残影行半透明+斜体，欺骗单位红色警示边，阵营色圆点。
+ * 通过 data-level 属性区分级别配色。
+ * ============================================================ */
+.intelligence-panel__empty {
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: var(--space-3);
+  text-align: center;
+}
+
+/* —— 级别计数 chip 网格 —— */
+.intelligence-panel__summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.intelligence-panel__chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-1) 2px;
+  background: var(--bg-item);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  font-size: 10px;
+  transition: border-color var(--dur) ease, box-shadow var(--dur) ease;
+}
+
+.intelligence-panel__chip-level {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+}
+
+.intelligence-panel__chip-name {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
+.intelligence-panel__chip-count {
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* —— 单位列表 —— */
+.intelligence-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.intelligence-panel__list-empty {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+  padding: var(--space-2);
+}
+
+/* 单位行卡片：青光描边 hover */
+.intelligence-panel__row {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-item);
+  border: 1px solid var(--border-dim);
+  border-left: 2px solid var(--text-dim);
+  border-radius: var(--radius);
+  transition: border-color var(--dur) ease, background var(--dur) ease,
+    box-shadow var(--dur) ease;
+}
+
+.intelligence-panel__row:hover {
+  border-color: var(--border-strong);
+  background: rgba(6, 182, 212, 0.06);
+  box-shadow: var(--glow-cyan);
+}
+
+/* —— 情报级别色阶（data-level 属性驱动）—— */
+/* L0 盲区：灰暗，行整体淡化提示「不确定存在」 */
+.intelligence-panel__row[data-level='0'] {
+  border-left-color: var(--text-dim);
+  opacity: 0.55;
+}
+/* L1 热力脉冲：暗青 */
+.intelligence-panel__row[data-level='1'] {
+  border-left-color: #0e7490;
+}
+/* L2 编制确认：中青 */
+.intelligence-panel__row[data-level='2'] {
+  border-left-color: var(--accent-blue);
+}
+/* L3 全量透视：青亮 + 微辉光 */
+.intelligence-panel__row[data-level='3'] {
+  border-left-color: var(--accent-cyan);
+  box-shadow: inset 2px 0 0 var(--accent-cyan), 0 0 6px rgba(6, 182, 212, 0.12);
+}
+
+/* 阵营色圆点（带辉光） */
+.intelligence-panel__faction-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+  box-shadow: 0 0 4px currentColor;
+}
+
+.intelligence-panel__row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.intelligence-panel__row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.intelligence-panel__unit-id {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* 级别徽章（chip 化） */
+.intelligence-panel__level-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 4px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  letter-spacing: 0.04em;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* 残影标记：半透明 + 斜体（过期信息态） */
+.intelligence-panel__ghost {
+  font-family: var(--font-mono);
+  font-style: italic;
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.intelligence-panel__row-meta {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* 残影行整体斜体 + 半透明（行级，与徽章联动） */
+.intelligence-panel__row[data-ghost='true'] {
+  opacity: 0.65;
+  background: linear-gradient(90deg, rgba(6, 182, 212, 0.03), var(--bg-item));
+}
+
+/* —— 欺骗单位警示区 —— */
+.intelligence-panel__deception {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius);
+}
+
+.intelligence-panel__deception h3 {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--danger);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 var(--space-1);
+  text-shadow: var(--glow-red);
+}
+
+.intelligence-panel__deception ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.intelligence-panel__deception-mark {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 0 4px;
+  margin-right: 4px;
+  letter-spacing: 0.05em;
+}
+
+.intelligence-panel__deception-hint {
+  margin: var(--space-1) 0 0;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ============================================================
+ * 19. 外交信任度仪表（.diplomacy-panel*）— UI-B 赛博朋克
+ *
+ * 设计：信任度进度条（cyan→blue 渐变，低值偏红）+ 趋势箭头色（rising 绿/
+ * stable 灰/falling 红）+ 倒戈风险闪烁（breathe 红光）+ 阵营色圆点。
+ * ============================================================ */
+.diplomacy-panel__empty {
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: var(--space-3);
+  text-align: center;
+}
+
+.diplomacy-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.diplomacy-panel__list-empty {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+  padding: var(--space-2);
+}
+
+/* 阵营信任度行卡片 */
+.diplomacy-panel__row {
+  padding: var(--space-2);
+  background: var(--bg-item);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  transition: border-color var(--dur) ease;
+}
+
+.diplomacy-panel__row:hover {
+  border-color: var(--border-strong);
+}
+
+.diplomacy-panel__row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.diplomacy-panel__faction-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 4px currentColor;
+}
+
+.diplomacy-panel__faction-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+
+/* 关系分类标签（chip） */
+.diplomacy-panel__stance {
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* 趋势箭头色 */
+.diplomacy-panel__trend {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.diplomacy-panel__trend--rising {
+  color: var(--success);
+  text-shadow: var(--glow-green);
+}
+.diplomacy-panel__trend--falling {
+  color: var(--danger);
+  text-shadow: var(--glow-red);
+}
+.diplomacy-panel__trend--stable {
+  color: var(--text-muted);
+}
+
+/* —— 信任度进度条（cyan→blue 渐变，低值偏红）—— */
+.diplomacy-panel__bar {
+  height: 6px;
+  background: var(--bg-void);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.diplomacy-panel__bar-fill {
+  height: 100%;
+  /* 默认 cyan→blue 渐变 */
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+  box-shadow: var(--glow-cyan);
+  transition: width var(--dur-slow) ease;
+}
+
+/* 低值（<30%）偏红：用 attr 无法直接读数值，组件侧按阈值加 modifier */
+.diplomacy-panel__bar-fill--low {
+  background: linear-gradient(90deg, var(--danger), #b91c1c);
+  box-shadow: var(--glow-red);
+}
+.diplomacy-panel__bar-fill--mid {
+  background: linear-gradient(90deg, var(--warn), var(--accent-cyan));
+  box-shadow: var(--glow-warn);
+}
+
+.diplomacy-panel__row-meta {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* —— 警告条 —— */
+.diplomacy-panel__warn {
+  margin-top: 4px;
+  padding: 3px 6px;
+  font-size: 10px;
+  border-radius: var(--radius);
+  letter-spacing: 0.03em;
+}
+
+/* 拒绝率警告（黄） */
+.diplomacy-panel__warn--reject {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: var(--warn);
+}
+
+/* 倒戈风险（红 + 呼吸闪烁） */
+.diplomacy-panel__warn--defect {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  box-shadow: var(--glow-red);
+  animation: diplomacy-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes diplomacy-breathe {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+  50% { opacity: 0.6; box-shadow: 0 0 12px rgba(239, 68, 68, 0.8); }
+}
+
+/* 我方对外信任区 */
+.diplomacy-panel__outbound {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-dim);
+}
+
+.diplomacy-panel__outbound h3 {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 var(--space-1);
+}
+
+.diplomacy-panel__outbound ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.diplomacy-panel__outbound li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ============================================================
+ * 20. 命令握手终端（.command-terminal*）— UI-B 赛博朋克
+ *
+ * 设计：命令输入行青光聚焦、候选命令卡（青光描边 + 意图色标 + 确认/修改按钮）、
+ * 外交响应卡（accept 绿/reject 红/flake 黄 + 信任度 delta）、待锁命令队列时间线
+ * （左侧青竖线 + 节点点）、需澄清卡（黄警示）。
+ * ============================================================ */
+.command-terminal__empty {
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: var(--space-3);
+  text-align: center;
+}
+
+/* —— 命令输入行 —— */
+.command-terminal__input-row {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+
+.command-terminal__input {
+  flex: 1;
+  font-family: var(--font-mono);
+}
+
+/* 输入框聚焦：青光增强（基础 input:focus 已有，此处加终端特化） */
+.command-terminal__input:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 1px var(--accent-cyan), 0 0 12px rgba(6, 182, 212, 0.5);
+}
+
+.command-terminal__phase-hint {
+  margin: 0 0 var(--space-2);
+  font-size: 11px;
+  color: var(--warn);
+  font-style: italic;
+}
+
+/* —— 候选命令卡（青光描边）—— */
+.command-terminal__candidate {
+  padding: var(--space-2);
+  background: var(--bg-item);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-2);
+  box-shadow: var(--glow-cyan);
+}
+
+.command-terminal__candidate-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.command-terminal__candidate-header strong {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--accent-cyan);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* 意图色标（chip，按 intent modifier 染色） */
+.command-terminal__intent {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  letter-spacing: 0.04em;
+}
+.command-terminal__intent--move {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+.command-terminal__intent--attack {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.command-terminal__intent--capture_node {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+.command-terminal__intent--hold {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.command-terminal__summary {
+  margin: 0 0 var(--space-1);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.command-terminal__details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-3);
+  margin: 0 0 var(--space-2);
+  font-size: 11px;
+}
+
+.command-terminal__details dt {
+  color: var(--text-muted);
+}
+
+.command-terminal__details dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+}
+
+.command-terminal__candidate-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.command-terminal__confirm {
+  /* 确认按钮：青填充（复用 btn--primary 视觉） */
+  background: var(--accent-cyan);
+  color: #04222a;
+  font-weight: 500;
+  box-shadow: var(--glow-cyan);
+}
+
+/* —— 外交响应卡（accept 绿/reject 红/flake 黄边）—— */
+.command-terminal__diplomacy {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-dim);
+}
+
+.command-terminal__diplomacy h3 {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 var(--space-1);
+}
+
+.command-terminal__diplomatic-card {
+  padding: var(--space-2);
+  background: var(--bg-item);
+  border: 1px solid;
+  border-left: 3px solid;
+  border-radius: var(--radius);
+  margin-bottom: var(--space-2);
+}
+
+.command-terminal__diplomatic-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.command-terminal__diplomatic-header strong {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.command-terminal__diplomatic-request {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.command-terminal__diplomatic-message {
+  margin: 0 0 var(--space-1);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.command-terminal__diplomatic-trust {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.command-terminal__diplomatic-warn {
+  color: var(--danger);
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+/* —— 需澄清卡（黄警示）—— */
+.command-terminal__clarify {
+  padding: var(--space-2);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-2);
+  box-shadow: inset 0 0 12px rgba(245, 158, 11, 0.08);
+}
+
+.command-terminal__clarify strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--warn);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  text-shadow: var(--glow-warn);
+}
+
+.command-terminal__clarify p {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.command-terminal__clarify ul {
+  margin: 0 0 var(--space-1);
+  padding-left: var(--space-3);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* —— 待锁命令队列时间线（左侧青竖线 + 节点点）—— */
+.command-terminal__queue {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg-item);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+}
+
+.command-terminal__queue h3 {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--accent-cyan);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 var(--space-2);
+}
+
+.command-terminal__queue ul {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0 0 0 var(--space-3);
+  border-left: 2px solid var(--accent-cyan);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  /* 左侧青竖线作时间线轴 */
+  box-shadow: -1px 0 6px rgba(6, 182, 212, 0.15);
+}
+
+.command-terminal__queue li {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  padding-left: var(--space-2);
+}
+
+/* 节点点：左侧青光圆点对齐竖线 */
+.command-terminal__queue li::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--space-3) - 3px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan);
+}
+
+.command-terminal__lock {
+  width: 100%;
+  background: var(--accent-cyan);
+  color: #04222a;
+  font-weight: 500;
+  box-shadow: var(--glow-cyan);
+}
+
+/* —— 错误条 —— */
+.command-terminal__error {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: var(--danger);
+}
+
+.command-terminal__hint {
+  margin: var(--space-1) 0 0;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ============================================================
+ * 21. 事件日志台（.event-log-panel*）— UI-B 赛博朋克
+ *
+ * 设计：日志行（等宽 JetBrains Mono + 来源色标徽章 + 时间码 text-dim + 单行截断）、
+ * 虚拟滚动容器（青光滚动条）、空状态。
+ * 来源色：physics 青 / director 紫 / rule-engine 黄 / diplomacy 绿 / intel 蓝。
+ * ============================================================ */
+.event-log-panel__count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.event-log-panel__refresh {
+  float: right;
+  font-size: 10px;
+  padding: 1px 8px;
+  margin-left: var(--space-2);
+}
+
+.event-log-panel__empty {
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: var(--space-3);
+  text-align: center;
+}
+
+/* 虚拟滚动容器：青光细滚动条（全局已有，此处补容器边框） */
+.event-log-panel__viewport {
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-void);
+  font-family: var(--font-mono);
+}
+
+/* 日志行：等宽 + 单行截断 */
+.event-log-panel__entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  font-size: 11px;
+  line-height: 28px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.06);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.event-log-panel__entry:hover {
+  background: rgba(6, 182, 212, 0.04);
+}
+
+/* 来源徽章（色标 chip） */
+.event-log-panel__source {
+  flex-shrink: 0;
+  font-size: 9px;
+  padding: 1px 5px;
+  border: 1px solid;
+  border-radius: var(--radius);
+  letter-spacing: 0.04em;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* live 当前回合：青亮 */
+.event-log-panel__source--live {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+  text-shadow: 0 0 4px rgba(6, 182, 212, 0.6);
+}
+/* physics 物理：青 */
+.event-log-panel__source--physics {
+  color: var(--accent-cyan);
+  border-color: rgba(6, 182, 212, 0.5);
+}
+/* director 导演：紫 */
+.event-log-panel__source--director {
+  color: #c084fc;
+  border-color: rgba(192, 132, 252, 0.5);
+}
+/* rule-engine 降级：黄 */
+.event-log-panel__source--rule-engine {
+  color: var(--warn);
+  border-color: rgba(245, 158, 11, 0.5);
+}
+/* diplomacy 外交：绿 */
+.event-log-panel__source--diplomacy {
+  color: var(--success);
+  border-color: rgba(16, 185, 129, 0.5);
+}
+/* intel 情报：蓝 */
+.event-log-panel__source--intel {
+  color: var(--accent-blue);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+/* 时间码：弱化 */
+.event-log-panel__turn {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+/* 日志正文：等宽 + 截断 */
+.event-log-panel__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+
+/* ============================================================
+ * 22. 战役生成器（.campaign-generator-panel*）— UI-B 赛博朋克
+ *
+ * 设计：阶段流水灯（横向步骤条，当前态青亮+辉光，完成绿，未到灰）、
+ * 生成中 spinner（青光环）、预览卡（七文件摘要网格）、warning/存疑徽章（黄）。
+ * ============================================================ */
+.campaign-generator-panel__stage {
+  margin: var(--space-2) 0;
+  padding: var(--space-2);
+  background: var(--bg-item);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-shadow: var(--glow-cyan);
+}
+
+/* 当前阶段：青亮 + 辉光呼吸 */
+.campaign-generator-panel__stage-active {
+  color: var(--accent-cyan);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  animation: stage-pulse 1.4s ease-in-out infinite;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.campaign-generator-panel__stage-active svg {
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
+@keyframes stage-pulse {
+  0%, 100% { text-shadow: 0 0 4px rgba(6, 182, 212, 0.4); }
+  50% { text-shadow: 0 0 12px rgba(6, 182, 212, 0.9); }
+}
+
+/* 阶段 spinner：青光环（旋转的环） */
+.campaign-generator-panel__spinner {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(6, 182, 212, 0.25);
+  border-top-color: var(--accent-cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  box-shadow: var(--glow-cyan);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* —— 预览卡（七文件摘要网格）—— */
+.campaign-generator-panel__preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.campaign-generator-panel__summary {
+  font-size: 11px;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.campaign-generator-panel__summary strong {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--accent-cyan);
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
+  text-shadow: 0 0 6px rgba(6, 182, 212, 0.3);
+}
+
+/* 降级模板徽章（黄） */
+.campaign-generator-panel__badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 9px;
+  padding: 1px 6px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius);
+  color: var(--warn);
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+/* warning / 存疑列表 */
+.campaign-generator-panel__warnings {
+  list-style: none;
+  margin: var(--space-1) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.campaign-generator-panel__warnings li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--warn);
+  padding: 2px var(--space-1);
+  background: rgba(245, 158, 11, 0.06);
+  border-left: 2px solid var(--warn);
+  border-radius: var(--radius);
+}
+
+.campaign-generator-panel__warnings li svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+

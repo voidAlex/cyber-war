@@ -174,7 +174,7 @@ function IntelRow({
   const label = ghostLabel(render)
   const fields = visibleFieldsFor(render)
   return (
-    <li className="intelligence-panel__row" data-level={render.level}>
+    <li className="intelligence-panel__row" data-level={render.level} data-ghost={render.ghost}>
       <span
         className="intelligence-panel__faction-dot"
         style={{ background: factionColor }}
