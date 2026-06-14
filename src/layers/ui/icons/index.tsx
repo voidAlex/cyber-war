@@ -33,6 +33,7 @@ import {
   Unlock,
   CheckCircle2,
   XCircle,
+  FolderOpen,
   type LucideProps,
 } from 'lucide-react'
 import { type JSX } from 'react'
@@ -59,6 +60,7 @@ export {
   Unlock,
   CheckCircle2,
   XCircle,
+  FolderOpen,
 }
 
 /**
@@ -86,6 +88,7 @@ const ICON_MAP = {
   unlock: Unlock,
   'check-circle': CheckCircle2,
   'x-circle': XCircle,
+  'folder-open': FolderOpen,
 } as const
 
 /** 图标名（kebab-case）。 */

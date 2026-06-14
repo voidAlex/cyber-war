@@ -1,9 +1,12 @@
 /**
- * 应用主布局（App.tsx）— M3 UI 层接线。
+ * 应用主布局（App.tsx）— M3 UI 层接线 + A 标题屏三态路由。
  *
- * 布局（PRD §4 / TDD §2 + M3 范围#6 + D 布局重构）：
- * - 未加载 LLM 配置 → 显示 LLMConfigPanel 作为入口（占满中心）。
- * - 已加载 → 三栏主界面（无 footer，沙盘吃满中栏）：
+ * 三态路由（UI 重构第 2 批「A 标题屏」）：
+ * - **configLock**（`!configUnlocked`）：LLMConfigPanel 铺满（首次配置 / legacy 重输 apiKey）。
+ * - **titleScreen**（`configUnlocked && context === null`）：TitleScreen 标题屏主菜单
+ *   （logo + 新战役 / 继续存档 / 设置 + 底部状态条）。玩家启动后先看标题屏选战役/存档，
+ *   不再直通半空三栏。
+ * - **inGame**（`context !== null`）：三栏游戏界面（D 布局，无 footer，沙盘吃满中栏）：
  *   - 左栏（按功能分组，3 组 CollapsibleSection）：
  *     · 行动组：回合控制（TurnControlPanel）
  *     · 信息组：情报（IntelligencePanel）+ 外交（DiplomacyPanel）
@@ -25,6 +28,7 @@
 
 import { useEffect, type JSX } from 'react'
 import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector, IntelligencePanel, DiplomacyPanel, CollapsibleSection } from '@/layers/ui'
+import TitleScreen from '@/layers/ui/title/TitleScreen'
 import SandboxErrorBoundary from '@/layers/ui/sandbox/SandboxErrorBoundary'
 import { useGameStore } from '@/store/game-store'
 import { logger } from '@/utils/logger'
@@ -89,7 +93,11 @@ export default function App(): JSX.Element {
     }
   }, [])
 
-  // 未加载配置：配置面板作为入口（仅显示全局错误横幅）
+  // ===========================================================================
+  // 三态路由（A 标题屏）：configLock → titleScreen → inGame
+  // ===========================================================================
+
+  // ① configLock：未加载 LLM 配置（首次 / legacy 重输 apiKey）→ LLMConfigPanel 铺满
   if (!configUnlocked) {
     return (
       <div className="app-shell app-shell--locked">
@@ -110,6 +118,18 @@ export default function App(): JSX.Element {
     )
   }
 
+  // ② titleScreen：已解锁配置但未进入游戏（context === null）→ 标题屏主菜单
+  //    玩家启动后先看标题屏选战役/存档，不再直通半空三栏。
+  if (context === null) {
+    return (
+      <div className="app-shell app-shell--title">
+        <GlobalBanner />
+        <TitleScreen />
+      </div>
+    )
+  }
+
+  // ③ inGame：已进入游戏（context !== null）→ 三栏游戏界面（D 布局）
   // 右栏：briefing 阶段显示战报，其他阶段显示命令终端
   const showBriefing = phase === 'briefing'
 

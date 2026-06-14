@@ -156,6 +156,11 @@ a {
   align-items: stretch;
 }
 
+/* 标题屏态（A 标题屏）：TitleScreen 自身 flex:1 撑满，无需 header */
+.app-shell--title {
+  align-items: stretch;
+}
+
 /* —— Header：赛博朋克化（HUD 横条 + 青光底分隔 + 角装饰）—— */
 .app-shell__header {
   position: relative;
@@ -2576,3 +2581,452 @@ th {
   flex-shrink: 0;
 }
 
+
+/* ============================================================
+ * N. 标题屏主菜单（.title-screen*）— A 标题屏（UI 重构第 2 批）
+ *
+ * 赛博朋克全屏：独立背景层（比 body 更浓的径向光晕 + 网格 + 扫描线）+
+ * 中央大 logo（Orbitron + 青光描边 + 辉光）+ 三主菜单按钮（chamfered 切角 +
+ * 青光描边 + hover 扫光）+ 展开区（复用 CampaignPanel/SaveListPanel/LLMConfigPanel）+
+ * 底部状态条（版本号 + LLM 状态）。
+ *
+ * 三态路由（App.tsx）：configUnlocked && context===null 时渲染。
+ * 进入游戏后由 App 卸载本组件，切到三栏。
+ * ============================================================ */
+
+/* —— 标题屏外壳：全屏 flex column，溢出隐藏（背景层绝对定位） —— */
+.title-screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* —— 背景层：独立叠加（比 body 更浓），绝对定位铺满 —— */
+.title-screen__bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-color: var(--bg-void);
+  background-image:
+    /* 中央径向青光晕（logo 后方光晕） */
+    radial-gradient(
+      ellipse at 50% 38%,
+      rgba(6, 182, 212, 0.18),
+      transparent 55%
+    ),
+    /* 左上角蓝光晕 */
+    radial-gradient(circle at 15% 10%, rgba(59, 130, 246, 0.12), transparent 40%),
+    /* 右下角青光晕 */
+    radial-gradient(circle at 85% 90%, rgba(6, 182, 212, 0.1), transparent 40%),
+    /* 细密网格（比 body 更显） */
+    linear-gradient(rgba(6, 182, 212, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(6, 182, 212, 0.05) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    40px 40px,
+    40px 40px;
+  /* 扫描线（标题屏专用，比 body::before 略浓） */
+  background-blend-mode: screen;
+}
+
+/* 背景层叠加一层移动扫描带（缓慢上下扫，赛博 HUD 感） */
+.title-screen__bg::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 120px;
+  top: -120px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(6, 182, 212, 0.06) 50%,
+    transparent
+  );
+  animation: title-scan 8s linear infinite;
+}
+
+@keyframes title-scan {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(calc(100vh + 120px)); }
+}
+
+/* —— 中央内容区：logo + 主菜单 + 展开区，居中，z-index 在背景层之上 —— */
+.title-screen__content {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-4);
+  overflow-y: auto;
+}
+
+/* —— 大 logo —— */
+.title-screen__logo {
+  text-align: center;
+  margin-bottom: var(--space-4);
+  /* logo 整体呼吸辉光（缓慢脉动，赛博全息感） */
+  animation: title-breathe 4s ease-in-out infinite;
+}
+
+@keyframes title-breathe {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(6, 182, 212, 0.3)); }
+  50% { filter: drop-shadow(0 0 18px rgba(6, 182, 212, 0.55)); }
+}
+
+.title-screen__logo-en {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(28px, 6vw, 64px);
+  letter-spacing: 0.12em;
+  color: var(--accent-cyan);
+  /* 双层 text-shadow：内层亮白 + 外层青光晕 */
+  text-shadow:
+    0 0 4px rgba(255, 255, 255, 0.5),
+    0 0 12px rgba(6, 182, 212, 0.8),
+    0 0 28px rgba(6, 182, 212, 0.5);
+  margin: 0;
+  line-height: 1.1;
+}
+
+.title-screen__logo-cn {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(16px, 3vw, 28px);
+  letter-spacing: 0.3em;
+  color: var(--text);
+  text-shadow: 0 0 8px rgba(6, 182, 212, 0.4);
+  margin: var(--space-2) 0 0;
+}
+
+.title-screen__logo-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+  margin-top: var(--space-3);
+  opacity: 0.7;
+}
+
+/* —— 主菜单按钮组 —— */
+.title-screen__menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(440px, 90vw);
+}
+
+/* —— 主菜单按钮：chamfered 切角 + 青光描边 + hover 扫光 —— */
+.title-screen__menu-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(
+    135deg,
+    rgba(6, 182, 212, 0.08),
+    rgba(15, 23, 42, 0.85)
+  );
+  border: 1px solid var(--border);
+  /* 切角（左上 + 右下，与 .panel 一致） */
+  clip-path: var(--chamfer);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  /* 入场过渡：边框/背景/阴影 */
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.12s ease;
+}
+
+/* 描边用内层伪元素补（clip-path 裁掉 border 的标准做法） */
+.title-screen__menu-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* 切角描边（半透明青） */
+  background:
+    linear-gradient(135deg, var(--accent-cyan), transparent 30%) border-box;
+  opacity: 0.15;
+  transition: opacity 0.18s ease;
+}
+
+/* hover 扫光：从左滑过的青色高光带 */
+.title-screen__menu-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgba(6, 182, 212, 0.25),
+    transparent
+  );
+  transform: skewX(-20deg);
+  pointer-events: none;
+}
+
+.title-screen__menu-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: linear-gradient(
+    135deg,
+    rgba(6, 182, 212, 0.18),
+    rgba(15, 23, 42, 0.9)
+  );
+  transform: translateX(4px);
+  box-shadow: var(--glow-cyan);
+}
+
+.title-screen__menu-btn:hover:not(:disabled)::before {
+  opacity: 0.35;
+}
+
+/* hover 时扫光带滑过 */
+.title-screen__menu-btn:hover:not(:disabled)::after {
+  animation: title-sweep 0.9s ease;
+}
+
+@keyframes title-sweep {
+  0% { left: -60%; }
+  100% { left: 120%; }
+}
+
+.title-screen__menu-btn:active:not(:disabled) {
+  transform: translateX(2px) scale(0.99);
+}
+
+.title-screen__menu-btn:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.title-screen__menu-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 激活态（已展开对应面板）：边框更亮 + 背景更浓 */
+.title-screen__menu-btn--active {
+  border-color: var(--border-strong);
+  background: linear-gradient(
+    135deg,
+    rgba(6, 182, 212, 0.22),
+    rgba(15, 23, 42, 0.92)
+  );
+  box-shadow: var(--glow-cyan);
+}
+
+.title-screen__menu-btn--active::before {
+  opacity: 0.4;
+}
+
+/* 菜单按钮内：图标 + 主标签 + 副标签 */
+.title-screen__menu-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--accent-cyan);
+  filter: drop-shadow(0 0 4px rgba(6, 182, 212, 0.6));
+}
+
+.title-screen__menu-label {
+  flex-shrink: 0;
+  min-width: 64px;
+}
+
+.title-screen__menu-sub {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* —— 展开区（复用 CampaignPanel/SaveListPanel/LLMConfigPanel） —— */
+.title-screen__panel-area {
+  width: min(680px, 94vw);
+  max-height: 52vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid var(--border-strong);
+  clip-path: var(--chamfer);
+  box-shadow:
+    var(--glow-cyan),
+    0 8px 32px rgba(0, 0, 0, 0.5);
+  /* 入场：轻微上滑 + 淡入 */
+  animation: title-panel-in 0.22s ease;
+}
+
+@keyframes title-panel-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.title-screen__panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: rgba(6, 182, 212, 0.06);
+}
+
+.title-screen__panel-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--accent-cyan);
+  text-shadow: 0 0 6px rgba(6, 182, 212, 0.4);
+}
+
+.title-screen__panel-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.title-screen__panel-close:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* 展开区主体：滚动容器，复用面板自带样式 */
+.title-screen__panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+/* 展开区内复用的 .panel 去掉自身切角（外层已有切角 + 描边，避免双层） */
+.title-screen__panel-body > .panel {
+  clip-path: none;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  margin: 0;
+}
+
+.title-screen__panel-body > .panel::before,
+.title-screen__panel-body > .panel::after {
+  display: none;
+}
+
+/* —— 底部状态条 —— */
+.title-screen__statusbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(10, 14, 26, 0.85);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.title-screen__status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.title-screen__status-model {
+  color: var(--text);
+}
+
+.title-screen__status-spacer {
+  flex: 1;
+}
+
+.title-screen__status-version {
+  color: var(--accent-cyan);
+  text-shadow: 0 0 4px rgba(6, 182, 212, 0.4);
+}
+
+/* 状态指示灯（与 app-shell__status-dot 同风格，标题屏专用） */
+.title-screen__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.title-screen__status-dot--on {
+  background: var(--success);
+  box-shadow: var(--glow-green);
+  animation: title-pulse 2s ease-in-out infinite;
+}
+
+.title-screen__status-dot--off {
+  background: var(--danger);
+  box-shadow: var(--glow-red);
+}
+
+@keyframes title-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* —— 响应式：窄屏（<1024）缩小 logo + 菜单纵向 —— */
+@media (max-width: 1023px) {
+  .title-screen__menu {
+    width: min(360px, 92vw);
+  }
+
+  .title-screen__logo-en {
+    letter-spacing: 0.08em;
+  }
+
+  .title-screen__panel-area {
+    max-height: 48vh;
+  }
+}
+
+/* —— 偏好减少动效：关闭扫描带/呼吸/扫光动画 —— */
+@media (prefers-reduced-motion: reduce) {
+  .title-screen__bg::after,
+  .title-screen__logo,
+  .title-screen__menu-btn:hover:not(:disabled)::after,
+  .title-screen__status-dot--on,
+  .title-screen__panel-area {
+    animation: none;
+  }
+}
