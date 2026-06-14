@@ -146,10 +146,11 @@ export default function EventLogPanel(): JSX.Element {
       {total === 0 ? (
         <p className="event-log-panel__empty">暂无事件记录。下命令并结算后此处显示事件流。</p>
       ) : (
+        // viewport 固定高度 + 滚动已抽到 styles.css .event-log-panel__viewport
+        // （原 inline height/overflowY 静态值移除，仅保留 onScroll 与 ref）。
         <div
           ref={scrollRef}
           className="event-log-panel__viewport"
-          style={{ height: VIEWPORT_HEIGHT, overflowY: 'auto' }}
           onScroll={handleScroll}
         >
           <div style={{ height: totalHeight, position: 'relative' }}>
@@ -192,13 +193,16 @@ function formatEnvelopeBrief(env: ActionEnvelope): string {
   return `${unitId} → ${targetStr}`
 }
 
-/** 来源标记中文显示 */
+/** 来源标记中文显示（与 styles.css 6 色徽章注释对齐：
+ *  physics 青 / director 紫 / rule-engine 黄 / diplomacy 绿 / intel 蓝 / live 青亮） */
 function sourceLabel(source: LogEntry['source']): string {
   const labels: Record<string, string> = {
     live: '当前',
     physics: '物理',
     director: '导演',
     'rule-engine': '降级',
+    diplomacy: '外交',
+    intel: '情报',
   }
   return labels[source] ?? source
 }

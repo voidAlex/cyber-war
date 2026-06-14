@@ -71,7 +71,11 @@ pub enum AppError {
         message: String,
     },
 
-    /// 加密错误（KDF 派生失败、AEAD 解密失败、密文格式损坏等）
+    /// keyring 异步任务调度失败（`spawn_blocking` 返回的 `JoinError`）。
+    ///
+    /// 注：`crypto/` 加密原语模块已于去口令改造中移除（apiKey 改走 OS 凭证库 + 明文
+    /// config 文件，不再需要 KDF/AEAD）。此变体名 `Crypto` 为保持 IPC 契约稳定而保留，
+    /// 原有 AEAD 语义已废弃；当前实际承载 keyring 调度错误（见 `keyring_store.rs`）。
     #[error("加密错误: {0}")]
     #[serde(rename = "crypto")]
     Crypto(String),

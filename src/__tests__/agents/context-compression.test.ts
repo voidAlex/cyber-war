@@ -247,3 +247,85 @@ describe('createDefaultContextCompressor', () => {
     expect(result.contextSummaries[10]).toBe(result.summary)
   })
 })
+
+// =============================================================================
+// P1-6 回归：director 段位固定槽互斥（防同回合重复 event id）
+// =============================================================================
+//
+// 第 5 回合（report + 上下文压缩同触发）若 report/压缩/fallback 用了相同
+// sequence，event-log 唯一契约被破坏。此处断言四个固定槽 SEQUENCE 常量两两不同，
+// 且通过公开 API 构造第 5 回合的"全事件集"验证 id 唯一。
+
+describe('P1-6 director 段位固定槽互斥', () => {
+  it('四个 SEQUENCE 常量两两不同（report 3997 / mock 压缩 3998 / 真压缩 3999 / 兜底 4000）', async () => {
+    const { SEQUENCE_CONTEXT_COMPRESSION } = await import(
+      '@/layers/agents/roles/context-compression'
+    )
+    const { SEQUENCE_DIRECTOR_REPORT, SEQUENCE_DIRECTOR_MOCK_COMPRESS } = await import(
+      '@/layers/agents/roles/director'
+    )
+    const { SEQUENCE_RULE_ENGINE_NOTICE } = await import(
+      '@/layers/agents/director/rule-engine-fallback'
+    )
+    const slots = [
+      SEQUENCE_DIRECTOR_REPORT,
+      SEQUENCE_DIRECTOR_MOCK_COMPRESS,
+      SEQUENCE_CONTEXT_COMPRESSION,
+      SEQUENCE_RULE_ENGINE_NOTICE,
+    ]
+    // 与契约文档一致
+    expect(SEQUENCE_DIRECTOR_REPORT).toBe(3997)
+    expect(SEQUENCE_DIRECTOR_MOCK_COMPRESS).toBe(3998)
+    expect(SEQUENCE_CONTEXT_COMPRESSION).toBe(3999)
+    expect(SEQUENCE_RULE_ENGINE_NOTICE).toBe(4000)
+    // 两两不同
+    expect(new Set(slots).size).toBe(slots.length)
+  })
+
+  it('第 5 回合：mock 压缩 + director report + 兜底说明同触发，event id 全部唯一', async () => {
+    // 模拟第 5 回合 briefing 阶段：上下文压缩（mock 默认压缩器）产出压缩事件，
+    // 与 director 战报固定槽、规则引擎兜底说明固定槽在同回合落 event-log。
+    // 三者 sequence 必须互斥 → event id（含 sequence）全部唯一。
+    const { SEQUENCE_DIRECTOR_REPORT, SEQUENCE_DIRECTOR_MOCK_COMPRESS } = await import(
+      '@/layers/agents/roles/director'
+    )
+    const { SEQUENCE_CONTEXT_COMPRESSION } = await import(
+      '@/layers/agents/roles/context-compression'
+    )
+    const { SEQUENCE_RULE_ENGINE_NOTICE, ruleEngineFallback } = await import(
+      '@/layers/agents/director/rule-engine-fallback'
+    )
+
+    const turn = 5
+    const scenarioSeed = 'p1-6:turn5'
+
+    // 1) mock 压缩事件（默认压缩器，对应 compressContextMock 固定槽 3998）
+    const compressor = createDefaultContextCompressor()
+    const world = makeRichWorld({ turnIndex: turn })
+    const compressOut = await compressor.compress(world, scenarioSeed, turn)
+    // 2) director 战报事件（reportToDirectorAction 固定槽 3997）——此处用同 sequence 构造等价 id
+    const reportEventId = `evt:${SEQUENCE_DIRECTOR_REPORT}:director-report:0`
+    // 3) 规则引擎兜底说明（makeFallbackNotice 固定槽 4000）——调 ruleEngineFallback 取真实 notice
+    const fallback = ruleEngineFallback({
+      physicsResult: { turn, events: [], stateChanges: { unitUpdates: {}, annihilated: [], objectiveChanges: [] }, success: true },
+      envelopes: [],
+      world,
+      scenarioSeed,
+      turn,
+    })
+    const notice = fallback.directorEvents.find((e) => e.sequence === SEQUENCE_RULE_ENGINE_NOTICE)
+    expect(notice).toBeDefined()
+
+    // 真压缩事件固定槽校验（与 mock 压缩槽不同）
+    expect(compressOut.event.sequence).toBe(SEQUENCE_DIRECTOR_MOCK_COMPRESS)
+    expect(SEQUENCE_CONTEXT_COMPRESSION).not.toBe(SEQUENCE_DIRECTOR_MOCK_COMPRESS)
+
+    // 收集第 5 回合所有固定槽事件的 id，断言唯一
+    const ids = new Set<string>([
+      compressOut.event.id, // evt:3998:context-summary:5
+      reportEventId,        // evt:3997:director-report:0
+      notice!.id,           // evt:4000:rule-engine-notice:0
+    ])
+    expect(ids.size).toBe(3)
+  })
+})

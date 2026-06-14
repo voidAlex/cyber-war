@@ -35,6 +35,14 @@ export const CONTEXT_COMPRESSION_INTERVAL = 5
 /** 摘要覆盖的最近回合数（窗口） */
 export const CONTEXT_COMPRESSION_WINDOW = 5
 
+/**
+ * 上下文压缩事件的 event-log sequence 固定槽（P1-6 互斥槽位）。
+ *
+ * 与 director 段位其他固定槽互斥（见 director.ts SEQUENCE_DIRECTOR_* 常量族）：
+ *   3997：director 战报；3998：mock 压缩；3999：真压缩（本常量）；4000：兜底说明。
+ */
+export const SEQUENCE_CONTEXT_COMPRESSION = 3999
+
 /** 摘要来源标签（与 event-log source 对齐） */
 export type ContextSummarySource = 'director' | 'rule-engine'
 
@@ -213,8 +221,8 @@ export async function compressContextWithRuleEngine(
     [turn]: summary,
   }
 
-  // 压缩事件（source:'rule-engine'，回放采信；sequence 用 director 段位末尾 3998）
-  const sequence = 3998
+  // 压缩事件（source:'rule-engine'，回放采信；sequence 用 director 段位互斥槽 3999）
+  const sequence = SEQUENCE_CONTEXT_COMPRESSION
   const event: AgentAction = {
     id: `evt:${sequence}:context-summary:${turn}`,
     turn,

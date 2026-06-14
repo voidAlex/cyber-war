@@ -53,9 +53,10 @@ export async function llmKeyLoad(): Promise<string | null> {
   try {
     const v = localStorage.getItem(LS_KEY)
     if (v === null) return null
-    // 对齐 Rust trim 语义：纯空白视为无 key
+    // 对齐 Rust 降级文件语义（keyring_store.rs:201-205）：trim 后返回 trimmed 值，
+    // 纯空白视为无 key。原实现误返回原始 v（含首尾空白），与 Rust 背离，已修正。
     const trimmed = v.trim()
-    return trimmed.length === 0 ? null : v
+    return trimmed.length === 0 ? null : trimmed
   } catch {
     return null
   }

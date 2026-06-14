@@ -82,9 +82,9 @@ describe('llmKeyLoad', () => {
     expect(await llmKeyLoad()).toBeNull()
   })
 
-  it('带空白的 key trim 后非空 → 返回原值（不 trim 返回内容）', async () => {
+  it('带空白的 key trim 后非空 → 返回 trimmed 值（对齐 Rust 降级文件语义）', async () => {
     store.set('cwmock:llm-api-key', '  sk-with-ws  \n')
-    expect(await llmKeyLoad()).toBe('  sk-with-ws  \n')
+    expect(await llmKeyLoad()).toBe('sk-with-ws')
   })
 })
 

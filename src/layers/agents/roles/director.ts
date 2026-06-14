@@ -163,6 +163,26 @@ export function createDefaultContextCompressor(): ContextCompressor {
 export const directorRole: DirectorRole = createDirectorRole()
 
 // ============================================================================
+// event-log sequence 槽位常量（P1-6 互斥槽位，防同回合重复 event id）
+// ============================================================================
+//
+// director 段位（3000+）末尾的固定槽必须**全局互斥**，否则第 5 回合
+// （report + 上下文压缩同触发）会产生重复 event id，破坏 event-log 唯一契约。
+//
+// 槽位分配（与 context-compression.ts / rule-engine-fallback.ts 对齐）：
+//   3000 + i（i=0..996）：director 覆写事件（overridesToDirectorActions，每条占一槽）
+//   3997：director 战报事件（reportToDirectorAction）
+//   3998：mock 上下文压缩事件（compressContextMock，离线默认压缩器）
+//   3999：真 上下文压缩事件（context-compression.ts compressContextWithRuleEngine）
+//   4000：规则引擎兜底说明（rule-engine-fallback.ts makeFallbackNotice）
+//
+// 注意：mock 压缩（3998）与真压缩（3999）槽位不同——但两者互斥使用
+// （同一编排只挂载 createDefaultContextCompressor 或 createLlmDirectorRole 之一，
+// 不会同时产出 3998 和 3999 事件）。即便同时存在，id 也不冲突。
+export const SEQUENCE_DIRECTOR_REPORT = 3997
+export const SEQUENCE_DIRECTOR_MOCK_COMPRESS = 3998
+
+// ============================================================================
 // M3 真 LLM 导演部（终裁 + 覆写留痕 + 流式战报；失败回退 mock）
 // ============================================================================
 
@@ -394,7 +414,8 @@ function overridesToDirectorActions(
 /**
  * 把 LLM reportText 转为 source:'director' 战报事件（流式战报落 event-log）。
  *
- * sequence 用 director 段位末尾槽（3000 + overrides.length + 1）。
+ * sequence 用 director 段位互斥槽位 3997（见 SEQUENCE_DIRECTOR_* 常量族，
+ * 与 mock 压缩/真压缩/fallback notice 互斥，避免同回合重复 event id）。
  */
 function reportToDirectorAction(
   reportText: string,
@@ -402,7 +423,8 @@ function reportToDirectorAction(
   turn: number,
   keyEvents: string[],
 ): AgentAction {
-  const sequence = 3000 + 998 // 战报事件固定槽（不与覆写 3000+ 冲突）
+  // P1-6 槽位互斥：director report 固定 3997
+  const sequence = SEQUENCE_DIRECTOR_REPORT
   return {
     id: `evt:${sequence}:director-report:0`,
     turn,
@@ -447,7 +469,8 @@ function adjudicateMock(params: DirectorAdjudicateParams): DirectorAdjudicateRes
  * 规则引擎模板产出 ~500 tokens 态势总结（source:'rule-engine'，稳定可回放）：
  * 1. generateRuleEngineSummary 汇总近 {WINDOW} 回合关键事件 + 阵营态势 + 节点控制。
  * 2. applyContextSummary 产出新 contextSummaries（不可变）。
- * 3. 压缩事件标 source:'rule-engine'，sequence 用 director 段位 3999（回放采信）。
+ * 3. 压缩事件标 source:'rule-engine'，sequence 用 director 段位 3998
+ *    （P1-6 互斥槽位，与 context-compression.ts 真压缩 3999、report 3997 区分）。
  *
  * 落盘（写 factions/{factionId}/context-summary.md）由编排器经 gateway 完成
  * （本方法不直接调 Tauri；保持纯逻辑边界）。
@@ -459,8 +482,8 @@ async function compressContextMock(
 ): Promise<ContextCompressionOutput> {
   const summary = generateRuleEngineSummary(world, turn)
   const newWorld = applyContextSummary(world, turn, summary)
-  // 压缩事件（source:'rule-engine'，回放采信；sequence 用 director 段位 3999）
-  const sequence = 3999
+  // 压缩事件（source:'rule-engine'，回放采信；sequence 用 director 段位 3998，互斥槽位）
+  const sequence = SEQUENCE_DIRECTOR_MOCK_COMPRESS
   const event: AgentAction = {
     id: `evt:${sequence}:context-summary:${turn}`,
     turn,

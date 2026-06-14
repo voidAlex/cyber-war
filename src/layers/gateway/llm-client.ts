@@ -201,6 +201,74 @@ export function streamChat(opts: StreamChatOptions): StreamChatHandle {
 }
 
 /**
+ * Anthropic 请求体的默认 max_tokens（P1-7）。
+ *
+ * Anthropic /v1/messages 强制要求 max_tokens 字段。此值为导演部/战区/敌盟等
+ * Agent 的合理产出上限（与 LlmCallConfig.maxTokens 默认值对齐）。
+ * 调用方可经 opts.extraParams.max_tokens 覆盖。
+ */
+export const ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
+
+/**
+ * 按 provider 分支构造 LLM 请求 payload（纯函数，可单测）。
+ *
+ * P1-7：Anthropic /v1/messages 端点要求顶层 `system` + `max_tokens`，
+ * 而 OpenAI/DeepSeek/Custom 兼容端点用 `messages[0]` (role:system)。
+ * 此前 start() 对所有 provider 一律发 OpenAI 格式 → anthropic 必 4xx。
+ *
+ * - anthropic：从 messages 中提取 role:system 的 content 到顶层 `system`，
+ *   剩余 user/assistant 消息保留为 `messages`；强制加 `max_tokens`
+ *   （默认 ANTHROPIC_DEFAULT_MAX_TOKENS，可被 extraParams.max_tokens 覆盖）。
+ * - deepseek/openai/custom：完全保持原 OpenAI 兼容格式不变。
+ *
+ * thinking/extraParams 透传规则：
+ * - anthropic：thinking 透传到顶层（Anthropic extended thinking）；extraParams 浅合并。
+ * - 其余：thinking/extraParams 与原行为一致。
+ *
+ * @param opts 流式请求选项
+ * @returns 适配 provider 的 payload 对象
+ */
+export function buildPayload(opts: StreamChatOptions): Record<string, unknown> {
+  if (opts.provider === 'anthropic') {
+    // 分离 system 消息（role:system）与对话消息（user/assistant）
+    const systemParts: string[] = []
+    const dialogMessages: Array<{ role: string; content: string }> = []
+    for (const m of opts.messages) {
+      if (m.role === 'system') {
+        // 多条 system 拼接（Anthropic 顶层 system 是单一字符串）
+        if (m.content) systemParts.push(m.content)
+      } else {
+        dialogMessages.push(m)
+      }
+    }
+    const payload: Record<string, unknown> = {
+      model: opts.model,
+      messages: dialogMessages,
+      stream: true,
+      // Anthropic 强制要求；默认值可被 extraParams.max_tokens 覆盖（见下方 Object.assign）
+      max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
+    }
+    // 仅当存在 system 内容时设置顶层 system（空字符串也会被 API 接受，但显式省略更干净）
+    if (systemParts.length > 0) {
+      payload.system = systemParts.join('\n\n')
+    }
+    if (opts.thinking) payload.thinking = opts.thinking
+    if (opts.extraParams) Object.assign(payload, opts.extraParams)
+    return payload
+  }
+
+  // deepseek/openai/custom：原 OpenAI 兼容格式（system 作为 messages[0]）
+  const payload: Record<string, unknown> = {
+    model: opts.model,
+    messages: opts.messages,
+    stream: true,
+  }
+  if (opts.thinking) payload.thinking = opts.thinking
+  if (opts.extraParams) Object.assign(payload, opts.extraParams)
+  return payload
+}
+
+/**
  * streamChat 返回的流式句柄。
  *
  * 同时实现 AsyncIterable<LlmStreamEvent>（可 for await）与
@@ -290,16 +358,15 @@ export class StreamChatHandle
       return
     }
 
-    // === Tauri 模式（生产 + vitest）：原 invoke 路径，行为不变 ===
-
-    // 构造 payload（OpenAI/DeepSeek 兼容 chat 格式）
-    const payload: Record<string, unknown> = {
-      model: this.opts.model,
-      messages: this.opts.messages,
-      stream: true,
-    }
-    if (this.opts.thinking) payload.thinking = this.opts.thinking
-    if (this.opts.extraParams) Object.assign(payload, this.opts.extraParams)
+    // === Tauri 模式（生产 + vitest）：原 invoke 路径，按 provider 分支构造 payload ===
+    //
+    // P1-7：Anthropic /v1/messages 与 OpenAI 兼容端点的请求体格式不同：
+    // - OpenAI/DeepSeek/Custom：system 作为 messages[0]（role:system），格式 {model,messages,stream}。
+    // - Anthropic：system 必须是顶层字段（不能塞进 messages），且必填 max_tokens；
+    //   router.rs 已为 anthropic 设 x-api-key + anthropic-version，stream.rs 按 anthropic
+    //   SSE 格式解析——唯独 payload 若仍用 OpenAI 的 system-as-message，Anthropic 会 4xx。
+    // 此处按 provider 分支构造，deepseek/openai/custom 完全保持原有行为不变。
+    const payload = buildPayload(this.opts)
 
     // 创建 Channel 订阅 Rust emit 的事件
     const channel = new Channel<LlmStreamEvent>()

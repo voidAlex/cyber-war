@@ -147,7 +147,8 @@ export default function Sandbox(): JSX.Element {
       try {
         app = new Application()
         await app.init({
-          background: 0x1a1d21,
+          // 与 styles.css --sandbox-bg 同值（0x0f172a），DOM canvas-host 与 PIXI 画布底色一致
+          background: 0x0f172a,
           antialias: true,
           resolution: window.devicePixelRatio || 1,
           autoDensity: true,

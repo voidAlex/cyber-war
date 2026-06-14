@@ -34,14 +34,12 @@ export default defineConfig({
     host: host || false,
     open: !host,
     proxy: {
-      '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
       // web 模式（浏览器 vite dev，供 agent-browser 验证）LLM 经此 proxy 真调 DeepSeek：
       // 浏览器直连 api.deepseek.com 有 CORS 限制，proxy 在 dev server 侧 changeOrigin 转发。
       // /deepseek/chat/completions → https://api.deepseek.com/chat/completions
       // 仅 web 模式（isWebMode() true）启用；Tauri 生产走 Rust reqwest，不经过此 proxy。
+      // 注：原 `/api` → localhost:3001 proxy 指向已删除的 legacy server/api-forwarder.ts，
+      // 随 server/ 一并移除（前端无任何代码引用 /api/llm/forward）。
       '/deepseek': {
         target: 'https://api.deepseek.com',
         changeOrigin: true,
@@ -59,7 +57,8 @@ export default defineConfig({
   },
   // Vitest 配置（继承自 vite.config；test.exclude 排除已废弃的 src-legacy 归档代码，
   // 与 tsconfig.json / eslint.config.js 的 exclude/ignores 对齐——src-legacy 仅借鉴不复用）
+  // 注：原 'server' 排除项随 legacy server/api-forwarder.ts 删除一并移除。
   test: {
-    exclude: ['node_modules', 'dist', 'src-legacy', 'server'],
+    exclude: ['node_modules', 'dist', 'src-legacy'],
   },
 })

@@ -166,10 +166,10 @@ function physicsEventsToAgentActions(
 /**
  * 构造一条固定的 director 战报 AgentAction（source:'director'，回放采信不重算）。
  *
- * 用 director 段位末尾固定槽 3000+998（与 director.ts reportToDirectorAction 对齐）。
+ * 用 director 段位互斥固定槽 3997（与 director.ts reportToDirectorAction 对齐，P1-6）。
  */
 function makeDirectorReportAction(turn: number, reportText: string): AgentAction {
-  const sequence = 3000 + 998
+  const sequence = 3000 + 997
   return {
     id: `evt:${sequence}:director-report:0`,
     turn,

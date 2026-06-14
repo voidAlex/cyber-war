@@ -462,7 +462,9 @@ function DiplomaticCard({
       <p className="command-terminal__diplomatic-message">{response.message}</p>
       <div className="command-terminal__diplomatic-trust">
         <span>信任度</span>
-        <strong style={{ color: delta > 0 ? '#4caf50' : delta < 0 ? '#e53935' : '#9e9e9e' }}>
+        {/* 信任度 delta 色用设计 token（去硬编码 Material 色）：
+            上升绿 / 下降红 / 持平灰 */}
+        <strong style={{ color: delta > 0 ? 'var(--success)' : delta < 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
           {deltaText}
         </strong>
         <span>→ {trustAfter.trust}</span>

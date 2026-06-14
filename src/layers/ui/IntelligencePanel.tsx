@@ -31,13 +31,8 @@ const LEVEL_NAMES: Record<IntelLevel, string> = {
   3: '全量透视',
 }
 
-/** 情报级别标签配色（边框/文字色） */
-const LEVEL_COLORS: Record<IntelLevel, string> = {
-  0: '#6b6b6b',
-  1: '#e69138',
-  2: '#f1c232',
-  3: '#4caf50',
-}
+// 注：情报级别配色统一由 styles.css [data-level='0'..'3'] 青蓝色阶驱动
+// （L0 灰暗 → L3 青亮），不再在此硬编码旧 Material 色（橙/黄/绿）。
 
 /**
  * 情报置信度看板组件。
@@ -143,14 +138,9 @@ export default function IntelligencePanel(): JSX.Element {
 /** 情报级别计数 chip */
 function LevelChip({ level, count }: { level: IntelLevel; count: number }): JSX.Element {
   return (
-    <div
-      className="intelligence-panel__chip"
-      style={{ borderColor: LEVEL_COLORS[level] }}
-    >
-      <span
-        className="intelligence-panel__chip-level"
-        style={{ color: LEVEL_COLORS[level] }}
-      >
+    // 配色由 styles.css [data-level] 青蓝色阶接管（chip 边框 + chip-level 文字色）
+    <div className="intelligence-panel__chip" data-level={level}>
+      <span className="intelligence-panel__chip-level" data-level={level}>
         L{level}
       </span>
       <span className="intelligence-panel__chip-name">{LEVEL_NAMES[level]}</span>
@@ -183,10 +173,8 @@ function IntelRow({
       <div className="intelligence-panel__row-main">
         <div className="intelligence-panel__row-head">
           <span className="intelligence-panel__unit-id">{unit.id}</span>
-          <span
-            className="intelligence-panel__level-badge"
-            style={{ borderColor: LEVEL_COLORS[render.level], color: LEVEL_COLORS[render.level] }}
-          >
+          {/* 配色由 styles.css [data-level] 青蓝色阶接管（border-color + color） */}
+          <span className="intelligence-panel__level-badge" data-level={render.level}>
             L{render.level} {LEVEL_NAMES[render.level]}
           </span>
           {render.ghost && (

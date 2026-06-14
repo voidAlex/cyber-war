@@ -36,6 +36,10 @@ export default function App(): JSX.Element {
   const config = useGameStore((s) => s.config)
   const loadConfig = useGameStore((s) => s.loadConfig)
   const refreshSaves = useGameStore((s) => s.refreshSaves)
+  // legacy/no-api-key 场景：旧 config 文件的非密钥字段（异步 loadConfig 完成后才写入 store）。
+  // 用于给 LLMConfigPanel 容器打 key，在 pendingConfig 到达后强制重挂载，使 useState 重取
+  // 初值（预填 provider/endpoint/model 生效），避免用户看到默认 DeepSeek 而非旧 config。
+  const pendingConfig = useGameStore((s) => s.pendingConfig)
 
   const phase = context?.game.phase ?? 'idle'
 
@@ -57,7 +61,10 @@ export default function App(): JSX.Element {
           hasConfig={config !== null}
         />
         <main className="app-shell__main app-shell__main--centered">
-          <LLMConfigPanel />
+          {/* key 随 pendingConfig 变化强制重挂载：legacy 场景 pendingConfig 异步到达后
+              useState 初值才会取到旧 config 的 provider/endpoint/model（预填生效）。
+              apiKey 在 pendingConfig 视图本就为空，重挂载不丢失用户已输入内容。 */}
+          <LLMConfigPanel key={pendingConfig ? 'legacy' : 'fresh'} />
         </main>
       </div>
     )
@@ -153,7 +160,9 @@ function AppHeader(props: {
                   : ' app-shell__status-dot--warn')
               }
             />
-            {configUnlocked ? 'UNLOCKED' : 'LOCKED'}
+            {/* 去口令语义残留：与左侧「LLM ONLINE/OFFLINE」对齐，
+                配置了 apiKey=READY，未配置=NEEDS API KEY。 */}
+            {configUnlocked ? 'LLM READY' : 'NEEDS API KEY'}
           </span>
 
           {!isLockedScreen && (

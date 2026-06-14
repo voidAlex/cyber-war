@@ -141,7 +141,6 @@ export default function CampaignGeneratorPanel(): JSX.Element {
           value={request}
           onChange={(e) => setRequest(e.target.value)}
           disabled={busy || generating}
-          style={{ flex: 1 }}
         />
         <button
           type="button"

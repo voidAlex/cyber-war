@@ -82,6 +82,8 @@ import {
   streamChat,
   streamForward,
   LlmStreamError,
+  buildPayload,
+  ANTHROPIC_DEFAULT_MAX_TOKENS,
   type StreamChatOptions,
 } from '@/layers/gateway/llm-client'
 
@@ -376,5 +378,162 @@ describe('streamForward（回调式兼容）', () => {
     expect(usage!.promptCacheHitTokens).toBe(5)
     expect(done).toBe(true)
     expect(result.degraded).toBe(false)
+  })
+})
+
+// =============================================================================
+// P1-7：按 provider 分支构造 payload（Anthropic 顶层 system + max_tokens）
+// =============================================================================
+
+describe('buildPayload — 按 provider 分支（P1-7）', () => {
+  it('deepseek：OpenAI 兼容格式（system 在 messages[0]，无 max_tokens）', () => {
+    const payload = buildPayload({
+      provider: 'deepseek',
+      endpoint: 'https://api.deepseek.com/v1/chat/completions',
+      apiKey: 'sk-test',
+      model: 'deepseek-v4-flash',
+      messages: [
+        { role: 'system', content: '你是导演部' },
+        { role: 'user', content: '结算' },
+      ],
+    })
+    expect(payload.model).toBe('deepseek-v4-flash')
+    expect(payload.stream).toBe(true)
+    // system 仍在 messages 里（OpenAI 格式）
+    const msgs = payload.messages as Array<{ role: string; content: string }>
+    expect(msgs[0]).toMatchObject({ role: 'system', content: '你是导演部' })
+    expect(msgs[1]).toMatchObject({ role: 'user', content: '结算' })
+    // 无顶层 system，无 max_tokens
+    expect(payload.system).toBeUndefined()
+    expect(payload.max_tokens).toBeUndefined()
+  })
+
+  it('openai：与 deepseek 同构（OpenAI 兼容）', () => {
+    const payload = buildPayload({
+      provider: 'openai',
+      endpoint: 'https://api.openai.com/v1/chat/completions',
+      apiKey: 'sk-test',
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+    expect(payload.max_tokens).toBeUndefined()
+    expect(payload.system).toBeUndefined()
+    expect(payload.messages).toHaveLength(1)
+  })
+
+  it('anthropic：system 提到顶层 + 强制 max_tokens（P1-7 核心）', () => {
+    const payload = buildPayload({
+      provider: 'anthropic',
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      apiKey: 'sk-ant-test',
+      model: 'claude-opus-4-5',
+      messages: [
+        { role: 'system', content: '你是导演部，负责终裁' },
+        { role: 'user', content: '结算第5回合' },
+      ],
+    })
+    expect(payload.model).toBe('claude-opus-4-5')
+    expect(payload.stream).toBe(true)
+    // 关键断言 1：顶层 system（从 messages[0] 提取）
+    expect(payload.system).toBe('你是导演部，负责终裁')
+    // 关键断言 2：强制 max_tokens（默认值）
+    expect(payload.max_tokens).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+    // 关键断言 3：messages 不再含 role:system（已提取到顶层）
+    const msgs = payload.messages as Array<{ role: string }>
+    expect(msgs.every((m) => m.role !== 'system')).toBe(true)
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]).toMatchObject({ role: 'user', content: '结算第5回合' })
+  })
+
+  it('anthropic：多条 system 消息拼接为顶层 system（用 \\n\\n 分隔）', () => {
+    const payload = buildPayload({
+      provider: 'anthropic',
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      apiKey: 'k',
+      model: 'claude-sonnet-4-5',
+      messages: [
+        { role: 'system', content: '人格：冷峻参谋长' },
+        { role: 'system', content: '规则：绝不伪造单位' },
+        { role: 'user', content: 'go' },
+      ],
+    })
+    expect(payload.system).toBe('人格：冷峻参谋长\n\n规则：绝不伪造单位')
+    const msgs = payload.messages as Array<{ role: string }>
+    expect(msgs.filter((m) => m.role === 'system')).toHaveLength(0)
+  })
+
+  it('anthropic：extraParams.max_tokens 覆盖默认值', () => {
+    const payload = buildPayload({
+      provider: 'anthropic',
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      apiKey: 'k',
+      model: 'claude-opus-4-5',
+      messages: [{ role: 'user', content: 'hi' }],
+      extraParams: { max_tokens: 8192 },
+    })
+    expect(payload.max_tokens).toBe(8192)
+  })
+
+  it('anthropic：无 system 消息时不设置顶层 system（API 允许）', () => {
+    const payload = buildPayload({
+      provider: 'anthropic',
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      apiKey: 'k',
+      model: 'claude-opus-4-5',
+      messages: [{ role: 'user', content: '无 system 的纯对话' }],
+    })
+    expect(payload.system).toBeUndefined()
+    expect(payload.max_tokens).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+  })
+
+  it('anthropic：thinking 透传到顶层（extended thinking）', () => {
+    const payload = buildPayload({
+      provider: 'anthropic',
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      apiKey: 'k',
+      model: 'claude-opus-4-5',
+      messages: [{ role: 'system', content: 's' }, { role: 'user', content: 'u' }],
+      thinking: { type: 'enabled', budget_tokens: 5000 },
+    })
+    expect(payload.thinking).toEqual({ type: 'enabled', budget_tokens: 5000 })
+    expect(payload.system).toBe('s')
+  })
+
+  it('custom：走 OpenAI 兼容分支（Bearer 鉴权，无 max_tokens 强制）', () => {
+    const payload = buildPayload({
+      provider: 'custom',
+      endpoint: 'https://my-llm.example.com/v1/chat/completions',
+      apiKey: 'k',
+      model: 'my-model',
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+    expect(payload.max_tokens).toBeUndefined()
+    expect(payload.system).toBeUndefined()
+    expect(payload.messages).toHaveLength(1)
+  })
+})
+
+describe('streamChat — anthropic payload 经 invoke 发出（P1-7 集成）', () => {
+  it('anthropic provider 的 invoke payload 含顶层 system + max_tokens', async () => {
+    const opts: StreamChatOptions = {
+      provider: 'anthropic',
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      apiKey: 'sk-ant',
+      model: 'claude-opus-4-5',
+      messages: [
+        { role: 'system', content: '导演部人格' },
+        { role: 'user', content: '结算' },
+      ],
+    }
+    const handle = streamChat(opts)
+    handle.result().catch(() => {})
+
+    await vi.waitFor(() => expect(invokeCalls).toHaveLength(1))
+    const payload = invokeCalls[0].args.payload as Record<string, unknown>
+    expect(payload.system).toBe('导演部人格')
+    expect(payload.max_tokens).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+    expect(payload.stream).toBe(true)
+    // provider 正确透传到 invoke（router.rs 据此加 x-api-key）
+    expect(invokeCalls[0].args.provider).toBe('anthropic')
   })
 })

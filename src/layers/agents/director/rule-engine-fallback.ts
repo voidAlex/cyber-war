@@ -59,6 +59,14 @@ export interface RuleEngineFallbackResult {
   directorEvents: AgentAction[]
 }
 
+/**
+ * 规则引擎兜底说明事件的 event-log sequence 固定槽（P1-6 互斥槽位）。
+ *
+ * 与 director 段位其他固定槽互斥（见 director.ts SEQUENCE_DIRECTOR_* 常量族）：
+ *   3997：director 战报；3998：mock 压缩；3999：真压缩；4000：兜底说明（本常量）。
+ */
+export const SEQUENCE_RULE_ENGINE_NOTICE = 4000
+
 // =============================================================================
 // 主入口：ruleEngineFallback（保留旧无参桩的兼容名，新增结构化实现）
 // =============================================================================
@@ -245,7 +253,8 @@ function physicsEventsToRuleEngineActions(
  * 构造一条兜底说明事件（记录降级原因，sequence 用 director 段位预留槽）。
  *
  * 仅留痕用，不含任何伪造的游戏数据。sequence 固定为 director 段位内的
- * 一个保留槽（SEQUENCE_BASE.director + 999），避免与真实覆写事件冲突。
+ * 互斥保留槽 4000（见 SEQUENCE_RULE_ENGINE_NOTICE），避免与真实覆写事件
+ * 及其他固定槽（3997 战报 / 3998 mock 压缩 / 3999 真压缩）冲突（P1-6）。
  */
 function makeFallbackNotice(
   scenarioSeed: string,
@@ -253,7 +262,7 @@ function makeFallbackNotice(
   reason: string | undefined,
   envelopeCount: number,
 ): AgentAction {
-  const sequence = 3000 + 999 // director 段位预留槽（不与正常覆写 3000+ 冲突）
+  const sequence = SEQUENCE_RULE_ENGINE_NOTICE // director 段位互斥槽 4000（P1-6）
   const reasonText = reason ?? 'LLM 不可用'
   return {
     id: `evt:${sequence}:rule-engine-notice:0`,

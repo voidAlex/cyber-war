@@ -11,7 +11,6 @@
     "test": "vitest",
     "test:m5": "vitest --run src/game/agent-orchestrator.test.ts src/game/use-game-state.test.ts src/game/engine/replay-regression.test.ts src/utils/performance-baseline.test.ts",
     "test:coverage": "vitest run --coverage",
-    "dev:server": "npx tsx server/api-forwarder.ts",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

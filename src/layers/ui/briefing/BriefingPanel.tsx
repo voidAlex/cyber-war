@@ -17,7 +17,7 @@
 import { type JSX } from 'react'
 import { useGameStore, type AgentProgressEntry } from '@/store/game-store'
 import { isActionAllowed } from '@/layers/application/state-machine'
-import { AlertTriangle } from '@/layers/ui/icons'
+import { AlertTriangle, Activity } from '@/layers/ui/icons'
 import type { ResolutionSummary } from '@/types'
 
 /** Agent 角色中文显示名 */
@@ -69,7 +69,13 @@ export default function BriefingPanel(): JSX.Element {
         <AgentProgressList entries={Object.values(agentProgressById)} />
         {(streamingReport || liveReport.length > 0) && (
           <div className="briefing-panel__live-report">
-            <h3>战报直播{streamingReport && <span className="briefing-panel__streaming-dot">●</span>}</h3>
+            {/* streaming-dot 用 lucide Activity 心电图标替换原 ● emoji（可染色、跨平台一致）。
+                pulse 动画对 svg 仍生效（opacity 继承 + 内联尺寸）。 */}
+            <h3>战报直播{streamingReport && (
+              <span className="briefing-panel__streaming-dot" aria-hidden>
+                <Activity size={12} aria-hidden />
+              </span>
+            )}</h3>
             <pre className="briefing-panel__text">{liveReport || '（导演部正在生成战报…）'}</pre>
           </div>
         )}

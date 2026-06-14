@@ -108,7 +108,7 @@ describe('ruleEngineFallback — 事件标 source:rule-engine（确定性两层�
     expect(converted!.text).toContain('u1')
   })
 
-  it('兜底说明事件固定槽位 sequence=3999，source=rule-engine', () => {
+  it('兜底说明事件固定槽位 sequence=4000，source=rule-engine', () => {
     const world = makeWorld([])
     const r = ruleEngineFallback({
       physicsResult: makePhysicsResult([]),
@@ -117,7 +117,7 @@ describe('ruleEngineFallback — 事件标 source:rule-engine（确定性两层�
       scenarioSeed: 'sc:s',
       turn: 0,
     })
-    const notice = r.directorEvents.find((e) => e.sequence === 3999)
+    const notice = r.directorEvents.find((e) => e.sequence === 4000)
     expect(notice).toBeDefined()
     expect(notice!.source).toBe('rule-engine')
     expect(notice!.kind).toBe('report')

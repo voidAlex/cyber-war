@@ -102,6 +102,14 @@ import {
   buildEnvelope,
 } from '@/layers/application/orchestrator/handshake-flow'
 import { advanceTurn, createDefaultResolver } from '@/layers/application/orchestrator/turn-orchestrator'
+import { orchestrateTurnResolution } from '@/layers/agents/orchestrator/turn-resolution'
+import { LlmDegradedError } from '@/layers/application/services/llm-service'
+import type {
+  TheaterRole,
+  CommanderRole,
+  DirectorRole,
+} from '@/layers/agents/roles'
+import type { LlmService, CacheStats } from '@/layers/application/services/llm-service'
 import { restoreFromEventLog } from '@/layers/persistence/replay'
 import { appendEvents, readEventLog } from '@/layers/persistence/event-log'
 import { saveRepository } from '@/layers/persistence/repository'
@@ -361,11 +369,11 @@ describe('验收#2：锁定后导演部裁定产出可回放战报', () => {
       seed: `${SCENARIO_SEED}:${turn}:${evt.sequence}`,
     }))
     const reportAction: AgentAction = {
-      id: `evt:3998:director-report:0`, turn, agentId: 'director-llm', agentRole: 'director',
+      id: `evt:3997:director-report:0`, turn, agentId: 'director-llm', agentRole: 'director',
       kind: 'report', source: 'director',
       payload: { kind: 'report', keyEvents: [] },
       text: '第 1 天战报：蓝方持续推进（验收回放固定）',
-      sequence: 3998, seed: `${SCENARIO_SEED}:${turn}:3998`,
+      sequence: 3997, seed: `${SCENARIO_SEED}:${turn}:3997`,
     }
     const allEvents = [...physicsActions, reportAction]
     await appendEvents(world.saveId, allEvents)
@@ -551,7 +559,103 @@ describe('验收#6：网络异常时游戏状态保持一致性', () => {
       expect(['physics', 'director', 'rule-engine']).toContain(e.source)
     }
   })
+
+  // P2-17：真测 LLM degraded→rule-engine 兜底链路（非 mock director 透传）。
+  // 用 orchestrateTurnResolution（多 Agent 编排器，规则引擎兜底的真实入口）+ 注入一个
+  // adjudicate 抛 LlmDegradedError 的 director，断言编排层自动切 rule-engine：
+  //   - result.degraded === true（明示降级结算，UI 据此标横幅）
+  //   - result.events 含 source:'rule-engine' 事件（兜底产物，回放采信，非伪造）
+  // 这条链路正是「网络/超时/降级异常时游戏不卡死」的工程兜底，验收#6 必须真测它。
+  it('导演部 LLM 降级（LlmDegradedError）→ 编排层自动切规则引擎兜底（degraded + source:rule-engine）', async () => {
+    const world = makeAcceptanceWorld(0)
+    const chiefEnv = makeLockedOrders(0)[0]
+    // director 抛 LlmDegradedError：模拟 Rust 3 次重试均失败（degraded:true）的上层信号
+    const failingDirector: DirectorRole = {
+      adjudicate: vi.fn(async () => {
+        throw new LlmDegradedError('模拟 Rust 重试耗尽（degraded:true）')
+      }),
+    }
+    // 物理引擎用真 simulateTurn 纯函数（确定性根，与 LLM 无关）
+    const physicsEngine = {
+      simulateTurn: async (
+        w: WorldState, locked: ActionEnvelope[], seed: string,
+      ): Promise<ReturnType<typeof simulateTurn>> => simulateTurn(w, locked, seed, w.turnIndex),
+    } as unknown as PhysicsEngineClient
+    const llmService = makeAcceptanceMockLlmService()
+
+    const result = await orchestrateTurnResolution({
+      worldState: world,
+      lockedOrders: { blue: [chiefEnv] },
+      scenarioSeed: SCENARIO_SEED,
+      turn: 0,
+      llmService,
+      workerService: physicsEngine,
+      theaterRole: makeAcceptanceMockTheaterRole(),
+      commanderRole: makeAcceptanceMockCommanderRole(),
+      directorRole: failingDirector,
+    })
+
+    // 规则引擎兜底真触发：degraded=true（非 director mock 透传的 false）
+    expect(result.degraded).toBe(true)
+    // 兜底产物含 source:'rule-engine' 事件（绝不伪造 director 输出）
+    const ruleEngineEvents = result.events.filter((e) => e.source === 'rule-engine')
+    expect(ruleEngineEvents.length).toBeGreaterThan(0)
+    // director.adjudicate 被调用过（证明走了真 LLM 路径，异常后才兜底）
+    expect(failingDirector.adjudicate).toHaveBeenCalledTimes(1)
+  })
 })
+
+// =============================================================================
+// P2-17 验收#6 辅助：多 Agent 编排 mock 工厂（与 turn-resolution.test.ts 同构）
+// =============================================================================
+
+/** mock LLM 服务（不调真 Rust；getCacheStats 返回零统计） */
+function makeAcceptanceMockLlmService(): LlmService {
+  const stats: CacheStats = {
+    totalHitTokens: 0, totalMissTokens: 0, totalInputTokens: 0, totalOutputTokens: 0,
+    callCount: 0, degradedCount: 0,
+  }
+  return {
+    streamText: vi.fn(async () => ({
+      text: '',
+      stats: { promptCacheHitTokens: 0, promptCacheMissTokens: 0, inputTokens: 0, outputTokens: 0, degraded: false },
+    })),
+    streamChatStructured: vi.fn(),
+    streamTextWithDeltas: vi.fn(async () => ({
+      text: '',
+      stats: { promptCacheHitTokens: 0, promptCacheMissTokens: 0, inputTokens: 0, outputTokens: 0, degraded: false },
+    })),
+    getCacheStats: () => ({ ...stats }),
+    resetCacheStats: () => {
+      Object.assign(stats, {
+        totalHitTokens: 0, totalMissTokens: 0, totalInputTokens: 0, totalOutputTokens: 0, callCount: 0, degradedCount: 0,
+      })
+    },
+  } as unknown as LlmService
+}
+
+/** mock 战区司令：把玩家命令拆为单位级（blue-1 move） */
+function makeAcceptanceMockTheaterRole(): TheaterRole {
+  return {
+    resolve: vi.fn(async () => ({
+      actions: [
+        { sourceCandidateIndex: 0, unitId: 'blue-1', intent: 'move' as const, targetCoord: { col: 2, row: 1 }, sequence: 1000, seed: `${SCENARIO_SEED}:0:1000` },
+      ],
+    })),
+  } as unknown as TheaterRole
+}
+
+/** mock 敌方统帅：red-1 攻击 blue-1 */
+function makeAcceptanceMockCommanderRole(): CommanderRole {
+  return {
+    resolve: vi.fn(async () => ({
+      decisions: [
+        { unitId: 'red-1', intent: 'attack' as const, targetUnitId: 'blue-1', rationale: 'aggression 高', sequence: 2000, seed: `${SCENARIO_SEED}:0:2000` },
+      ],
+      disobeying: false,
+    })),
+  } as unknown as CommanderRole
+}
 
 // =============================================================================
 // 标准 7：导演部输出写 event-log，回放从日志恢复（不重算 LLM）
@@ -581,11 +685,11 @@ describe('验收#7：导演部输出写 event-log，回放从日志恢复', () =
     const baseWorld = makeAcceptanceWorld(0)
     const turn = 0
     const reportAction: AgentAction = {
-      id: `evt:3998:director-report:0`, turn, agentId: 'director-llm', agentRole: 'director',
+      id: `evt:3997:director-report:0`, turn, agentId: 'director-llm', agentRole: 'director',
       kind: 'report', source: 'director',
       payload: { kind: 'report', keyEvents: ['关键事件A'] },
       text: '导演部战报原文（验收#7 采信）',
-      sequence: 3998, seed: `${SCENARIO_SEED}:${turn}:3998`,
+      sequence: 3997, seed: `${SCENARIO_SEED}:${turn}:3997`,
     }
     // 回放：director 类直接采信，文本在 event-log 原文（不重新调 LLM）
     const restored = restoreFromEventLog([reportAction], baseWorld, SCENARIO_SEED)

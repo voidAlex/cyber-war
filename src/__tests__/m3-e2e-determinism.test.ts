@@ -195,7 +195,7 @@ function makeFixedDirector(): DirectorRole {
       }))
       // director 战报（source:'director'，回放采信不重算）
       const reportEvent: AgentAction = {
-        id: `evt:3998:director-report:0`,
+        id: `evt:3997:director-report:0`,
         turn: p.turn,
         agentId: 'director-llm',
         agentRole: 'director' as const,
@@ -203,8 +203,8 @@ function makeFixedDirector(): DirectorRole {
         source: 'director' as const,
         payload: { kind: 'report', keyEvents: [] },
         text: `[导演部] 第 ${p.turn + 1} 天：蓝军突击红军阵地（固定 mock 战报）`,
-        sequence: 3998,
-        seed: `${p.scenarioSeed}:${p.turn}:3998`,
+        sequence: 3997,
+        seed: `${p.scenarioSeed}:${p.turn}:3997`,
       }
       return {
         finalResult: p.physicsResult,
