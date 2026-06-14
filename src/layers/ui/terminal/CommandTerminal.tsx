@@ -16,7 +16,7 @@
  * @module layers/ui/terminal/CommandTerminal
  */
 
-import { useState, useCallback, type JSX } from 'react'
+import { useState, useCallback, useRef, type JSX } from 'react'
 import { useGameStore, buildLlmCallConfig } from '@/store/game-store'
 import {
   chiefRole,
@@ -24,6 +24,7 @@ import {
   classifyInput,
   type ChiefChatResult,
 } from '@/layers/agents/roles/chief'
+import type { DialogueTurn } from '@/types'
 import { llmService } from '@/layers/application/services/llm-service'
 import {
   submitOrder,
@@ -71,18 +72,42 @@ export default function CommandTerminal(): JSX.Element {
   const clearError = useGameStore((s) => s.clearError)
   const userError = useGameStore((s) => s.userError)
 
-  const [draft, setDraft] = useState('')
+  // === 拆分后的独立 state（重写计划 B：对话/命令/外交不互相干扰） ===
+  // 对话/命令主输入框（问候/询问/命令统一入口，classifyInput 路由）
+  const [draftCommand, setDraftCommand] = useState('')
+  // 外交请求独立输入框（不与主框共用 draft，避免打字互相覆盖）
+  const [draftDiplomatic, setDraftDiplomatic] = useState('')
+
   const [candidate, setCandidate] = useState<ParseCommandResult | null>(null)
   const [parsing, setParsing] = useState(false)
 
   // 参谋长对话历史（chat 模式，区别于候选命令卡片）。
   // 玩家对话/询问 → 参谋自然语言回复，渲染为青光对话气泡。
-  // 最近一条在最下；保留最近若干条避免无限增长。
+  // 最近一条在最下；保留最近 20 条（重写计划 B：>6 拉长到 20，多轮上下文更连贯）。
+  // 同时用作 chief.chat 的 history 参数（转 DialogueTurn[]）让参谋有记忆。
   const [dialogues, setDialogues] = useState<Array<{ input: string; reply: ChiefChatResult }>>([])
 
-  // 外交请求流程状态（M4-B）
+  /**
+   * dialogues 的 ref 镜像（重写计划 B：多轮上下文）。
+   *
+   * 为什么用 ref：handleChat 调 chief.chat 时需取**最新** dialogues 作 history。
+   * 但 handleChat 经 handleSubmit 调用，handleSubmit 的 useCallback 依赖若含 dialogues，
+   * 会导致每次对话后整条链路重建（且 handleSubmit 在 handleChat 前声明会有 TDZ）。
+   * 用 ref 让 handleChat 闭包始终读到最新 dialogues，无需把 dialogues 列入依赖。
+   *
+   * 每次 dialogues 变化时由下面的 effect 同步到 ref。
+   */
+  const dialoguesRef = useRef(dialogues)
+  dialoguesRef.current = dialogues // 每次渲染同步（ref 赋值是幂等的，无副作用）
+
+  // 外交请求流程状态（M4-B，独立于主对话流）
   const [diplomatic, setDiplomatic] = useState<DiplomaticRequestResult | null>(null)
   const [diplomaticPending, setDiplomaticPending] = useState(false)
+
+  /** 对话历史上限（重写计划 B：>6 拉长到 20，多轮上下文更连贯） */
+  const DIALOGUE_HISTORY_LIMIT = 20
+  /** 传给 chief.chat 的最近 N 轮（避免 prompt 过长，取最近 8 轮 = 16 条 player+chief） */
+  const CHIEF_HISTORY_TURNS = 8
 
   const phase = context?.game.phase ?? 'idle'
 
@@ -92,15 +117,16 @@ export default function CommandTerminal(): JSX.Element {
   const canEnter = context !== null && canEnterHandshake(context)
 
   /**
-   * 统一提交入口：先 classifyInput 判断「命令」还是「对话」再路由。
+   * 统一提交入口（主对话/命令框）：先 classifyInput 判断「命令」还是「对话」再路由。
    *
-   * - 命令（含移动/攻击/占领/固守等意图词）→ handleParse（原 parseCommand 流程）。
-   * - 对话/询问（问候、问态势、闲聊）→ handleChat（参谋自然语言回复）。
+   * - 命令（含移动/攻击/占领/固守等意图词且非疑问句式）→ handleParse（parseCommand 流程）。
+   * - 对话/询问（问候、问态势、闲聊、带疑问标志）→ handleChat（参谋自然语言回复）。
    *
    * 这样玩家输入"你好"不会被误解析成命令（修复真机问题1）。
+   * "怎么样需要移动吗"含疑问标志 → chat（重写计划 B classifyInput 优化）。
    */
   const handleSubmit = useCallback(async (): Promise<void> => {
-    const input = draft.trim()
+    const input = draftCommand.trim()
     if (input.length === 0 || context === null) return
     const kind = classifyInput(input)
     if (kind === 'command') {
@@ -108,8 +134,10 @@ export default function CommandTerminal(): JSX.Element {
     } else {
       await handleChat(input)
     }
+    // handleChat/handleParse 经 dialoguesRef 取最新对话历史（ref 模式），
+    // 故此处无需把它们列入依赖——多轮上下文 history 仍正确传递（重写计划 B）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, context])
+  }, [draftCommand, context])
 
   /**
    * 调参谋长解析命令（planning 时先进入 handshake）。
@@ -187,17 +215,27 @@ export default function CommandTerminal(): JSX.Element {
         useLlm: llmConfig !== null,
       })
 
-      const reply = await role.chat(input, {
-        world: cur.game.world,
-        playerFactionId: getPlayerFactionId(cur.game.world),
-      })
+      const reply = await role.chat(
+        input,
+        {
+          world: cur.game.world,
+          playerFactionId: getPlayerFactionId(cur.game.world),
+        },
+        // 多轮上下文：把最近 N 轮 dialogues 转为 DialogueTurn[] 传给 chief.chat。
+        // 取最近 CHIEF_HISTORY_TURNS 轮（每轮含 player+chief），让参谋有记忆。
+        // 用 ref 取最新 dialogues（避免 useCallback 依赖链重建 + TDZ）。
+        dialoguesToHistory(dialoguesRef.current, CHIEF_HISTORY_TURNS),
+      )
 
-      // 追加到对话历史（保留最近 6 条避免无限增长）
+      // 追加到对话历史（保留最近 DIALOGUE_HISTORY_LIMIT 条避免无限增长）。
+      // 重写计划 B：上限从 6 拉长到 20，多轮上下文更连贯。
       setDialogues((prev) => {
         const next = [...prev, { input, reply }]
-        return next.length > 6 ? next.slice(next.length - 6) : next
+        return next.length > DIALOGUE_HISTORY_LIMIT
+          ? next.slice(next.length - DIALOGUE_HISTORY_LIMIT)
+          : next
       })
-      setDraft('')
+      setDraftCommand('')
     } finally {
       setParsing(false)
     }
@@ -223,7 +261,7 @@ export default function CommandTerminal(): JSX.Element {
       const next = submitOrder(cur, envelope)
       useGameStore.setState({ context: next, userError: null })
       setCandidate(null)
-      setDraft('')
+      setDraftCommand('')
     } catch (err) {
       useGameStore.setState({ userError: (err as Error).message })
     }
@@ -267,7 +305,7 @@ export default function CommandTerminal(): JSX.Element {
    */
   const handleDiplomatic = useCallback(async (): Promise<void> => {
     if (context === null) return
-    const input = draft.trim()
+    const input = draftDiplomatic.trim()
     if (input.length === 0) return
     const cur = useGameStore.getState().context
     if (cur === null) return
@@ -329,11 +367,11 @@ export default function CommandTerminal(): JSX.Element {
       })
 
       setDiplomatic(result)
-      setDraft('')
+      setDraftDiplomatic('')
     } finally {
       setDiplomaticPending(false)
     }
-  }, [context, draft])
+  }, [context, draftDiplomatic])
 
   // 未加载存档
   if (context === null) {
@@ -362,11 +400,11 @@ export default function CommandTerminal(): JSX.Element {
           type="text"
           className="command-terminal__input"
           placeholder={inputEnabled ? '如：第一装甲师移动到 C3 或「你好」' : phaseHint}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          value={draftCommand}
+          onChange={(e) => setDraftCommand(e.target.value)}
           disabled={busy || parsing}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !parsing && !busy && draft.trim().length > 0) {
+            if (e.key === 'Enter' && !parsing && !busy && draftCommand.trim().length > 0) {
               void handleSubmit()
             }
           }}
@@ -374,7 +412,7 @@ export default function CommandTerminal(): JSX.Element {
         <button
           type="button"
           onClick={() => void handleSubmit()}
-          disabled={busy || parsing || draft.trim().length === 0}
+          disabled={busy || parsing || draftCommand.trim().length === 0}
         >
           {parsing ? '处理中…' : '发送'}
         </button>
@@ -407,7 +445,8 @@ export default function CommandTerminal(): JSX.Element {
         />
       )}
 
-      {/* 外交请求流程（M4-B）：玩家向盟友统帅发起请求，任何阶段可用 */}
+      {/* 外交请求流程（M4-B）：玩家向盟友统帅发起请求，任何阶段可用。
+          独立 draft（draftDiplomatic），不与主对话/命令框共用，避免打字互相覆盖。 */}
       <div className="command-terminal__diplomacy">
         <h3>外交请求</h3>
         <div className="command-terminal__input-row">
@@ -415,11 +454,11 @@ export default function CommandTerminal(): JSX.Element {
             type="text"
             className="command-terminal__input"
             placeholder="如：请求盟友空中支援 / 增援 / 情报共享"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            value={draftDiplomatic}
+            onChange={(e) => setDraftDiplomatic(e.target.value)}
             disabled={diplomaticPending}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !diplomaticPending && draft.trim().length > 0) {
+              if (e.key === 'Enter' && !diplomaticPending && draftDiplomatic.trim().length > 0) {
                 void handleDiplomatic()
               }
             }}
@@ -427,7 +466,7 @@ export default function CommandTerminal(): JSX.Element {
           <button
             type="button"
             onClick={() => void handleDiplomatic()}
-            disabled={diplomaticPending || draft.trim().length === 0 || context === null}
+            disabled={diplomaticPending || draftDiplomatic.trim().length === 0 || context === null}
           >
             {diplomaticPending ? '请求中…' : '发起外交'}
           </button>
@@ -479,6 +518,32 @@ export default function CommandTerminal(): JSX.Element {
 function getPlayerFactionId(world: { factions: Array<{ id: string; side: string }> }): string {
   const player = world.factions.find((f) => f.side === 'player')
   return player?.id ?? ''
+}
+
+/**
+ * 把 UI 对话历史（dialogues 数组）转为 chief.chat 的 history 参数（DialogueTurn[]）。
+ *
+ * 每条 UI dialogue 含玩家问话 + 参谋回复，拆成两条 DialogueTurn（player + chief）。
+ * 取最近 N 轮（每轮 = player + chief 两条），避免 prompt 过长。
+ *
+ * 重写计划 B：多轮上下文记忆——参谋能援引上文（如"刚才你问的杜奥蒙堡"）。
+ *
+ * @param dialogues UI 对话历史数组（每条含 input + reply）
+ * @param turns 取最近 N 轮（默认 8 轮 = 16 条 player+chief）
+ * @returns DialogueTurn[]（player/chief 交替）
+ */
+function dialoguesToHistory(
+  dialogues: ReadonlyArray<{ input: string; reply: ChiefChatResult }>,
+  turns = 8,
+): DialogueTurn[] {
+  // 取最近 turns 轮
+  const recent = dialogues.slice(-turns)
+  const out: DialogueTurn[] = []
+  for (const d of recent) {
+    out.push({ role: 'player', text: d.input })
+    out.push({ role: 'chief', text: d.reply.text })
+  }
+  return out
 }
 
 /**

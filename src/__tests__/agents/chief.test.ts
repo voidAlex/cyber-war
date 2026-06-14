@@ -290,6 +290,23 @@ describe('classifyInput — 命令 vs 对话路由', () => {
     // "你好，把第一装甲师移动到 C3" 应判 command（移动是核心意图）
     expect(classifyInput('你好，把第一装甲师移动到 C3')).toBe('command')
   })
+  // === 重写计划 B：classifyInput 误判修复（疑问句式 → chat） ===
+  it('含意图词但带疑问标志 → chat（"怎么样需要移动吗"不误判命令）', () => {
+    expect(classifyInput('怎么样需要移动吗')).toBe('chat')
+    expect(classifyInput('步兵需要移动吗')).toBe('chat')
+    expect(classifyInput('我们要不要攻击？')).toBe('chat')
+    expect(classifyInput('能不能占领杜奥蒙堡')).toBe('chat')
+    expect(classifyInput('现在是不是该推进')).toBe('chat')
+  })
+  it('占领节点（无单位词、无坐标、无疑问标志）→ command', () => {
+    // "占领杜奥蒙堡" 含"占领"且无疑问标志 → command
+    expect(classifyInput('占领杜奥蒙堡')).toBe('command')
+    expect(classifyInput('步兵占领杜奥蒙堡')).toBe('command')
+  })
+  it('固守（hold 无坐标）→ command', () => {
+    expect(classifyInput('first-armor 固守')).toBe('command')
+    expect(classifyInput('步兵就地坚守')).toBe('command')
+  })
 })
 
 // ============================================================================
@@ -319,5 +336,46 @@ describe('chiefRole.chat — mock 对话回复', () => {
   it('无意义输入 → 引导玩家明确意图', async () => {
     const r = await chiefRole.chat('...', makeCtx())
     expect(r.text.length).toBeGreaterThan(0)
+  })
+})
+
+// ============================================================================
+// 参谋长多轮上下文（chat history）— 重写计划 B 核心
+// ============================================================================
+
+describe('chiefRole.chat — 多轮上下文（history 参数）', () => {
+  it('chat 接受 history 参数不抛错（向后兼容）', async () => {
+    const history = [
+      { role: 'player' as const, text: '你好' },
+      { role: 'chief' as const, text: '长官，参谋长报到。' },
+    ]
+    const r = await chiefRole.chat('我们现在是什么状态', makeCtx(), history)
+    expect(r.source).toBe('mock')
+    expect(r.text.length).toBeGreaterThan(0)
+  })
+  it('history 为空数组等价于无 history（不破坏旧调用）', async () => {
+    const r1 = await chiefRole.chat('你好', makeCtx())
+    const r2 = await chiefRole.chat('你好', makeCtx(), [])
+    expect(r2.text).toBe(r1.text)
+  })
+  it('mock 在 history 含上轮玩家提及节点时回应"接你刚才提到的XX"', async () => {
+    // 上轮玩家问过"杜奥蒙堡"，本轮问态势 → mock 应含"接你刚才提到的杜奥蒙堡"
+    const history = [
+      { role: 'player' as const, text: '杜奥蒙堡情况如何' },
+      { role: 'chief' as const, text: '长官，杜奥蒙堡在我方手中。' },
+    ]
+    const r = await chiefRole.chat('现在情况如何', makeCtx(), history)
+    expect(r.source).toBe('mock')
+    expect(r.text).toContain('杜奥蒙堡')
+  })
+  it('history 上轮不含节点时 mock 不强加"接你刚才"提示', async () => {
+    const history = [
+      { role: 'player' as const, text: '你好' },
+      { role: 'chief' as const, text: '长官报到。' },
+    ]
+    const r = await chiefRole.chat('现在情况如何', makeCtx(), history)
+    expect(r.source).toBe('mock')
+    // 不应误含"接你刚才提到"（上轮"你好"未提节点）
+    expect(r.text).not.toContain('接你刚才提到的')
   })
 })

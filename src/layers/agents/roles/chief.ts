@@ -30,13 +30,13 @@ import type {
   GridCoord,
   WorldState,
   Unit,
+  DialogueTurn,
 } from '@/types'
 import type { LlmService } from '@/layers/application/services/llm-service'
 import type { LlmCallConfig } from './llm-role-base'
 import { buildLlmOptions } from './llm-role-base'
 import {
-  serializeCampaignData,
-  serializeWorldSummary,
+  buildChatMessages,
 } from '@/layers/agents/protocol/context-builder'
 import {
   getAgentValidator,
@@ -83,7 +83,11 @@ export interface ChiefChatResult {
 /**
  * 参谋长角色实例（M2 mock，M3 可替换为 LLM 实现）。
  *
- * 无状态：每次 parseCommand/chat 独立解析，不持有会话历史。
+ * **chat 多轮上下文**：parseCommand 保持 stateless（一次性解析）；
+ * chat 携带 history 参数（最近 N 轮），让参谋长有"记忆"——
+ * 玩家可连贯对话（问候→态势→建议→下命令），参谋长能援引上文（如"刚才你问的杜奥蒙堡"）。
+ *
+ * 历史不破坏 L0/L1 缓存前缀（放 L2 之后，详见 context-builder.buildChatMessages）。
  */
 export interface ChiefRole {
   /**
@@ -96,18 +100,27 @@ export interface ChiefRole {
   parseCommand(input: string, ctx: ChiefParseContext): Promise<ParseCommandResult>
 
   /**
-   * 与参谋长自然语言对话（询问态势/问候/闲聊）。
+   * 与参谋长自然语言对话（询问态势/问候/闲聊，多轮上下文）。
    *
    * 与 parseCommand 互补：parseCommand 把命令解析为结构化候选；
    * chat 回复自然语言（参谋口吻，基于真实 world 状态，不伪造命令）。
    *
    * 调用方应先用 {@link classifyInput} 判断输入类别再决定调哪个方法。
    *
+   * 多轮上下文：history 传最近 N 轮（玩家+参谋交替），参谋长能援引上文。
+   * 历史注入 LLM 的 L2 之后、L3 之前（buildChatMessages），
+   * 不破坏 L0/L1 缓存前缀。mock 实现简单拼接最近轮作上下文（或忽略）。
+   *
    * @param input 玩家自然语言（如「你好 我们现在是什么状态」）
    * @param ctx 世界状态视图
+   * @param history 最近 N 轮对话历史（player/chief），用作参谋长上下文记忆；可选
    * @returns 对话回复文本（mock 模板 或 LLM 参谋人格回复）
    */
-  chat(input: string, ctx: ChiefParseContext): Promise<ChiefChatResult>
+  chat(
+    input: string,
+    ctx: ChiefParseContext,
+    history?: readonly DialogueTurn[],
+  ): Promise<ChiefChatResult>
 }
 
 /**
@@ -153,14 +166,47 @@ const CHAT_KEYWORDS: readonly string[] = [
 ]
 
 /**
+ * 疑问/征询标志词（命中则即便含意图词也判 chat）。
+ *
+ * 用于 classifyInput 区分"命令"与"询问/征询"：
+ * - "步兵需要移动吗"含"吗"→ 询问（chat）
+ * - "我们要不要攻击"含"要不要"→ 征询（chat）
+ * - "怎么样需要移动"含"怎么样"→ 询问（chat）
+ * - "第一装甲师移动到 C3"无疑问标志 → 命令（command）
+ *
+ * 注意：纯命令不含疑问词；疑问句才含。故以此反推。
+ */
+const QUESTION_MARKERS: readonly string[] = [
+  '吗', '呢', '？', '?',
+  '要不要', '需不需要', '是不是', '能不能', '可不可以',
+  '怎么样', '如何', '好不好', '行不行',
+]
+
+/** 输入是否含疑问/征询标志（用于 classifyInput 反推询问态） */
+function hasQuestionMarker(lower: string): boolean {
+  for (const m of QUESTION_MARKERS) {
+    if (lower.includes(m)) return true
+  }
+  return false
+}
+
+/**
  * 纯函数：判断玩家输入是「命令」还是「对话/询问」。
  *
  * 路由规则（先用规则省成本，LLM 判断更准但多一次调用）：
- * 1. 输入含任何命令意图关键词（移动/攻击/占领/固守等）→ `'command'`。
- * 2. 否则 → `'chat'`（包括问候、询问、闲聊、无意义输入）。
+ * 1. 输入含任何命令意图关键词（移动/攻击/占领/固守等）：
+ *    - 同时含疑问/征询标志（吗/呢/？/要不要/怎么样等）→ `'chat'`（询问而非命令）。
+ *    - 否则（命令陈述句）→ `'command'`。
+ * 2. 无命令意图词 → `'chat'`（问候/询问/闲聊/无意义输入）。
  *
- * 这样"你好 我们现在是什么状态"因无命令词 → chat，不会被误解析成命令。
- * "第一装甲师移动到 C3"含"移动"→ command。
+ * 修复问题（重写计划 B）："怎么样需要移动吗"含"移动"+"吗"+"怎么样"→ chat。
+ * "第一装甲师移动到 C3"含"移动"无疑问标志 → command。
+ * "占领杜奥蒙堡"含"占领"无疑问标志 → command。
+ * "步兵需要移动吗"含"吗"→ chat。
+ *
+ * 这是基于"疑问句式 ≠ 命令"的反推——比"必须有单位+目标"更宽松，
+ * 因为 capture_node 的节点名、attack 的敌方单位名无法穷举预判，
+ * 强制要求"单位+目标齐全"会把"占领杜奥蒙堡"误判为 chat。
  *
  * 注意：与 matchIntent 共用 INTENT_KEYWORDS 表，保证一致。
  *
@@ -170,14 +216,15 @@ const CHAT_KEYWORDS: readonly string[] = [
 export function classifyInput(input: string): ChiefInputKind {
   const lower = input.trim().toLowerCase()
   if (lower.length === 0) return 'chat'
-  // 命令意图词命中优先（哪怕同时含问候，也是命令）
-  for (const { words } of INTENT_KEYWORDS) {
-    for (const w of words) {
-      if (lower.includes(w.toLowerCase())) return 'command'
-    }
-  }
-  // 无命令词 → 对话/询问（问候、问态势、闲聊、求助等）
-  return 'chat'
+  // 先找意图词（不命中直接 chat）
+  const intent = matchIntent(lower)
+  if (intent === null) return 'chat'
+
+  // 意图词命中后，疑问句式 → chat（询问/征询，非命令陈述）
+  if (hasQuestionMarker(lower)) return 'chat'
+
+  // 命令陈述句 → command
+  return 'command'
 }
 
 /** @internal 内部用的"是否含对话关键词"判定，便于 mock chat 决定回复模板分支 */
@@ -199,8 +246,8 @@ export function createChiefRole(): ChiefRole {
     async parseCommand(input, ctx) {
       return parseCommandMock(input, ctx)
     },
-    async chat(input, ctx) {
-      return chatMock(input, ctx)
+    async chat(input, ctx, history) {
+      return chatMock(input, ctx, history)
     },
   }
 }
@@ -260,15 +307,15 @@ export function createLlmChiefRole(
         throw err
       }
     },
-    async chat(input, ctx) {
+    async chat(input, ctx, history) {
       try {
-        return await chatWithLlm(input, ctx, llmService, config)
+        return await chatWithLlm(input, ctx, llmService, config, history)
       } catch (err) {
         // LLM 失败：回退 mock 模板回复（绝不伪造命令，绝不卡死对话）。
         // eslint-disable-next-line no-console
         console.error('[chief] LLM 对话失败，回退 mock 模板回复:', err)
         if (isLlmCallError(err)) {
-          return chatMock(input, ctx)
+          return chatMock(input, ctx, history)
         }
         throw err
       }
@@ -365,38 +412,25 @@ async function parseCommandWithLlm(
 // ============================================================================
 // 参谋长对话（chat）— LLM 实现 + mock 模板
 // =============================================================================
+//
+// 对话人格 L0 文本统一由 context-builder.ts 维护（CHIEF_CHAT_PERSONA_PROMPT），
+// 经 getChiefChatPersonaPrompt() 取得，避免 chief.ts 本地常量与 context-builder
+// 各维护一份造成漂移（两侧 L0 必须字节一致才能稳定吃缓存）。
 
 /**
- * 参谋长对话的 L0 system prompt（人格 + 对话规则，完全固定，缓存友好）。
+ * 真 LLM 参谋长对话实现（多轮上下文）。
  *
- * 注意：与命令解析用的 CHIEF_SYSTEM_PROMPT 不同——对话人格更口语化，
- * 职责是回答态势/问候/给建议，而非解析结构化命令。
- * 禁注入回合号/时间戳（这些在 L3 任务文本里）。
- */
-const CHIEF_CHAT_SYSTEM_PROMPT = [
-  '你是玩家的参谋长（Chief of Staff），一位经验丰富、沉稳睿智的军事副手。',
-  '职责：与指挥官（玩家）进行自然语言对话——回答态势询问、提供战术建议、汇报战况、回应问候。',
-  '口吻：称玩家为「长官」，语气专业、简洁、有条理，适当带入军事术语，但不过度冗长。',
-  '原则：',
-  '- 仅基于上下文提供的真实世界状态回答，绝不虚构不存在的单位/阵地/战况。',
-  '- 给建议时要有依据（援引当前单位位置、敌方态势、地形），不空谈。',
-  '- 不主动下达命令或执行动作；玩家要下命令需用明确指令词（移动/攻击/占领/固守）。',
-  '- 回复控制在 2-5 句，适合终端对话气泡展示。',
-  '直接输出自然语言回复，不要输出 JSON 或其他格式。',
-].join('\n')
-
-/**
- * 真 LLM 参谋长对话实现。
- *
- * 与命令解析不同的 messages 构造：
- * - L0 用 CHIEF_CHAT_SYSTEM_PROMPT（对话人格，非命令解析人格）。
- * - L1/L2 复用 context-builder 的 serializeCampaignData/serializeWorldSummary
- *   （缓存前缀与命令解析共享，吃满缓存红利）。
- * - L3 是玩家原始问话（不要求 JSON，直接自然语言回复）。
+ * messages 构造走 context-builder.buildChatMessages：
+ * - L0 用 CHIEF_CHAT_PERSONA_PROMPT（对话人格，固定）。
+ * - L1 战役数据（开局冻结）。
+ * - L2 世界状态摘要（每回合变，同回合共享）。
+ * - history（DialogueTurn[] → AgentMessage[]，append-only，天然命中缓存）。
+ * - L3 本轮玩家问话（含回合号，回合号属 L3 安全）。
  *
  * 用 llmService.streamText（非结构化）拿纯文本回复。
  * 失败抛 LlmCallError，由 createLlmChiefRole 上层回退 mock 模板。
  *
+ * @param history 最近 N 轮对话历史（player/chief），注入 L2 之后让参谋有记忆
  * @throws LlmCallError（四分类/degraded）由上层回退 mock
  */
 async function chatWithLlm(
@@ -404,27 +438,21 @@ async function chatWithLlm(
   ctx: ChiefParseContext,
   llmService: LlmService,
   config: LlmCallConfig,
+  history?: readonly DialogueTurn[],
 ): Promise<ChiefChatResult> {
   const trimmed = input.trim()
   if (trimmed.length === 0) {
     // 空输入直接走 mock（不浪费 LLM 调用）
-    return chatMock(input, ctx)
+    return chatMock(input, ctx, history)
   }
 
-  // L0-L2 与命令解析共享缓存前缀；L3 是玩家问话
-  const messages: Array<{ role: string; content: string }> = [
-    { role: 'system', content: CHIEF_CHAT_SYSTEM_PROMPT },
-    { role: 'system', content: `战役数据（本局冻结）：\n${serializeCampaignData(ctx.world)}` },
-    {
-      role: 'system',
-      content: `当前世界状态摘要（本回合）：\n${serializeWorldSummary(ctx.world)}`,
-    },
-    {
-      role: 'user',
-      // 玩家问话作为 L3，回合号属 L3 安全（system prompt 不含回合号）
-      content: `（当前第 ${ctx.world.turnIndex} 回合，${ctx.world.inGameDate}）\n指挥官说："${trimmed}"\n请以参谋长口吻回复。`,
-    },
-  ]
+  // buildChatMessages 负责 L0-L3 分层 + history 转换（集中维护，避免重复）
+  const messages = buildChatMessages({
+    worldState: ctx.world,
+    // L3 任务文本：回合号属 L3 安全（system prompt 不含回合号）
+    task: `（当前第 ${ctx.world.turnIndex} 回合，${ctx.world.inGameDate}）\n指挥官说："${trimmed}"\n请以参谋长口吻回复。`,
+    history: history,
+  })
 
   const result = await llmService.streamText({
     provider: config.provider,
@@ -439,21 +467,43 @@ async function chatWithLlm(
   const text = result.text.trim()
   if (text.length === 0) {
     // LLM 返回空：回退 mock（不伪造，用模板）
-    return chatMock(input, ctx)
+    return chatMock(input, ctx, history)
   }
   return { text, source: 'llm' }
+}
+
+/**
+ * 把历史最近一轮玩家发言文本取出（用于 mock 上下文记忆提示）。
+ * 没有历史返回 null。
+ */
+function lastPlayerTurn(history: readonly DialogueTurn[] | undefined): string | null {
+  if (!history || history.length === 0) return null
+  // 从尾向前找最近一条 player 发言
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === 'player') return history[i].text
+  }
+  return null
 }
 
 /**
  * mock 参谋长对话（纯函数模板，离线/降级/LLM 失败时兜底）。
  *
  * 基于 world 真实状态生成回复，绝不伪造命令或编造不存在的态势。
+ * 多轮上下文：history 简单用作"上文记忆提示"——若上轮玩家问过特定单位/节点，
+ * 本轮可回应"刚才你提到的 XX"。
+ *
  * 几个分支：
- * - 问候 → 回礼 + 简报当前态势。
+ * - 问候 → 回礼 + 简报当前态势（含上文记忆提示）。
  * - 问状态/战况 → 汇报回合、阵地、关键单位位置。
  * - 其他（建议/闲聊）→ 通用参谋口吻回复 + 引导下命令。
+ *
+ * @param history 最近 N 轮对话历史（player/chief），用于上下文记忆提示
  */
-function chatMock(input: string, ctx: ChiefParseContext): ChiefChatResult {
+function chatMock(
+  input: string,
+  ctx: ChiefParseContext,
+  history?: readonly DialogueTurn[],
+): ChiefChatResult {
   const world = ctx.world
   const playerUnits = world.units.filter((u) => u.factionId === ctx.playerFactionId)
   const enemyUnits = world.units.filter((u) => u.factionId !== ctx.playerFactionId)
@@ -463,12 +513,33 @@ function chatMock(input: string, ctx: ChiefParseContext): ChiefChatResult {
   // 节点控制摘要（哪些节点名）
   const nodeName = (n: { name: string }): string => n.name
 
+  // 上文记忆提示：若上轮玩家问过某个高价值节点，本轮简报可点一句"刚才你问的 XX"
+  // 节点名可能含英文括注（如「杜奥蒙堡 (Fort Douaumont)」），玩家输入通常只写中文
+  // （「杜奥蒙堡」），故用「节点名中文片段是否被 prevPlayer 包含」做匹配（双向容错）。
+  const prevPlayer = lastPlayerTurn(history)
+  let memoryHint = ''
+  if (prevPlayer !== null && world.map.highValueNodes.length > 0) {
+    const mentioned = world.map.highValueNodes.find((n) => {
+      // 直接全名包含（节点名是 prevPlayer 子串）
+      if (prevPlayer.includes(n.name)) return true
+      // 取节点名的中文片段（去括号英文），看是否被 prevPlayer 包含
+      // 如「杜奥蒙堡 (Fort Douaumont)」→「杜奥蒙堡」
+      const cnPart = n.name.replace(/\s*[(（].*?[)）].*/g, '').trim()
+      return cnPart.length > 0 && prevPlayer.includes(cnPart)
+    })
+    if (mentioned !== undefined) {
+      // 提示用中文片段（去英文括注），更自然
+      const cnName = mentioned.name.replace(/\s*[(（].*?[)）].*/g, '').trim() || mentioned.name
+      memoryHint = `（接你刚才提到的${cnName}）`
+    }
+  }
+
   if (hasChatKeyword(input)) {
     // 含问候/询问态势等对话词
     if (/你好|您好|hi|hello|嗨|早|晚上好|下午好|早上好/i.test(input)) {
       return {
         source: 'mock',
-        text: `长官，参谋长报到。当前第 ${turn} 回合（${date}），我方尚有 ${playerUnits.length} 个建制可调动，当面之敌约 ${enemyUnits.length} 个建制。${world.map.highValueNodes.length > 0 ? `关键目标：${world.map.highValueNodes.slice(0, 3).map(nodeName).join('、')}。` : ''}请下令。`,
+        text: `长官，参谋长报到。${memoryHint}当前第 ${turn} 回合（${date}），我方尚有 ${playerUnits.length} 个建制可调动，当面之敌约 ${enemyUnits.length} 个建制。${world.map.highValueNodes.length > 0 ? `关键目标：${world.map.highValueNodes.slice(0, 3).map(nodeName).join('、')}。` : ''}请下令。`,
       }
     }
     if (/什么状态|现状|当前态势|战况|情况如何|怎么样|状态|当前|局势|汇报|报告/.test(input)) {
@@ -479,19 +550,19 @@ function chatMock(input: string, ctx: ChiefParseContext): ChiefChatResult {
         .join('；')
       return {
         source: 'mock',
-        text: `长官，第 ${turn} 回合态势：我方${playerUnits.length > 0 ? `主力 ${unitBrief}` : '暂无可调单位'}。当面敌军约 ${enemyUnits.length} 个建制。${world.map.highValueNodes.length > 0 ? `争夺焦点：${world.map.highValueNodes.slice(0, 3).map(nodeName).join('、')}。` : ''}`,
+        text: `长官，${memoryHint}第 ${turn} 回合态势：我方${playerUnits.length > 0 ? `主力 ${unitBrief}` : '暂无可调单位'}。当面敌军约 ${enemyUnits.length} 个建制。${world.map.highValueNodes.length > 0 ? `争夺焦点：${world.map.highValueNodes.slice(0, 3).map(nodeName).join('、')}。` : ''}`,
       }
     }
     if (/建议|怎么办|怎么看|你觉得|你认为|有什么|能做/.test(input)) {
       return {
         source: 'mock',
-        text: `长官，依参谋部判断：优先确保关键节点防御，再图反击。若要推进，可命装甲/步兵向目标格机动，炮兵提供火力支援。具体请下达命令（如「${UNIT_TYPE_CN[playerUnits[0]?.type ?? 'infantry'] ?? '步兵'}移动到 C3」）。`,
+        text: `长官，${memoryHint}依参谋部判断：优先确保关键节点防御，再图反击。若要推进，可命装甲/步兵向目标格机动，炮兵提供火力支援。具体请下达命令（如「${UNIT_TYPE_CN[playerUnits[0]?.type ?? 'infantry'] ?? '步兵'}移动到 C3」）。`,
       }
     }
     // 谢谢/再见等其他对话词
     return {
       source: 'mock',
-      text: `长官不必客气，参谋部随时待命。如需下令请直说，例如「某单位移动到某坐标」。`,
+      text: `长官不必客气，${memoryHint}参谋部随时待命。如需下令请直说，例如「某单位移动到某坐标」。`,
     }
   }
 

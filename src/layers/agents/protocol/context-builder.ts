@@ -29,6 +29,7 @@ import type {
   AgentMessage,
   AgentRole,
   WorldState,
+  DialogueTurn,
 } from '@/types'
 import { AGENT_OUTPUT_SCHEMAS } from './schema'
 
@@ -216,6 +217,37 @@ export function serializeWorldSummary(world: WorldState): string {
 // buildMessages：L0→L1→L2→L3 分层构造
 // =============================================================================
 
+/**
+ * 参谋长对话人格 L0 system prompt（chief.ts 的 CHIEF_CHAT_SYSTEM_PROMPT 同款镜像）。
+ *
+ * **注意**：与上面 ROLE_SYSTEM_PROMPTS.chief（命令解析人格）不同——对话人格更口语化，
+ * 职责是回答态势/问候/建议而非解析结构化命令。
+ *
+ * 此常量与 chief.ts 中的 CHIEF_CHAT_SYSTEM_PROMPT **必须保持文本一致**
+ * （对话入口在 buildChatMessages 与 chatWithLlm 两侧都能构造 messages，
+ * 故人格文本集中在此处由 chief.ts 转引，避免重复维护）。详见 chief.ts 注释。
+ */
+const CHIEF_CHAT_PERSONA_PROMPT = [
+  '你是玩家的参谋长（Chief of Staff），一位经验丰富、沉稳睿智的军事副手。',
+  '职责：与指挥官（玩家）进行自然语言对话——回答态势询问、提供战术建议、汇报战况、回应问候。',
+  '口吻：称玩家为「长官」，语气专业、简洁、有条理，适当带入军事术语，但不过度冗长。',
+  '原则：',
+  '- 仅基于上下文提供的真实世界状态回答，绝不虚构不存在的单位/阵地/战况。',
+  '- 给建议时要有依据（援引当前单位位置、敌方态势、地形），不空谈。',
+  '- 不主动下达命令或执行动作；玩家要下命令需用明确指令词（移动/攻击/占领/固守）。',
+  '- 回复控制在 2-5 句，适合终端对话气泡展示。',
+  '- 你有上下文记忆：可援引对话历史中提到的单位/阵地/话题（如「刚才你问的杜奥蒙堡」）。',
+  '直接输出自然语言回复，不要输出 JSON 或其他格式。',
+].join('\n')
+
+/**
+ * 暴露参谋长对话人格文本供 chief.ts 复用（保证两侧 L0 字节一致，吃满缓存）。
+ * @internal 仅供 chief.ts 内部 import，不对外作为公共协议。
+ */
+export function getChiefChatPersonaPrompt(): string {
+  return CHIEF_CHAT_PERSONA_PROMPT
+}
+
 /** buildMessages 的角色名（重导出，避免与 AgentRole 冲突时清晰） */
 export type { AgentRole as ContextBuilderRole }
 
@@ -276,6 +308,102 @@ export function buildMessages(
   }
 
   // L3：本条具体任务（每请求变，回合号/时间戳只放这里）
+  messages.push({ role: 'user', content: input.task })
+
+  return messages
+}
+
+// =============================================================================
+// buildChatMessages：参谋长多轮对话专用（含历史，区别 buildMessages 命令解析）
+// =============================================================================
+//
+// 与 buildMessages 的区别：
+// - L0 用 CHIEF_CHAT_PERSONA_PROMPT（对话人格，非命令解析人格）。
+// - L1/L2 复用同一套战役数据/世界摘要序列化函数（缓存前缀与命令解析共享）。
+// - history 是高层 DialogueTurn[]（player/chief），转 AgentMessage 后注入 L2 之后、L3 之前。
+//   对话历史天然 append-only，每追加一轮只增长尾部，前缀稳定 → 缓存命中。
+// - L3 是本轮玩家问话（自然语言，不要求 JSON）。
+//
+// 对话历史不破坏 L0/L1 缓存前缀（历史在 L2 之后），符合「DeepSeek 官方例一」缓存策略。
+
+/**
+ * 把高层 DialogueTurn[]（player/chief）映射为 LLM wire 格式 AgentMessage[]。
+ *
+ * - 'player' → 'user'（指挥官发言对应用户角色）。
+ * - 'chief' → 'assistant'（参谋长上一轮回复，作为助手上下文）。
+ * - 'system' 不出现在对话历史里（对话历史只有两个对话方）。
+ *
+ * 纯函数：仅做字段映射，不读时间/随机。
+ *
+ * @param history 高层对话历史
+ * @returns LLM wire 格式 messages（可直接 append 到 messages 数组）
+ */
+export function dialogueTurnsToMessages(history: readonly DialogueTurn[]): AgentMessage[] {
+  const out: AgentMessage[] = []
+  for (const turn of history) {
+    if (turn.role === 'player') {
+      out.push({ role: 'user', content: turn.text })
+    } else {
+      // chief → assistant
+      out.push({ role: 'assistant', content: turn.text })
+    }
+  }
+  return out
+}
+
+/** buildChatMessages 的上下文输入 */
+export interface BuildChatMessagesInput {
+  /** 当前世界状态（L1 战役数据 + L2 世界状态摘要来源） */
+  worldState: WorldState
+  /** 本轮玩家问话（L3，自然语言） */
+  task: string
+  /** 最近 N 轮对话历史（高层 DialogueTurn，转 wire 格式后注入 L2 之后） */
+  history?: readonly DialogueTurn[]
+}
+
+/**
+ * 按 L0-L3 缓存分层构造参谋长对话 messages（含多轮历史）。
+ *
+ * 分层顺序（稳定→易变，最大化前缀缓存命中）：
+ * 1. L0 system：参谋长对话人格（**完全固定，禁注入易变内容**）。
+ * 2. L1 system：战役数据（开局冻结）。
+ * 3. L2 system：当前回合世界状态摘要 + 上下文压缩摘要（每回合变，同回合共享）。
+ * 4. history（可选，DialogueTurn 转 AgentMessage，append-only，天然命中缓存）。
+ * 5. L3 user：本轮玩家问话（每请求变，回合号/时间戳只放这里）。
+ *
+ * 与 {@link buildMessages} 的区别：L0 用对话人格而非命令解析人格，
+ * history 类型是高层 DialogueTurn[]（玩家方/参谋方）而非裸 AgentMessage[]。
+ *
+ * @param input 对话上下文输入
+ * @returns 分层 messages 数组（含历史）
+ */
+export function buildChatMessages(input: BuildChatMessagesInput): AgentMessage[] {
+  const messages: AgentMessage[] = []
+
+  // L0：参谋长对话人格（固定不变）
+  messages.push({ role: 'system', content: CHIEF_CHAT_PERSONA_PROMPT })
+
+  // L1：战役数据（开局冻结）
+  messages.push({
+    role: 'system',
+    content: `战役数据（本局冻结）：\n${serializeCampaignData(input.worldState)}`,
+  })
+
+  // L2：当前回合世界状态摘要 + 上下文压缩摘要（每回合变，同回合共享）
+  messages.push({
+    role: 'system',
+    content: `当前世界状态摘要（本回合）：\n${serializeWorldSummary(input.worldState)}`,
+  })
+
+  // 历史对话（append-only，多轮天然命中缓存）—— DialogueTurn → AgentMessage
+  if (input.history && input.history.length > 0) {
+    const historyMessages = dialogueTurnsToMessages(input.history)
+    for (const msg of historyMessages) {
+      messages.push(msg)
+    }
+  }
+
+  // L3：本轮玩家问话（自然语言，回合号属 L3 安全，system prompt 不含回合号）
   messages.push({ role: 'user', content: input.task })
 
   return messages

@@ -78,3 +78,24 @@ export interface AgentMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
 }
+
+/**
+ * 参谋长多轮对话历史的一轮（玩家 ↔ 参谋长）。
+ *
+ * 区别于 AgentMessage：
+ * - AgentMessage 是 LLM wire 格式（role: system/user/assistant），用于 prompt 构造。
+ * - DialogueTurn 是 UI 与 chief.chat 之间的高层语义（role: player/chief），
+ *   反映"指挥官 ↔ 参谋长"两个角色，不暴露 wire role。
+ *
+ * UI 端把 dialogues 数组映射为 DialogueTurn[] 传给 chief.chat；
+ * chief 内部再转 AgentMessage[]（player→user, chief→assistant）注入 L2 层。
+ *
+ * @field role 'player'（指挥官/玩家发言）或 'chief'（参谋长回复）
+ * @field text 该轮的文本内容
+ * @field ts 可选时间戳（UI 排序用，LLM 不依赖）
+ */
+export interface DialogueTurn {
+  role: 'player' | 'chief'
+  text: string
+  ts?: number
+}

@@ -61,6 +61,7 @@ export type {
   EventLogSource,
   AgentContext,
   AgentMessage,
+  DialogueTurn,
 } from './agent-action'
 
 // === 情报与外交 ===
