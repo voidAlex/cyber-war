@@ -281,6 +281,12 @@ a {
   flex: 1;
   display: grid;
   grid-template-columns: 280px 1fr 380px;
+  /* 行高填满 main 高度而非被内容撑开（避免右栏内容多时撑高整行，
+     导致 center 列 canvas-host 被拉到数千 px → 真机黑屏）。
+     minmax(0,1fr) 让行可收缩，配合各列 min-height:0 + overflow。 */
+  grid-template-rows: minmax(0, 1fr);
+  /* flex 子项需 min-height:0 才能在父 flex 容器内正确收缩 */
+  min-height: 0;
   gap: var(--space-3);
   padding: var(--space-3);
 }
@@ -299,14 +305,92 @@ a {
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
+  /* 配合 grid-template-rows: minmax(0,1fr)，让列内容可收缩/滚动，
+     避免 canvas-host 被拉到数千 px。 */
+  min-height: 0;
 }
 
 .app-shell__right {
   overflow: auto;
 }
 
+/* 左栏内容可滚动（折叠后仍可能超过视口） */
+.app-shell__left {
+  overflow-y: auto;
+}
+
 .app-shell__footer {
   padding: 0 var(--space-3) var(--space-3);
+}
+
+/* ============================================================
+ * 3.5 可折叠面板区（.collapsible*）— 左栏面板折叠包装
+ * ============================================================ */
+.collapsible {
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, rgba(17, 24, 39, 0.92) 0%, rgba(15, 23, 42, 0.92) 100%);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--border);
+  clip-path: var(--chamfer);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.collapsible__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+.collapsible__header:hover {
+  color: var(--accent-cyan);
+}
+.collapsible__header:focus-visible {
+  outline: 1px solid var(--accent-cyan);
+  outline-offset: -2px;
+}
+.collapsible__arrow {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--accent-cyan);
+  transition: transform 0.15s ease;
+  width: 10px;
+}
+.collapsible__title {
+  flex: 1;
+}
+.collapsible__hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+/* 展开态 body：被包裹的 panel 去掉自身外层边框（避免双层描边），保留内容 */
+.collapsible__body > .panel {
+  border: none;
+  box-shadow: none;
+  clip-path: none;
+  background: transparent;
+  backdrop-filter: none;
+}
+/* 折叠态：仅 header，无额外间距 */
+.collapsible--closed .collapsible__header {
+  border-bottom: none;
+}
+.collapsible--open .collapsible__header {
+  border-bottom: 1px solid var(--border-dim);
 }
 
 /* ============================================================
@@ -954,7 +1038,12 @@ a {
   flex-direction: column;
   min-width: 320px;
   min-height: 360px;
+  /* 限制沙盘最大高度：避免 grid 行被其他列（右栏终端/inspector）撑高后，
+     center 列 canvas-host 被拉到数千 px（真机黑屏根因之一——网格只画在顶部，
+     大片深色 canvas 看起来全黑）。min-height:0 让 flex 子项可收缩。 */
   flex: 1 1 auto;
+  min-height: 0;
+  max-height: calc(100vh - 180px);
 }
 
 /* canvas 挂载点：撑满 panel 剩余空间 */
@@ -962,6 +1051,8 @@ a {
   position: relative;
   flex: 1 1 auto;
   min-height: 280px;
+  /* 配合 .sandbox max-height，避免 host 超出视口 */
+  max-height: 100%;
   width: 100%;
   overflow: hidden;
   /* 与 PIXI Application.background 同值（--sandbox-bg），避免 DOM/Canvas 拼接缝 */
@@ -1880,6 +1971,70 @@ th {
   border-radius: var(--radius);
   margin-bottom: var(--space-2);
   box-shadow: var(--glow-cyan);
+}
+
+/* ===== 参谋长对话气泡（chat 模式）===== */
+.command-terminal__dialogues {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.command-terminal__dialogue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.command-terminal__dialogue-input {
+  margin: 0;
+  padding: 4px var(--space-2);
+  font-size: 12px;
+  color: var(--text-muted);
+  align-self: flex-end;
+  max-width: 85%;
+  text-align: right;
+}
+.command-terminal__dialogue-speaker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+.command-terminal__dialogue-reply {
+  position: relative;
+  align-self: flex-start;
+  max-width: 90%;
+  padding: var(--space-2);
+  background: var(--bg-item);
+  border: 1px solid var(--accent-cyan);
+  border-radius: var(--radius);
+  box-shadow: var(--glow-cyan);
+}
+.command-terminal__dialogue-speaker--chief {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--accent-cyan);
+  font-family: var(--font-display);
+}
+.command-terminal__dialogue-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.command-terminal__dialogue-source {
+  display: inline-block;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  opacity: 0.7;
 }
 
 .command-terminal__candidate-header {

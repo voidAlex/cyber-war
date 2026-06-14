@@ -18,7 +18,12 @@
 
 import { useState, useCallback, type JSX } from 'react'
 import { useGameStore, buildLlmCallConfig } from '@/store/game-store'
-import { chiefRole, createLlmChiefRole } from '@/layers/agents/roles/chief'
+import {
+  chiefRole,
+  createLlmChiefRole,
+  classifyInput,
+  type ChiefChatResult,
+} from '@/layers/agents/roles/chief'
 import { llmService } from '@/layers/application/services/llm-service'
 import {
   submitOrder,
@@ -70,6 +75,11 @@ export default function CommandTerminal(): JSX.Element {
   const [candidate, setCandidate] = useState<ParseCommandResult | null>(null)
   const [parsing, setParsing] = useState(false)
 
+  // 参谋长对话历史（chat 模式，区别于候选命令卡片）。
+  // 玩家对话/询问 → 参谋自然语言回复，渲染为青光对话气泡。
+  // 最近一条在最下；保留最近若干条避免无限增长。
+  const [dialogues, setDialogues] = useState<Array<{ input: string; reply: ChiefChatResult }>>([])
+
   // 外交请求流程状态（M4-B）
   const [diplomatic, setDiplomatic] = useState<DiplomaticRequestResult | null>(null)
   const [diplomaticPending, setDiplomaticPending] = useState(false)
@@ -82,16 +92,34 @@ export default function CommandTerminal(): JSX.Element {
   const canEnter = context !== null && canEnterHandshake(context)
 
   /**
+   * 统一提交入口：先 classifyInput 判断「命令」还是「对话」再路由。
+   *
+   * - 命令（含移动/攻击/占领/固守等意图词）→ handleParse（原 parseCommand 流程）。
+   * - 对话/询问（问候、问态势、闲聊）→ handleChat（参谋自然语言回复）。
+   *
+   * 这样玩家输入"你好"不会被误解析成命令（修复真机问题1）。
+   */
+  const handleSubmit = useCallback(async (): Promise<void> => {
+    const input = draft.trim()
+    if (input.length === 0 || context === null) return
+    const kind = classifyInput(input)
+    if (kind === 'command') {
+      await handleParse(input)
+    } else {
+      await handleChat(input)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, context])
+
+  /**
    * 调参谋长解析命令（planning 时先进入 handshake）。
    *
    * 解锁状态下用真 LLM chief（createLlmChiefRole + 真 LLM 调用，失败回退 mock），
    * 否则用 mock chief（规则解析，离线/降级可玩）。llmService 与 advance 同源（模块单例），
    * config 由 buildLlmCallConfig() 从会话取明文 apiKey（即用即抛，不进 store）。
    */
-  const handleParse = useCallback(async (): Promise<void> => {
+  const handleParse = useCallback(async (input: string): Promise<void> => {
     if (context === null) return
-    const input = draft.trim()
-    if (input.length === 0) return
 
     setParsing(true)
     try {
@@ -129,7 +157,51 @@ export default function CommandTerminal(): JSX.Element {
     } finally {
       setParsing(false)
     }
-  }, [context, draft, dispatch])
+  }, [context, dispatch])
+
+  /**
+   * 参谋长对话（询问态势/问候/闲聊）。
+   *
+   * 任何阶段都可对话（不强制 planning/handshake）——对话不改变游戏状态。
+   * 真 LLM 解锁用 createLlmChiefRole.chat（参谋人格回复，失败回退 mock 模板），
+   * 未解锁用 mock chief.chat（纯模板，基于真实 world 状态，不伪造命令）。
+   * 回复追加到 dialogues 历史渲染为青光对话气泡。
+   */
+  const handleChat = useCallback(async (input: string): Promise<void> => {
+    if (context === null) return
+
+    setParsing(true)
+    try {
+      const cur = useGameStore.getState().context
+      if (cur === null) return
+
+      const llmConfig = buildLlmCallConfig()
+      const role = llmConfig !== null
+        ? createLlmChiefRole(llmService, llmConfig)
+        : chiefRole
+
+      logger.info('ui/command/chat', '参谋对话', {
+        scope: 'save',
+        saveId: cur.game.world.saveId,
+        turn: cur.game.world.turnIndex,
+        useLlm: llmConfig !== null,
+      })
+
+      const reply = await role.chat(input, {
+        world: cur.game.world,
+        playerFactionId: getPlayerFactionId(cur.game.world),
+      })
+
+      // 追加到对话历史（保留最近 6 条避免无限增长）
+      setDialogues((prev) => {
+        const next = [...prev, { input, reply }]
+        return next.length > 6 ? next.slice(next.length - 6) : next
+      })
+      setDraft('')
+    } finally {
+      setParsing(false)
+    }
+  }, [context])
 
   /** 玩家确认候选命令 → 入 pendingOrders（沙盘自动显示虚线）。 */
   const handleConfirm = useCallback((): void => {
@@ -275,6 +347,11 @@ export default function CommandTerminal(): JSX.Element {
 
   const inputEnabled = canSubmit
   const phaseHint = getPhaseHint(phase)
+  // 对话/询问不受阶段守卫限制（不改变游戏状态）：命令需要 planning/handshake。
+  // 输入框在「命令」阶段被守卫；对话可在任何阶段。这里给一个宽松策略：
+  // 输入框始终可用（除非 busy），由 handleSubmit 内部按 classify 路由——
+  // 命令走 handleParse（内部守卫 planning/handshake），对话走 handleChat（无守卫）。
+  // 但若处于 locked/resolution/briefing/persist 等阶段，命令会被守卫，此时仍可对话。
 
   return (
     <section className="panel command-terminal">
@@ -284,27 +361,38 @@ export default function CommandTerminal(): JSX.Element {
         <input
           type="text"
           className="command-terminal__input"
-          placeholder={inputEnabled ? '如：第一装甲师移动到 C3' : phaseHint}
+          placeholder={inputEnabled ? '如：第一装甲师移动到 C3 或「你好」' : phaseHint}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          disabled={!inputEnabled}
+          disabled={busy || parsing}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && inputEnabled && !parsing) {
-              void handleParse()
+            if (e.key === 'Enter' && !parsing && !busy && draft.trim().length > 0) {
+              void handleSubmit()
             }
           }}
         />
         <button
           type="button"
-          onClick={() => void handleParse()}
-          disabled={!inputEnabled || parsing || draft.trim().length === 0}
+          onClick={() => void handleSubmit()}
+          disabled={busy || parsing || draft.trim().length === 0}
         >
-          {parsing ? '解析中…' : '参谋解析'}
+          {parsing ? '处理中…' : '发送'}
         </button>
       </div>
 
-      {!inputEnabled && (
-        <p className="command-terminal__phase-hint">当前阶段「{phaseHint}」，无法输入命令</p>
+      {!inputEnabled && !busy && (
+        <p className="command-terminal__phase-hint">
+          当前阶段「{phaseHint}」——无法下达命令，但仍可与参谋对话（问候/询问态势）。
+        </p>
+      )}
+
+      {/* 参谋长对话历史（chat 模式回复，青光气泡） */}
+      {dialogues.length > 0 && (
+        <div className="command-terminal__dialogues">
+          {dialogues.map((d, i) => (
+            <DialogueBubble key={i} input={d.input} reply={d.reply} />
+          ))}
+        </div>
       )}
 
       {candidate !== null && candidate.kind === 'clarify' && (
@@ -602,4 +690,36 @@ function buildAllyMessage(
     default:
       return ''
   }
+}
+
+/**
+ * 参谋长对话气泡（chat 模式回复）。
+ *
+ * 区别于候选命令卡片：对话气泡是参谋的自然语言回复（青光样式），
+ * 不触发命令入队。展示玩家问话 + 参谋回复 + 来源标记（LLM/mock）。
+ */
+function DialogueBubble({
+  input,
+  reply,
+}: {
+  input: string
+  reply: ChiefChatResult
+}): JSX.Element {
+  return (
+    <div className="command-terminal__dialogue" role="status">
+      <p className="command-terminal__dialogue-input">
+        <span className="command-terminal__dialogue-speaker">指挥官</span>
+        「{input}」
+      </p>
+      <div className="command-terminal__dialogue-reply">
+        <span className="command-terminal__dialogue-speaker command-terminal__dialogue-speaker--chief">
+          参谋长
+        </span>
+        <p className="command-terminal__dialogue-text">{reply.text}</p>
+        <span className="command-terminal__dialogue-source">
+          {reply.source === 'llm' ? 'LLM' : '离线模板'}
+        </span>
+      </div>
+    </div>
+  )
 }

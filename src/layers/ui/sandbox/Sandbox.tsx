@@ -37,6 +37,7 @@ import {
 } from './SandboxRenderer'
 import { CELL_SIZE, gridPixelSize } from './coords'
 import { getPlayerFactionId } from './intel-visibility'
+import { logger } from '@/utils/logger'
 
 /** 容器最小尺寸（避免 0×0 时 PixiJS 报错）。 */
 const MIN_SIZE = 64
@@ -110,6 +111,25 @@ export default function Sandbox(): JSX.Element {
       const observerFactionId = getPlayerFactionId(factions)
       const world: SandboxWorld | null =
         map === undefined ? null : { map, units, factions, observerFactionId, currentTurn, halfLifeTurns }
+      // —— 诊断日志：定位真机黑屏（world 是否 null、cells/units 数量）——
+      // best-effort 写 diagnostics.log，不阻塞渲染。
+      if (world === null) {
+        logger.warn(
+          'sandbox/sync/null_world',
+          'Sandbox 收到 null world（未加载存档或 map 缺失），渲染空沙盘占位',
+          { scope: 'app', unitsCount: units.length, factionsCount: factions.length },
+        )
+      } else {
+        logger.debug('sandbox/sync/world', 'Sandbox 推送 world 重绘', {
+          scope: 'app',
+          cellsCount: world.map.cells.length,
+          unitsCount: world.units.length,
+          factionsCount: world.factions.length,
+          cols: world.map.cols,
+          rows: world.map.rows,
+          turn: currentTurn,
+        })
+      }
       renderer.updateWorld(world)
       renderer.updatePreview(pendingOrders)
     }
@@ -123,12 +143,25 @@ export default function Sandbox(): JSX.Element {
       const rect = container.getBoundingClientRect()
       const w = Math.max(MIN_SIZE, Math.floor(rect.width))
       const h = Math.max(MIN_SIZE, Math.floor(rect.height))
+      // —— 诊断日志：容器尺寸（真机黑屏排查：尺寸 0 → 画布不可见）——
+      logger.debug('sandbox/resize', '容器尺寸与画布尺寸', {
+        scope: 'app',
+        rectWidth: rect.width,
+        rectHeight: rect.height,
+        canvasW: w,
+        canvasH: h,
+        gridCols: cols,
+        gridRows: rows,
+      })
       try {
         app.renderer.resize(w, h)
       } catch (err) {
         // resize 偶发失败不应传播到 React（如 WebGL 上下文丢失）
         // eslint-disable-next-line no-console
         console.error('[sandbox] renderer.resize failed:', err)
+        logger.error('sandbox/resize/failed', `renderer.resize 失败: ${(err as Error).message}`, {
+          scope: 'app',
+        })
         return
       }
       const { width, height } = gridPixelSize(cols, rows)
@@ -171,6 +204,17 @@ export default function Sandbox(): JSX.Element {
         }
         // 标记 init 完成 —— 后续 destroy / resize 才安全
         initDone = true
+
+        // —— 诊断日志：PIXI Application init 成功 + WebGL 状态（真机黑屏排查）——
+        // renderer.type: 1=WebGL2, 2=WebGL(1), 5=canvas(降级)。
+        const rendererType = app.renderer.type
+        logger.info('sandbox/init/done', 'PIXI Application 初始化成功', {
+          scope: 'app',
+          rendererType,
+          rendererTypeName:
+            rendererType === 1 ? 'WebGL2' : rendererType === 2 ? 'WebGL' : rendererType === 5 ? 'canvas' : `type:${rendererType}`,
+          resolution: window.devicePixelRatio || 1,
+        })
 
         // canvas 挂载 + 渲染层加入 stage
         app.canvas.style.display = 'block'
@@ -219,6 +263,15 @@ export default function Sandbox(): JSX.Element {
         // 首次同步（用当前 store 状态）+ 首次 resize + hitArea 校正
         const initialCtx = useGameStore.getState().context
         const initialMap = initialCtx?.game.world.map
+        // —— 诊断日志：init 时的 store 状态（真机黑屏排查：init 时 world 是否已就绪）——
+        logger.info('sandbox/init/sync', 'init 首次同步 store 状态', {
+          scope: 'app',
+          hasContext: initialCtx !== null,
+          hasMap: initialMap !== undefined,
+          cellsCount: initialMap?.cells.length ?? 0,
+          unitsCount: initialCtx?.game.world.units.length ?? 0,
+          phase: initialCtx?.game.phase ?? 'none',
+        })
         syncFromStore(
           initialMap,
           initialCtx?.game.world.units ?? [],
@@ -268,6 +321,19 @@ export default function Sandbox(): JSX.Element {
       const ordersChanged = ctx?.pendingOrders !== prevCtx?.pendingOrders
       if (!worldChanged && !ordersChanged) return
 
+      // —— 诊断日志：store 变化触发重绘（真机黑屏排查：world 加载后是否到达 Sandbox）——
+      // 仅在 worldChanged 时记 info（ordersChanged 高频，记 debug）。
+      if (worldChanged) {
+        logger.info('sandbox/subscribe/world_changed', 'store world 变化触发 Sandbox 重绘', {
+          scope: 'app',
+          initDone,
+          hasWorld: world !== undefined,
+          cellsCount: world?.map.cells.length ?? 0,
+          unitsCount: world?.units.length ?? 0,
+          phase: ctx?.game.phase ?? 'none',
+        })
+      }
+
       const map = world?.map
       syncFromStore(
         map,
@@ -291,11 +357,38 @@ export default function Sandbox(): JSX.Element {
     })
 
     // —— 3. ResizeObserver：容器尺寸变化时重算居中 ——
+    // 真机黑屏防御：尺寸变化时除了 resize，还重新 sync 一次当前 store world。
+    // 部分真机 WebView2 首次 layout 慢——init 时容器尺寸可能 0，PIXI resize 到 MIN_SIZE
+    // 后内容不可见；布局稳定后 ResizeObserver 触发，这里 resize + 重绘确保内容显现。
+    let lastContainerW = 0
+    let lastContainerH = 0
     const ro = new ResizeObserver(() => {
       if (app === null || disposed) return
       const ctx = useGameStore.getState().context
       const map = ctx?.game.world.map
+      const rect = container.getBoundingClientRect()
+      // 尺寸未变（首次回调也可能如此）→ 仅 resize；尺寸真变化才记日志
+      const sizeChanged =
+        Math.abs(rect.width - lastContainerW) > 1 || Math.abs(rect.height - lastContainerH) > 1
+      lastContainerW = rect.width
+      lastContainerH = rect.height
       resizeToContainer(map?.cols ?? 1, map?.rows ?? 1)
+      // 尺寸变化且 init 完成：重新 sync 一次 world（防 init race 导致漏绘）
+      if (sizeChanged && initDone && map !== undefined) {
+        logger.debug('sandbox/resize/force_resync', '容器尺寸变化，强制重新 sync world', {
+          scope: 'app',
+          w: rect.width,
+          h: rect.height,
+        })
+        syncFromStore(
+          map,
+          ctx?.game.world.units ?? [],
+          ctx?.game.world.factions ?? [],
+          ctx?.pendingOrders ?? [],
+          ctx?.game.world.turnIndex ?? 0,
+          safeHalfLifeTurns(ctx ?? null),
+        )
+      }
     })
     ro.observe(container)
 

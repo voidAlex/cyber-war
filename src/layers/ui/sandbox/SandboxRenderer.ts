@@ -82,6 +82,7 @@ import {
   GHOST_LABEL_COLOR,
   factionColorToNumber,
 } from './theme'
+import { logger } from '@/utils/logger'
 
 /** 沙盘交互回调集合（由 Sandbox.tsx 注入，渲染层不持有 store）。 */
 export interface SandboxCallbacks {
@@ -201,6 +202,20 @@ export class SandboxRenderer {
     this.redrawObjectives()
     this.redrawUnits()
     this.redrawHighlight()
+    // —— 诊断日志：updateWorld 汇总（真机黑屏排查：是否真绘制了 cells/units）——
+    // best-effort 写 diagnostics.log；cellsCount/unitsCount 为 0 说明 world 空或没喂数据。
+    const cellsCount = world?.map.cells.length ?? 0
+    const unitsCount = world?.units.length ?? 0
+    const nodesCount = world?.map.highValueNodes.length ?? 0
+    logger.debug('sandbox/render/update_world', 'SandboxRenderer.updateWorld 完成', {
+      scope: 'app',
+      hasWorld: world !== null,
+      cellsCount,
+      unitsCount,
+      nodesCount,
+      cols: world?.map.cols ?? 0,
+      rows: world?.map.rows ?? 0,
+    })
   }
 
   /** 写入预演订单并重绘预演层。 */
@@ -437,6 +452,11 @@ export class SandboxRenderer {
     const currentTurn = world.currentTurn ?? 0
     const halfLifeTurns = world.halfLifeTurns ?? 3
 
+    // —— 诊断计数：实际绘制单位数 + 按情报级别分布（真机黑屏排查：单位是否全被隐藏）——
+    let drawnCount = 0
+    let hiddenCount = 0
+    const modeCounts: Record<string, number> = {}
+
     for (const unit of units) {
       // 无观察方时（测试/空场景）：按己方全量渲染（不隐藏任何单位）
       const decision: IntelRenderDecision =
@@ -452,8 +472,14 @@ export class SandboxRenderer {
             }
           : computeIntelRender(unit, observerFactionId, currentTurn, halfLifeTurns)
 
+      modeCounts[decision.mode] = (modeCounts[decision.mode] ?? 0) + 1
+
       // L0 盲区：完全不显示（玩家不知道该单位存在）
-      if (decision.mode === 'hidden') continue
+      if (decision.mode === 'hidden') {
+        hiddenCount += 1
+        continue
+      }
+      drawnCount += 1
 
       const alpha = ghostAlpha(decision)
       const faction = factionById.get(unit.factionId)
@@ -548,6 +574,16 @@ export class SandboxRenderer {
 
       void unitKey // 保留 key 函数引用（全量重画，预留增量优化）
     }
+
+    // —— 诊断日志：单位绘制汇总（真机黑屏排查：drawnCount=0 说明全被情报规则隐藏）——
+    logger.debug('sandbox/render/units', '单位层重绘完成', {
+      scope: 'app',
+      totalUnits: units.length,
+      drawnCount,
+      hiddenCount,
+      observerFactionId,
+      modeCounts,
+    })
   }
 
   /** 重绘高亮层（选中/悬停）。 */

@@ -20,7 +20,7 @@
  */
 
 import { useEffect, type JSX } from 'react'
-import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector, IntelligencePanel, DiplomacyPanel } from '@/layers/ui'
+import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector, IntelligencePanel, DiplomacyPanel, CollapsibleSection } from '@/layers/ui'
 import SandboxErrorBoundary from '@/layers/ui/sandbox/SandboxErrorBoundary'
 import { useGameStore } from '@/store/game-store'
 import { logger } from '@/utils/logger'
@@ -37,12 +37,16 @@ export default function App(): JSX.Element {
   const config = useGameStore((s) => s.config)
   const loadConfig = useGameStore((s) => s.loadConfig)
   const refreshSaves = useGameStore((s) => s.refreshSaves)
+  // 存档列表（左栏折叠态摘要用）
+  const saves = useGameStore((s) => s.saves)
   // legacy/no-api-key 场景：旧 config 文件的非密钥字段（异步 loadConfig 完成后才写入 store）。
   // 用于给 LLMConfigPanel 容器打 key，在 pendingConfig 到达后强制重挂载，使 useState 重取
   // 初值（预填 provider/endpoint/model 生效），避免用户看到默认 DeepSeek 而非旧 config。
   const pendingConfig = useGameStore((s) => s.pendingConfig)
 
   const phase = context?.game.phase ?? 'idle'
+  // 当前回合号（左栏折叠态摘要 + header 状态灯共用）
+  const turnIndex = context?.game.world.turnIndex ?? null
 
   // 启动时加载配置（读 config 文件 + keyring，无口令）+ 刷新存档列表
   useEffect(() => {
@@ -114,11 +118,39 @@ export default function App(): JSX.Element {
 
       <main className="app-shell__main">
         <div className="app-shell__left">
-          <SaveListPanel />
-          <CampaignPanel />
-          <TurnControlPanel />
-          <IntelligencePanel />
-          <DiplomacyPanel />
+          {/* 左栏面板可折叠（真机问题3）：存档/回合默认展开，战役包/情报/外交默认收起。
+              折叠态只显示紧凑标题条，节省 280px 纵向空间。 */}
+          <CollapsibleSection
+            title="存档"
+            defaultOpen={true}
+            collapsedHint={`${saves.length} 个`}
+          >
+            <SaveListPanel />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="回合控制"
+            defaultOpen={true}
+            collapsedHint={turnIndex !== null ? `第 ${turnIndex} 回合` : undefined}
+          >
+            <TurnControlPanel />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="战役包"
+            defaultOpen={false}
+            collapsedHint={context?.game.world.scenarioId ?? '凡尔登'}
+          >
+            <CampaignPanel />
+          </CollapsibleSection>
+
+          <CollapsibleSection title="情报置信度" defaultOpen={false}>
+            <IntelligencePanel />
+          </CollapsibleSection>
+
+          <CollapsibleSection title="外交信任度" defaultOpen={false}>
+            <DiplomacyPanel />
+          </CollapsibleSection>
         </div>
 
         <div className="app-shell__center">

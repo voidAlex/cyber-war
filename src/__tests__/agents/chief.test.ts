@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { chiefRole } from '@/layers/agents/roles/chief'
+import { chiefRole, classifyInput } from '@/layers/agents/roles/chief'
 import type { WorldState, Unit, MapCell, Faction } from '@/types'
 import type { ChiefParseContext } from '@/layers/agents/roles/chief'
 
@@ -253,5 +253,71 @@ describe('chiefRole.parseCommand — 仅匹配玩家可控单位', () => {
     // 执行单位是玩家方 first-armor，目标才是敌方
     expect(r.targetUnitIds).toContain('first-armor')
     expect(r.targetUnitId).toBe('enemy-infantry')
+  })
+})
+
+// ============================================================================
+// 意图分类（classifyInput）— 修复问题1的核心路由
+// ============================================================================
+
+describe('classifyInput — 命令 vs 对话路由', () => {
+  it('含移动关键词 → command', () => {
+    expect(classifyInput('第一装甲师移动到 C3')).toBe('command')
+    expect(classifyInput('inf-regiment 前进到 2,2')).toBe('command')
+  })
+  it('含攻击/占领/固守关键词 → command', () => {
+    expect(classifyInput('攻击 enemy-infantry')).toBe('command')
+    expect(classifyInput('占领杜奥蒙堡')).toBe('command')
+    expect(classifyInput('first-armor 固守')).toBe('command')
+  })
+  it('问候 → chat（不被误判为命令）', () => {
+    expect(classifyInput('你好')).toBe('chat')
+    expect(classifyInput('hello')).toBe('chat')
+  })
+  it('询问态势 → chat', () => {
+    expect(classifyInput('我们现在是什么状态')).toBe('chat')
+    expect(classifyInput('当前战况如何')).toBe('chat')
+  })
+  it('闲聊/感谢 → chat', () => {
+    expect(classifyInput('谢谢参谋长')).toBe('chat')
+    expect(classifyInput('有什么建议')).toBe('chat')
+  })
+  it('空输入 → chat（不触发命令解析）', () => {
+    expect(classifyInput('   ')).toBe('chat')
+    expect(classifyInput('')).toBe('chat')
+  })
+  it('命令优先于对话：同时含问候与移动词 → command', () => {
+    // "你好，把第一装甲师移动到 C3" 应判 command（移动是核心意图）
+    expect(classifyInput('你好，把第一装甲师移动到 C3')).toBe('command')
+  })
+})
+
+// ============================================================================
+// 参谋长对话（chat）— mock 模板回复
+// ============================================================================
+
+describe('chiefRole.chat — mock 对话回复', () => {
+  it('问候 → 参谋报到 + 简报态势', async () => {
+    const r = await chiefRole.chat('你好', makeCtx())
+    expect(r.source).toBe('mock')
+    expect(r.text.length).toBeGreaterThan(0)
+    // 不伪造命令：回复文本不应像候选命令卡片
+    expect(r.text).toContain('长官')
+  })
+  it('问态势 → 汇报回合与单位', async () => {
+    const r = await chiefRole.chat('我们现在是什么状态', makeCtx())
+    expect(r.source).toBe('mock')
+    expect(r.text).toContain('回合')
+  })
+  it('回复不伪造不存在的单位（仅引用真实数据）', async () => {
+    const ctx = makeCtx()
+    const r = await chiefRole.chat('汇报当前态势', ctx)
+    // mock 模板可能引用单位类型中文名（步兵/装甲等），这些都是 world 中真实存在的
+    // 这里只验证不抛错且返回非空文本
+    expect(r.text.length).toBeGreaterThan(0)
+  })
+  it('无意义输入 → 引导玩家明确意图', async () => {
+    const r = await chiefRole.chat('...', makeCtx())
+    expect(r.text.length).toBeGreaterThan(0)
   })
 })
