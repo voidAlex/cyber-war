@@ -69,3 +69,80 @@ fn tmp_sibling(target: &Path) -> std::path::PathBuf {
 fn cleanup_quiet(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
+
+// =============================================================================
+// 单元测试（P2-1）：原子写成功 + 写入中断不损坏目标
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 原子写成功：tmp→rename，目标内容正确，且 tmp 文件被清理（不存在残留）。
+    #[test]
+    fn write_atomic_succeeds_content_correct_and_tmp_cleaned() {
+        let tmp = tempfile::tempdir().expect("创建 tempdir 失败");
+        let target = tmp.path().join("world-state.json");
+
+        let payload = r#"{"turnIndex":42}"#;
+        write_atomic(&target, payload.as_bytes()).expect("原子写应成功");
+
+        // 目标内容正确
+        let got = std::fs::read_to_string(&target).expect("读取目标文件失败");
+        assert_eq!(got, payload);
+
+        // tmp 临时文件应已被 rename 消费掉，无残留
+        let tmp_path = tmp_sibling(&target);
+        assert!(
+            !tmp_path.exists(),
+            "原子写成功后 tmp 文件不应残留: {tmp_path:?}"
+        );
+    }
+
+    /// 写入中断不损坏目标：模拟「tmp 已写出但 rename 未执行」。
+    ///
+    /// 做法：先让目标存在旧值；然后手动写出 tmp（模拟中断在 rename 前），
+    /// 验证目标仍为旧值（rename 未发生 → 目标不受影响）。
+    /// 再补一次完整 write_atomic，验证 rename 后目标更新为新值。
+    #[test]
+    fn write_atomic_interruption_does_not_corrupt_target() {
+        let tmp = tempfile::tempdir().expect("创建 tempdir 失败");
+        let target = tmp.path().join("snapshot.json");
+
+        // 初始：目标已有旧值
+        std::fs::write(&target, b"OLD").expect("写旧值失败");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "OLD");
+
+        // 模拟中断：只写出 tmp，不执行 rename（直接构造 tmp 文件）
+        let tmp_path = tmp_sibling(&target);
+        std::fs::write(&tmp_path, b"NEW").expect("写 tmp 失败");
+        // 此时目标仍为旧值（rename 未发生）
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "OLD",
+            "中断期间目标不得损坏，应保持旧值"
+        );
+
+        // 恢复：执行完整原子写（内部会 rename 覆盖）
+        write_atomic(&target, b"NEW").expect("恢复写入应成功");
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "NEW",
+            "rename 后目标应更新为新值"
+        );
+    }
+
+    /// 多次原子写覆盖：每次都应是完整内容（无半截/拼接）。
+    #[test]
+    fn write_atomic_overwrite_keeps_consistent_content() {
+        let tmp = tempfile::tempdir().expect("创建 tempdir 失败");
+        let target = tmp.path().join("manifest.json");
+
+        write_atomic(&target, b"first-long-content").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "first-long-content");
+
+        // 用更短的内容覆盖，确认不会残留旧内容的尾巴（半截写入的典型症状）
+        write_atomic(&target, b"short").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "short");
+    }
+}

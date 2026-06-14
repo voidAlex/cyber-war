@@ -25,6 +25,7 @@ import {
 import { isAppErrorPayload, type AppErrorPayload } from '@/layers/gateway/tauri-bridge'
 import { parseLLMJson, LlmJsonParseError } from '@/layers/agents/protocol/schema'
 import type { LlmErrorKindString } from '@/layers/gateway/bridge-types'
+import { appendDiagnostic, type DiagnosticEntry } from '@/layers/persistence/diagnostics'
 
 // =============================================================================
 // typed errors（按四分类 + 降级 + schema 校验失败）
@@ -184,6 +185,63 @@ export function toLlmCallError(err: unknown): LlmCallError {
   return new LlmNetworkError(err instanceof Error ? err.message : String(err))
 }
 
+/**
+ * 把 typed LlmCallError 映射为诊断条目的 category（点分 `llm/<kind>`）。
+ *
+ * 用于错误分类路径落 diagnostics.log（P2-2）：
+ * - LlmNetworkError → `llm/network`
+ * - LlmApiKeyError → `llm/api_key`
+ * - LlmServerError → `llm/llm_error`
+ * - LlmTimeoutError → `llm/timeout`
+ * - LlmDegradedError → `llm/degraded`
+ * - LlmSchemaError → `llm/schema`
+ * 非 LlmCallError 归 `llm/unknown`。
+ */
+function llmErrorCategory(err: unknown): string {
+  if (err instanceof LlmNetworkError) return 'llm/network'
+  if (err instanceof LlmApiKeyError) return 'llm/api_key'
+  if (err instanceof LlmServerError) return 'llm/llm_error'
+  if (err instanceof LlmTimeoutError) return 'llm/timeout'
+  if (err instanceof LlmDegradedError) return 'llm/degraded'
+  if (err instanceof LlmSchemaError) return 'llm/schema'
+  return 'llm/unknown'
+}
+
+/**
+ * 把 typed LlmCallError 落一条诊断（category=llm/<kind>，level=error）。
+ *
+ * 仅落概要 message（diagnostics 内部还会兜底脱敏，绝不写 key/payload）。
+ * code 取 HTTP status 时由调用方经 err.message 透传，此处只取 message 文本。
+ * 落盘失败静默吞掉（诊断不得打断主流程）。
+ */
+async function appendLlmDiagnostic(
+  diagnosticSink: DiagnosticSink | undefined,
+  err: unknown,
+): Promise<void> {
+  if (!diagnosticSink) return
+  const entry: DiagnosticEntry = {
+    level: 'error',
+    category: llmErrorCategory(err),
+    message: err instanceof Error ? err.message : String(err),
+  }
+  try {
+    await diagnosticSink.append(diagnosticSink.saveId, entry)
+  } catch {
+    // 诊断落盘失败不得打断 LLM 调用主流程
+  }
+}
+
+/**
+ * 诊断下沉（依赖注入）：由编排器/上层注入，决定落哪个存档的 diagnostics.log。
+ * 默认单例 llmService 不注入（无副作用）；M3+ 由编排器注入 saveId + appendDiagnostic。
+ */
+export interface DiagnosticSink {
+  /** 目标存档 id（决定 diagnostics.log 路径） */
+  saveId: string
+  /** 追加函数（默认指向 diagnostics.appendDiagnostic，测试可 mock） */
+  append: (saveId: string, entry: DiagnosticEntry) => Promise<void>
+}
+
 // =============================================================================
 // 缓存命中统计（累计，供 Inspector）
 // =============================================================================
@@ -278,11 +336,13 @@ export type StreamFn = (
  * 默认 LLM 服务实现。
  *
  * 依赖注入：注入 streamChat（默认用 gateway 实现，测试可 mock）。
+ * 可选注入 `diagnosticSink`：错误分类路径落 diagnostics.log（P2-2）。
  */
 export function createLlmService(
-  deps: { stream?: StreamFn } = {},
+  deps: { stream?: StreamFn; diagnosticSink?: DiagnosticSink } = {},
 ): LlmService {
   const _stream = deps.stream ?? streamChat
+  const _diagnosticSink = deps.diagnosticSink
 
   let stats: CacheStats = {
     totalHitTokens: 0,
@@ -308,14 +368,19 @@ export function createLlmService(
       try {
         result = await _stream(opts)
       } catch (err) {
-        throw toLlmCallError(err)
+        const typed = toLlmCallError(err)
+        // P2-2：错误分类路径落 diagnostics.log（仅概要，绝不写 key/payload）
+        await appendLlmDiagnostic(_diagnosticSink, typed)
+        throw typed
       }
       accumulate(result.stats)
       // 降级信号：Rust 3 次重试均失败 → 切规则引擎
       if (result.stats.degraded) {
-        throw new LlmDegradedError(
+        const degradedErr = new LlmDegradedError(
           'LLM 3 次重试均失败，切规则引擎兜底（degraded:true）',
         )
+        await appendLlmDiagnostic(_diagnosticSink, degradedErr)
+        throw degradedErr
       }
       return result
     },
@@ -329,13 +394,17 @@ export function createLlmService(
       try {
         result = await _stream(opts)
       } catch (err) {
-        throw toLlmCallError(err)
+        const typed = toLlmCallError(err)
+        await appendLlmDiagnostic(_diagnosticSink, typed)
+        throw typed
       }
       accumulate(result.stats)
       if (result.stats.degraded) {
-        throw new LlmDegradedError(
+        const degradedErr = new LlmDegradedError(
           'LLM 3 次重试均失败，切规则引擎兜底（degraded:true）',
         )
+        await appendLlmDiagnostic(_diagnosticSink, degradedErr)
+        throw degradedErr
       }
 
       // 流式收集完整文本 → parseLLMJson（剥离 fence + ajv 校验）
@@ -345,13 +414,14 @@ export function createLlmService(
       } catch (err) {
         // 校验失败：绝不伪造，抛 LlmSchemaError 让上层规则引擎兜底
         const raw = result.text
-        if (err instanceof LlmJsonParseError) {
-          throw new LlmSchemaError(err.message, raw)
-        }
-        throw new LlmSchemaError(
-          err instanceof Error ? err.message : String(err),
-          raw,
-        )
+        const schemaErr = err instanceof LlmJsonParseError
+          ? new LlmSchemaError(err.message, raw)
+          : new LlmSchemaError(
+              err instanceof Error ? err.message : String(err),
+              raw,
+            )
+        await appendLlmDiagnostic(_diagnosticSink, schemaErr)
+        throw schemaErr
       }
 
       return { data, stats: result.stats }
@@ -378,19 +448,25 @@ export function createLlmService(
           }
         }
       } catch (err) {
-        throw toLlmCallError(err)
+        const typed = toLlmCallError(err)
+        await appendLlmDiagnostic(_diagnosticSink, typed)
+        throw typed
       }
       let result: StreamChatResult
       try {
         result = await handle.result()
       } catch (err) {
-        throw toLlmCallError(err)
+        const typed = toLlmCallError(err)
+        await appendLlmDiagnostic(_diagnosticSink, typed)
+        throw typed
       }
       accumulate(result.stats)
       if (result.stats.degraded) {
-        throw new LlmDegradedError(
+        const degradedErr = new LlmDegradedError(
           'LLM 3 次重试均失败，切规则引擎兜底（degraded:true）',
         )
+        await appendLlmDiagnostic(_diagnosticSink, degradedErr)
+        throw degradedErr
       }
       return result
     },
@@ -411,5 +487,29 @@ export function createLlmService(
 /**
  * 默认单例 LLM 服务（经 gateway 走真实 Rust 流式转发）。
  * orchestrator 通过依赖注入持有；测试可注入 mock。
+ *
+ * 默认单例**不**绑定 saveId，故不落 diagnostics（无目标存档）；
+ * 需要落诊断时用 [`createLlmServiceWithDiagnostics`] 按 saveId 构造实例。
  */
 export const llmService: LlmService = createLlmService()
+
+/**
+ * 构造一个绑定 saveId、错误路径落 diagnostics.log 的 LLM 服务（P2-2）。
+ *
+ * 在四分类错误/降级/schema 失败时自动追加一条诊断（category=llm/<kind>，
+ * level=error，仅概要 message，绝不写 key/payload）。落盘失败静默吞掉。
+ *
+ * 供编排器/上层在进入某存档上下文时按 saveId 创建实例。
+ *
+ * @param saveId 目标存档 id（决定 diagnostics.log 路径）
+ * @param overrides 可选覆盖（如注入 mock stream 做测试）
+ */
+export function createLlmServiceWithDiagnostics(
+  saveId: string,
+  overrides: { stream?: StreamFn } = {},
+): LlmService {
+  return createLlmService({
+    stream: overrides.stream,
+    diagnosticSink: { saveId, append: appendDiagnostic },
+  })
+}

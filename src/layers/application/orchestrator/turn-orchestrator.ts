@@ -35,6 +35,7 @@ import type { PhysicsEngineClient } from '@/layers/application/services/worker-s
 import type { ResolutionResult } from '@/layers/domain/combat'
 import type { DirectorRole, ContextCompressor } from '@/layers/agents/roles/director'
 import { shouldCompressContext } from '@/layers/agents/roles/context-compression'
+import { appendDiagnostic } from '@/layers/persistence/diagnostics'
 
 /**
  * 编排器所需的副作用服务句柄（依赖注入，便于 mock 测试）。
@@ -172,6 +173,13 @@ export async function advanceTurn(
     await services.persistence.writeTurn(world, phaseBeforePersist, events)
   } catch (err) {
     // 落盘失败回路：persist → briefing，等待重试；抛错供 UI 提示
+    // P2-2：落一条诊断（category=persist，level=error，仅概要 message，绝不写 key/payload）
+    //   诊断用 fire-and-forget：失败不得掩盖原始落盘错误，故不等 await。
+    void appendDiagnostic(cur.game.world.saveId, {
+      level: 'error',
+      category: 'persist',
+      message: `writeTurn 失败: ${String(err)}`,
+    })
     cur = step(cur, { type: 'PERSIST_FAILED', reason: String(err) }, signal)
     actions.push({ type: 'PERSIST_FAILED', reason: String(err) })
     throw Object.assign(new Error(`turn-orchestrator: 落盘失败 ${String(err)}`), {
