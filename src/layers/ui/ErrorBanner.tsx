@@ -17,15 +17,16 @@
 import { type JSX } from 'react'
 import { useGameStore } from '@/store/game-store'
 import type { LlmErrorBanner } from '@/layers/application/services/llm-service'
+import { Icon, type IconName } from '@/layers/ui/icons'
 
-/** kind → CSS class + 图标 */
-const KIND_META: Record<LlmErrorBanner['kind'], { cls: string; icon: string }> = {
-  api_key: { cls: 'error-banner--api-key', icon: '🔑' },
-  timeout: { cls: 'error-banner--timeout', icon: '⏱' },
-  network: { cls: 'error-banner--network', icon: '📡' },
-  degraded: { cls: 'error-banner--degraded', icon: '⚙' },
-  schema: { cls: 'error-banner--schema', icon: '⚠' },
-  server: { cls: 'error-banner--server', icon: '⚠' },
+/** kind → CSS class + 图标（lucide SVG，可染色） */
+const KIND_META: Record<LlmErrorBanner['kind'], { cls: string; icon: IconName }> = {
+  api_key: { cls: 'error-banner--api-key', icon: 'key-round' }, // 🔑 → KeyRound
+  timeout: { cls: 'error-banner--timeout', icon: 'clock' }, // ⏱ → Clock
+  network: { cls: 'error-banner--network', icon: 'wifi' }, // 📡 → Wifi
+  degraded: { cls: 'error-banner--degraded', icon: 'settings' }, // ⚙ → Settings（齿轮兜底）
+  schema: { cls: 'error-banner--schema', icon: 'alert-triangle' }, // ⚠ → AlertTriangle
+  server: { cls: 'error-banner--server', icon: 'alert-triangle' }, // ⚠ → AlertTriangle
 }
 
 /** kind → 用户可读建议（在主消息下方补充操作建议） */
@@ -52,7 +53,9 @@ export default function ErrorBanner(): JSX.Element | null {
     const meta = KIND_META[llmError.kind]
     return (
       <div className={`error-banner ${meta.cls}`} role="alert">
-        <span className="error-banner__icon">{meta.icon}</span>
+        <span className="error-banner__icon">
+          <Icon name={meta.icon} size={18} />
+        </span>
         <div className="error-banner__body">
           <strong>{llmError.message}</strong>
           <span className="error-banner__hint">{KIND_HINT[llmError.kind]}</span>
@@ -67,7 +70,9 @@ export default function ErrorBanner(): JSX.Element | null {
   // 通用 userError（非四分类）
   return (
     <div className="error-banner error-banner--generic" role="alert">
-      <span className="error-banner__icon">⚠</span>
+      <span className="error-banner__icon">
+        <Icon name="alert-triangle" size={18} />
+      </span>
       <div className="error-banner__body">
         <strong>{userError}</strong>
       </div>

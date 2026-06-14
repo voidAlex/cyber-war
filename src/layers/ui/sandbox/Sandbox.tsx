@@ -37,47 +37,14 @@ import {
 } from './SandboxRenderer'
 import { CELL_SIZE, gridPixelSize } from './coords'
 import { getPlayerFactionId } from './intel-visibility'
-import type { CSSProperties } from 'react'
 
 /** 容器最小尺寸（避免 0×0 时 PixiJS 报错）。 */
 const MIN_SIZE = 64
 
 /** 默认情报半衰回合数（store 无 world.intel 时的兜底）。 */
 const DEFAULT_HALF_LIFE_TURNS = 3
-
-/** 沙盘 panel 内联样式（独立于全局样式表，保证有尺寸）。 */
-const panelStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  minWidth: 320,
-  minHeight: 360,
-  flex: '1 1 auto',
-}
-
-/** canvas 挂载点内联样式：撑满 panel 剩余空间，给 PIXI resize 提供真实尺寸。 */
-const canvasHostStyle: CSSProperties = {
-  position: 'relative',
-  flex: '1 1 auto',
-  minHeight: 280,
-  width: '100%',
-  overflow: 'hidden',
-  background: '#1a1d21',
-}
-
-/** 降级占位内联样式（init 失败时显示，保证沙盘区有可见内容）。 */
-const degradedStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  flex: '1 1 auto',
-  minHeight: 280,
-  padding: 24,
-  color: '#a0a4a8',
-  border: '1px dashed #3a3d41',
-  borderRadius: 4,
-  textAlign: 'center',
-}
+// 注：原 inline 样式（panelStyle/canvasHostStyle/degradedStyle）已抽到 styles.css
+// 的 .sandbox / .sandbox__canvas-host / .sandbox--degraded / .sandbox__placeholder* 类名。
 
 /**
  * 安全读取情报半衰回合数。
@@ -375,11 +342,11 @@ export default function Sandbox(): JSX.Element {
   // 降级占位（async init 失败）：显示提示，绝不挂 canvas
   if (initFailed) {
     return (
-      <section className="panel sandbox sandbox--degraded" style={panelStyle}>
+      <section className="panel sandbox sandbox--degraded">
         <h2 className="panel__title">战场沙盘</h2>
-        <div style={degradedStyle}>
-          <p style={{ fontSize: 14 }}>沙盘加载失败</p>
-          <p style={{ fontSize: 11, marginTop: 8, opacity: 0.7 }}>
+        <div className="sandbox__placeholder">
+          <p className="sandbox__placeholder-title">沙盘加载失败</p>
+          <p className="sandbox__placeholder-detail">
             WebGL 渲染不可用或初始化失败。其余面板不受影响，可继续指挥。
           </p>
         </div>
@@ -388,14 +355,13 @@ export default function Sandbox(): JSX.Element {
   }
 
   return (
-    <section className="panel sandbox" style={panelStyle}>
+    <section className="panel sandbox">
       <h2 className="panel__title">战场沙盘</h2>
       {/*
         PixiJS canvas 挂载点。容器需有明确尺寸，PIXI 才能据此 resize。
-        用内联样式给定最小高度，避免依赖尚未接入的全局样式表；
-        外部仍可通过 .sandbox__canvas-host 覆盖（width/height 可被 CSS 覆写）。
+        尺寸由 styles.css 的 .sandbox__canvas-host 提供（flex:1 + min-height:280）。
       */}
-      <div ref={containerRef} className="sandbox__canvas-host" style={canvasHostStyle} />
+      <div ref={containerRef} className="sandbox__canvas-host" />
     </section>
   )
 }

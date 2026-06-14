@@ -17,24 +17,9 @@
  * @module layers/ui/sandbox/SandboxErrorBoundary
  */
 
-import { Component, type ErrorInfo, type ReactNode, type CSSProperties } from 'react'
-
-/** 占位容器内联样式（保证有可见尺寸，提示用户沙盘区降级）。 */
-const fallbackStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minWidth: 320,
-  minHeight: 360,
-  padding: 24,
-  background: '#1a1d21',
-  color: '#a0a4a8',
-  border: '1px dashed #3a3d41',
-  borderRadius: 4,
-  flex: '1 1 auto',
-  textAlign: 'center',
-}
+import { Component, type ErrorInfo, type ReactNode } from 'react'
+// 注：原 fallbackStyle（占位内联样式）已抽到 styles.css 的
+// .sandbox--error / .sandbox__placeholder / .sandbox__placeholder-* 类名。
 
 /** 沙盘错误边界 Props。 */
 export interface SandboxErrorBoundaryProps {
@@ -89,27 +74,16 @@ export default class SandboxErrorBoundary extends Component<
   render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <section className="panel sandbox sandbox--error" style={fallbackStyle}>
+        <section className="panel sandbox sandbox--error">
           <h2 className="panel__title">战场沙盘</h2>
-          <p style={{ fontSize: 14, marginTop: 16 }}>沙盘加载失败</p>
-          {/* dev 环境显示错误摘要，方便排查；生产环境隐藏 */}
-          {import.meta.env.DEV && this.state.message.length > 0 && (
-            <p
-              style={{
-                fontSize: 11,
-                marginTop: 8,
-                maxWidth: 280,
-                wordBreak: 'break-word',
-                opacity: 0.7,
-                fontFamily: 'monospace',
-              }}
-            >
-              {this.state.message}
-            </p>
-          )}
-          <p style={{ fontSize: 11, marginTop: 12, opacity: 0.6 }}>
-            其余面板不受影响，可继续指挥。
-          </p>
+          <div className="sandbox__placeholder">
+            <p className="sandbox__placeholder-title">沙盘加载失败</p>
+            {/* dev 环境显示错误摘要，方便排查；生产环境隐藏 */}
+            {import.meta.env.DEV && this.state.message.length > 0 && (
+              <p className="sandbox__placeholder-message">{this.state.message}</p>
+            )}
+            <p className="sandbox__placeholder-detail">其余面板不受影响，可继续指挥。</p>
+          </div>
         </section>
       )
     }

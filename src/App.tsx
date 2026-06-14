@@ -13,6 +13,9 @@
  *
  * 挂载 zustand store；不直接调 @tauri-apps/api。
  *
+ * UI 重设计（赛博朋克全息青蓝）：header 升级为 HUD 横条——
+ * Orbitron 标题 + 青光描边 + 装饰角括号 + 状态指示灯（连接/解锁/回合）+ 版本号。
+ *
  * @module App
  */
 
@@ -21,12 +24,16 @@ import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTermina
 import SandboxErrorBoundary from '@/layers/ui/sandbox/SandboxErrorBoundary'
 import { useGameStore } from '@/store/game-store'
 
+/** 应用版本号（HUD 右下显示）。 */
+const APP_VERSION = 'v0.4.0'
+
 /**
  * 应用根组件：根据 LLM 配置解锁态切换入口 / 主界面。
  */
 export default function App(): JSX.Element {
   const context = useGameStore((s) => s.context)
   const configUnlocked = useGameStore((s) => s.configUnlocked)
+  const config = useGameStore((s) => s.config)
   const probeConfig = useGameStore((s) => s.probeConfig)
   const refreshSaves = useGameStore((s) => s.refreshSaves)
 
@@ -43,10 +50,12 @@ export default function App(): JSX.Element {
     return (
       <div className="app-shell app-shell--locked">
         <GlobalBanner />
-        <header className="app-shell__header">
-          <h1>赛博战争模拟器</h1>
-          <p className="app-shell__subtitle">Cyber War Simulator — 请先配置并解锁 LLM</p>
-        </header>
+        <AppHeader
+          phase={phase}
+          turnIndex={context?.game.world.turnIndex ?? null}
+          configUnlocked={false}
+          hasConfig={config !== null}
+        />
         <main className="app-shell__main app-shell__main--centered">
           <LLMConfigPanel />
         </main>
@@ -60,10 +69,12 @@ export default function App(): JSX.Element {
   return (
     <div className="app-shell">
       <GlobalBanner />
-      <header className="app-shell__header">
-        <h1>赛博战争模拟器</h1>
-        <p className="app-shell__subtitle">Cyber War Simulator — M3 Agent + 导演部 + 流式战报</p>
-      </header>
+      <AppHeader
+        phase={phase}
+        turnIndex={context?.game.world.turnIndex ?? null}
+        configUnlocked={true}
+        hasConfig={config !== null}
+      />
 
       <main className="app-shell__main">
         <div className="app-shell__left">
@@ -91,6 +102,71 @@ export default function App(): JSX.Element {
         <EventLogPanel />
       </footer>
     </div>
+  )
+}
+
+/**
+ * 应用 Header（赛博朋克 HUD 横条）。
+ *
+ * 包含：Orbitron 标题（青光描边）、副标题、状态指示灯条（连接/解锁/回合）、版本号。
+ * 角装饰（L 形角括号）由 CSS .app-shell__header::before/::after 实现。
+ */
+function AppHeader(props: {
+  phase: string
+  turnIndex: number | null
+  configUnlocked: boolean
+  hasConfig: boolean
+}): JSX.Element {
+  const { phase, turnIndex, configUnlocked, hasConfig } = props
+  const isLockedScreen = !configUnlocked
+
+  return (
+    <header className="app-shell__header">
+      <div className="app-shell__header-row">
+        <div className="app-shell__title-block">
+          <h1>赛博战争模拟器</h1>
+          <p className="app-shell__subtitle">
+            {isLockedScreen
+              ? 'Cyber War Simulator — 请先配置 LLM'
+              : 'Cyber War Simulator — Agent + 导演部 + 流式战报'}
+          </p>
+        </div>
+
+        {/* 状态指示灯条（HUD 右侧） */}
+        <div className="app-shell__status-bar">
+          <span className="app-shell__status-item">
+            <span
+              className={
+                'app-shell__status-dot' +
+                (hasConfig ? ' app-shell__status-dot--on' : ' app-shell__status-dot--off')
+              }
+            />
+            LLM {hasConfig ? 'ONLINE' : 'OFFLINE'}
+          </span>
+
+          <span className="app-shell__status-item">
+            <span
+              className={
+                'app-shell__status-dot' +
+                (configUnlocked
+                  ? ' app-shell__status-dot--on'
+                  : ' app-shell__status-dot--warn')
+              }
+            />
+            {configUnlocked ? 'UNLOCKED' : 'LOCKED'}
+          </span>
+
+          {!isLockedScreen && (
+            <span className="app-shell__status-item">
+              <span className="app-shell__status-dot app-shell__status-dot--on" />
+              TURN {turnIndex ?? 0} · {phase.toUpperCase()}
+            </span>
+          )}
+
+          <span className="app-shell__version">{APP_VERSION}</span>
+        </div>
+      </div>
+    </header>
   )
 }
 
