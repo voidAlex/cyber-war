@@ -32,6 +32,7 @@ import {
   startDefaultCampaign,
 } from '@/layers/persistence'
 import type { CampaignPayload } from '@/types'
+import CampaignGeneratorPanel from './CampaignGeneratorPanel'
 
 /** 凡尔登玩家可选阵营 */
 const VERDUN_FACTIONS = [
@@ -244,6 +245,11 @@ export default function CampaignPanel(): JSX.Element {
         <p className="campaign-panel__hint">
           ZIP 经内存 ajv 校验（七文件 schema），失败即拒绝，不加载损坏/恶意包。
         </p>
+      </div>
+
+      {/* 生成新战役（LLM）入口 */}
+      <div className="campaign-panel__section">
+        <CampaignGeneratorPanel />
       </div>
 
       {/* 导入存档 ZIP */}
