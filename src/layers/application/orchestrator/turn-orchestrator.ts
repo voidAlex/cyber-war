@@ -116,6 +116,11 @@ function step(
  * （非 fire-and-forget），落盘成功后才 PERSIST_COMPLETE → NEXT_TURN。
  * 落盘失败时回退到 briefing 并抛 TURN_PERSIST_FAILED（不进下一回合）。
  *
+ * 落盘语义（关键）：writeTurn 落盘的 world-state/manifest turnIndex = N+1
+ * （下一回合 idle 态），而非结算回合 N——保证刷新（loadSave）后显示正确回合。
+ * 内存 reducer 流程不变（PERSIST_COMPLETE→NEXT_TURN 仍在内存推进 turnIndex+1），
+ * 落盘的 turnIndex 数值仅影响 world-state.json 快照，回放从 event-log 重算不受影响。
+ *
  * @param ctx 当前状态机上下文
  * @param services 副作用服务句柄
  * @param signal AbortSignal，用于取消（默认新建）
@@ -167,10 +172,32 @@ export async function advanceTurn(
   actions.push({ type: 'ENTER_PERSIST' })
 
   // persist：**await** 落盘（非 fire-and-forget，关键防坑）
+  //
+  // 落盘语义（关键）：world-state.json / manifest 落盘的是**下一回合 idle 态**
+  // （turnIndex+1），而非当前结算回合 N。原因：刷新（loadSave）从 world-state 恢复，
+  // 若落盘 turnIndex=N（结算完未+1），刷新后 UI 显示回合 N，比实际少 1，体感像丢档。
+  // 落盘 N+1 后，刷新显示正确回合。
+  //
+  // 回放不受影响（验收#7 红线）：
+  // - event-log 记录的是回合 N 的事件（action.turn=N），哈希比对/物理重算均基于
+  //   event-log，与 world-state.json 的 turnIndex 无关；
+  // - restoreFromEventLog 是纯函数，baseWorld.turnIndex 仅作起点，最终 turnIndex
+  //   由 `maxTurn+1`（event-log 最大回合+1）覆盖（见 replay.ts:110-113）；
+  // - 物理重算 seed = scenarioSeed:turn:sequence，turn 取自 event.turn，非 world.turnIndex。
+  // 故 world-state 落盘 N+1 不破坏回放确定性/哈希回归。
+  //
+  // persist-gate 不受影响：reducer 顺序仍是 persist→PERSIST_COMPLETE→NEXT_TURN，
+  // 落盘的 turnIndex 数值与 persist-gate（persistCompleted 守卫）正交。
   const phaseBeforePersist: GamePhase = 'persist'
   try {
     const world: WorldState = cur.game.world
-    await services.persistence.writeTurn(world, phaseBeforePersist, events)
+    // 构造下一回合 idle 态落盘：仅 turnIndex+1，其余世界数据沿用结算结果。
+    // （此处不调 reducer NEXT_TURN——那会污染内存上下文；只构造落盘用的快照。）
+    const persistedWorld: WorldState = {
+      ...world,
+      turnIndex: world.turnIndex + 1,
+    }
+    await services.persistence.writeTurn(persistedWorld, phaseBeforePersist, events)
   } catch (err) {
     // 落盘失败回路：persist → briefing，等待重试；抛错供 UI 提示
     // P2-2：落一条诊断（category=persist，level=error，仅概要 message，绝不写 key/payload）

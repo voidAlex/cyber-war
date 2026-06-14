@@ -64,9 +64,10 @@ describe('advanceTurn — 空转闭环集成', () => {
     expect(result.context.game.world.turnIndex).toBe(1)
     // 关键：落盘被 await 调用过（非 fire-and-forget）
     expect(persistence.writeTurn).toHaveBeenCalledTimes(1)
-    // 落盘写入的 world.turnIndex 应为 0（NEXT_TURN 之前的态）
+    // 落盘写入的 world.turnIndex 应为 1（下一回合 idle 态，刷新恢复正确回合）。
+    // 内存上下文 turnIndex 也是 1（NEXT_TURN 后），两者一致；落盘语义见 advanceTurn 注释。
     const writtenWorld = persistence.writeTurn.mock.calls[0][0] as WorldState
-    expect(writtenWorld.turnIndex).toBe(0)
+    expect(writtenWorld.turnIndex).toBe(1)
   })
 
   it('从 idle 自动 START_TURN 再推进', async () => {
@@ -182,10 +183,11 @@ describe('advanceTurn — 刷新恢复链路', () => {
     expect(cur.game.world.turnIndex).toBe(3)
 
     // 模拟「重启」：从 store 读回最后一次落盘的 world-state
-    // 注意：store 保存的是 writeTurn 时的 world（turnIndex=N-1，即 NEXT_TURN 之前）
+    // 落盘语义：writeTurn 落盘下一回合 idle 态（turnIndex=N+1），
+    // 故第 3 回合（推进到内存 turnIndex=3）落盘时 world.turnIndex=3（刷新恢复显示正确回合）。
     const persisted = store.get('save-A')
     expect(persisted).toBeDefined()
-    expect(persisted!.turnIndex).toBe(2) // 第 3 回合落盘时 turnIndex 仍为 2（NEXT_TURN 前态）
+    expect(persisted!.turnIndex).toBe(3) // 第 3 回合落盘 turnIndex=3（下一回合 idle 态，与内存一致）
 
     // readWorldState 读回后，可重建 idle 上下文（与 store.loadSave 一致）
     const restored = await persistence.readWorldState('save-A')

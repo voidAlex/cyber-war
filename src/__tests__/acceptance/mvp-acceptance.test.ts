@@ -462,13 +462,16 @@ describe('验收#4：重启后恢复（world-state 写读一致）', () => {
     const persistence = makeMockPersistenceService(world.saveId)
     const result = await advanceTurn(ctx, { persistence, resolve })
 
-    // persist 阶段落盘的 world-state 反映结算回合（turnIndex=0）；
-    // NEXT_TURN 在 persist 之后才在内存推进到 1。
+    // persist 阶段落盘的 world-state 为**下一回合 idle 态**（turnIndex=1），
+    // 保证刷新（loadSave 从 world-state 恢复）后显示正确回合，而非结算回合 N（体感丢档）。
+    // 内存上下文同样推进到 turnIndex=1（NEXT_TURN 后），两者一致。
     const raw = memoryStore.get(`${world.saveId}/world-state.json`)
     expect(raw).toBeDefined()
     const parsed = JSON.parse(raw!) as WorldState
     expect(parsed.saveId).toBe(world.saveId)
-    // 内存上下文已推进到下一回合
+    // 落盘 world-state turnIndex = 结算回合+1（下一回合 idle 态，刷新恢复正确）
+    expect(parsed.turnIndex).toBe(1)
+    // 内存上下文已推进到下一回合（与落盘一致）
     expect(result.context.game.world.turnIndex).toBe(1)
     expect(result.context.game.phase).toBe('idle')
   })
