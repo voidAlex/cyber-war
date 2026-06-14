@@ -1,0 +1,94 @@
+# 三平台桌面客户端打包（Windows / macOS / Linux）
+# 触发：推送 v* 标签（发布），或 Actions 页面手动 Run workflow
+# 产物：每平台独立 upload-artifact（cyber-war-windows / -macos / -linux），
+#       产物扁平放在 artifact 根目录（不层层嵌套 bundle/<format>/...）
+#
+# 使用：
+#   git tag v0.1.0 && git push --tags   # 打包发布
+#   或 GitHub 仓库 → Actions → build-desktop → Run workflow
+
+name: build-desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      note:
+        description: '手动打包（测试用）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write  # 预留给后续 release 上传
+
+jobs:
+  build:
+    name: 打包 ${{ matrix.platform }}
+    strategy:
+      fail-fast: false  # 单平台失败不影响其他平台
+      matrix:
+        include:
+          - { os: ubuntu-22.04, platform: linux }
+          - { os: windows-latest, platform: windows }
+          - { os: macos-latest, platform: macos }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Rust 编译产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: 安装 Linux 系统依赖（webkit2gtk 等 Tauri 必需）
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: Tauri 打包
+        run: pnpm tauri build
+
+      - name: 收集打包产物（扁平，不嵌套）
+        shell: bash
+        run: |
+          set -e
+          mkdir -p artifacts
+          # 从 bundle 各格式子目录（msi/nsis/dmg/deb/appimage/rpm）提取最终产物，
+          # 扁平复制到 artifacts/ 根（去掉 bundle/<format>/ 中间层）
+          find src-tauri/target/release/bundle -type f \
+            \( -name '*.msi' -o -name '*.exe' -o -name '*.dmg' \
+               -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
+            -exec cp {} artifacts/ \;
+          echo "=== ${{ matrix.platform }} 产物清单 ==="
+          ls -la artifacts/
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyber-war-${{ matrix.platform }}
+          path: artifacts/*
+          if-no-files-found: error  # 没产物视为失败（早暴露打包问题）
