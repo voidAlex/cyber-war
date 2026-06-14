@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "赛博战争模拟器",
+  "productName": "Cyber War Simulator",
   "version": "0.1.0",
   "identifier": "com.cyberwar.simulator",
   "build": {
