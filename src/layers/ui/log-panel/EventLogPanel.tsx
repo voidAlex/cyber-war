@@ -24,8 +24,12 @@ import type { AgentAction, ActionEnvelope } from '@/types'
 const ITEM_HEIGHT = 28
 /** 可视区上下额外渲染的缓冲条目数（避免滚动边缘闪烁）。 */
 const OVERSCAN = 5
-/** 日志面板可视高度（px）。 */
-const VIEWPORT_HEIGHT = 240
+/** 日志面板可视高度（px）。
+ *  D 布局重构：日志从视口底部 footer（240px）移到右栏底部（与对话/命令同栏），
+ *  改为更紧凑的 150px（约 5 行），避免占用右栏过多纵向空间。
+ *  必须与 styles.css .event-log-panel__viewport 的 height 保持一致
+ *  （否则虚拟滚动窗口大小与实际可视区不匹配，会出现底部空白或多余渲染）。 */
+const VIEWPORT_HEIGHT = 150
 
 /**
  * 日志条目统一形态（live envelope 与 persisted event 合并展示）。

@@ -142,7 +142,12 @@ a {
 .app-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  /* D 布局重构：严格 100vh（非 min-height），配合 overflow:hidden 让 main 严格填满
+     视口、各列内部滚动。移除 footer 后避免右栏内容超高把整页撑出视口
+     （既有缺陷：min-height:100vh 允许增长，grid 行被最高列撑开）。
+     锁定屏（LLMConfigPanel）因内容短不受影响。 */
+  height: 100vh;
+  overflow: hidden;
   position: relative;
   z-index: 1; /* 浮在 body 扫描线之上（但仍被 ::before 覆盖） */
 }
@@ -311,16 +316,31 @@ a {
 }
 
 .app-shell__right {
-  overflow: auto;
+  /* D 布局重构：右栏改为 flex 列，上区（终端/inspector）flex 1 吃满，
+     下区（日志）固定底部高度。整体不再 overflow:auto（上区单独滚动，
+     日志区内部虚拟滚动自管）。 */
+  overflow: hidden;
+}
+
+/* 右栏上区：终端/战报 + AgentInspector，flex 1 吃满剩余空间，自身滚动 */
+.app-shell__right-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* 右栏底区：日志台，固定高度（不再随内容增长），flex-shrink 防被压缩 */
+.app-shell__right-log {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 /* 左栏内容可滚动（折叠后仍可能超过视口） */
 .app-shell__left {
   overflow-y: auto;
-}
-
-.app-shell__footer {
-  padding: 0 var(--space-3) var(--space-3);
 }
 
 /* ============================================================
@@ -391,6 +411,24 @@ a {
 }
 .collapsible--open .collapsible__header {
   border-bottom: 1px solid var(--border-dim);
+}
+
+/* —— D 布局重构：左栏分组容器 ——
+   一个 CollapsibleSection 组内可含多个面板（如信息组=情报+外交，系统组=存档+战役）。
+   组内面板纵向排列、带间距；内层面板去掉外层描边（避免与组容器双层边框，
+   由 .collapsible__body > .panel 规则继承处理）。 */
+.collapsible-group__panels {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+/* 组内面板间距下，首个/末个面板与组 header/body 边缘对齐 */
+.collapsible-group__panels > .panel:first-child {
+  margin-top: 0;
+}
+.collapsible-group__panels > .panel:last-child {
+  margin-bottom: 0;
 }
 
 /* ============================================================
@@ -1038,12 +1076,13 @@ a {
   flex-direction: column;
   min-width: 320px;
   min-height: 360px;
-  /* 限制沙盘最大高度：避免 grid 行被其他列（右栏终端/inspector）撑高后，
-     center 列 canvas-host 被拉到数千 px（真机黑屏根因之一——网格只画在顶部，
-     大片深色 canvas 看起来全黑）。min-height:0 让 flex 子项可收缩。 */
+  /* D 布局重构：移除底部 footer（原占 240px）后，沙盘吃满中栏剩余空间。
+     max-height 仅按 header + main padding 估算（header ~60px + padding 24px + 余量），
+     不再减 footer 240px——沙盘不再"太长"。flex 1 让其填满 grid 行；
+     min-height:0 让 flex 子项可收缩（防 canvas-host 被拉到数千 px 黑屏）。 */
   flex: 1 1 auto;
   min-height: 0;
-  max-height: calc(100vh - 180px);
+  max-height: calc(100vh - 90px);
 }
 
 /* canvas 挂载点：撑满 panel 剩余空间 */
@@ -2328,9 +2367,10 @@ th {
 }
 
 /* 虚拟滚动容器：青光细滚动条（全局已有）+ 固定可视高度。
-   抽出原组件 inline height/overflowY（静态值），集中到样式表便于统一调整。 */
+   D 布局重构：日志从视口底部 footer（240px）移到右栏底部，高度收为 150px（约 5 行）。
+   必须与 EventLogPanel VIEWPORT_HEIGHT 常量保持一致（虚拟滚动窗口大小对齐）。 */
 .event-log-panel__viewport {
-  height: 240px;
+  height: 150px;
   overflow-y: auto;
   border: 1px solid var(--border-dim);
   border-radius: var(--radius);

@@ -1,15 +1,19 @@
 /**
  * 应用主布局（App.tsx）— M3 UI 层接线。
  *
- * 布局（PRD §4 / TDD §2 + M3 范围#6）：
+ * 布局（PRD §4 / TDD §2 + M3 范围#6 + D 布局重构）：
  * - 未加载 LLM 配置 → 显示 LLMConfigPanel 作为入口（占满中心）。
- * - 已加载 → 三栏主界面：
- *   - 左栏：SaveListPanel + TurnControlPanel
- *   - 中栏：Sandbox
- *   - 右栏：按 phase 切换 CommandTerminal / BriefingPanel
- * - 底部：EventLogPanel
+ * - 已加载 → 三栏主界面（无 footer，沙盘吃满中栏）：
+ *   - 左栏（按功能分组，3 组 CollapsibleSection）：
+ *     · 行动组：回合控制（TurnControlPanel）
+ *     · 信息组：情报（IntelligencePanel）+ 外交（DiplomacyPanel）
+ *     · 系统组：存档（SaveListPanel）+ 战役包（CampaignPanel）
+ *   - 中栏：Sandbox（flex 1 吃满，移除 footer 后不再"太长"）
+ *   - 右栏（对话/命令/战报 + 日志同栏，不跳视线）：
+ *     · 上：按 phase 切换 CommandTerminal / BriefingPanel
+ *     · 中：AgentInspector（DEV 折叠）
+ *     · 底：EventLogPanel（从视口底部 footer 移此，~150px 紧凑）
  * - 全局：ErrorBanner（四分类错误横幅）
- * - 开发模式：AgentInspector（右栏底部或独立区）
  *
  * 挂载 zustand store；不直接调 @tauri-apps/api。
  *
@@ -121,38 +125,39 @@ export default function App(): JSX.Element {
 
       <main className="app-shell__main">
         <div className="app-shell__left">
-          {/* 左栏面板可折叠（真机问题3）：存档/回合默认展开，战役包/情报/外交默认收起。
-              折叠态只显示紧凑标题条，节省 280px 纵向空间。 */}
-          <CollapsibleSection
-            title="存档"
-            defaultOpen={true}
-            collapsedHint={`${saves.length} 个`}
-          >
-            <SaveListPanel />
-          </CollapsibleSection>
+          {/* 左栏按功能分 3 组（D 布局重构：5 折叠条 → 3 组，减少拥挤）。
+              每组一个 CollapsibleSection header，组内可含多个面板。
+              默认展开策略：行动/系统常用（开），信息查看型（收起）。 */}
 
+          {/* 行动组：回合控制（每回合必用，默认展开） */}
           <CollapsibleSection
-            title="回合控制"
+            title="行动"
             defaultOpen={true}
             collapsedHint={turnIndex !== null ? `第 ${turnIndex} 回合` : undefined}
           >
-            <TurnControlPanel />
+            <div className="collapsible-group__panels">
+              <TurnControlPanel />
+            </div>
           </CollapsibleSection>
 
+          {/* 信息组：情报 + 外交（查看型，默认收起） */}
+          <CollapsibleSection title="信息" defaultOpen={false}>
+            <div className="collapsible-group__panels">
+              <IntelligencePanel />
+              <DiplomacyPanel />
+            </div>
+          </CollapsibleSection>
+
+          {/* 系统组：存档 + 战役包（存档常用，默认展开） */}
           <CollapsibleSection
-            title="战役包"
-            defaultOpen={false}
-            collapsedHint={context?.game.world.scenarioId ?? '凡尔登'}
+            title="系统"
+            defaultOpen={true}
+            collapsedHint={`${saves.length} 个存档`}
           >
-            <CampaignPanel />
-          </CollapsibleSection>
-
-          <CollapsibleSection title="情报置信度" defaultOpen={false}>
-            <IntelligencePanel />
-          </CollapsibleSection>
-
-          <CollapsibleSection title="外交信任度" defaultOpen={false}>
-            <DiplomacyPanel />
+            <div className="collapsible-group__panels">
+              <SaveListPanel />
+              <CampaignPanel />
+            </div>
           </CollapsibleSection>
         </div>
 
@@ -164,14 +169,18 @@ export default function App(): JSX.Element {
         </div>
 
         <div className="app-shell__right">
-          {showBriefing ? <BriefingPanel /> : <CommandTerminal />}
-          <AgentInspector />
+          {/* 右栏（D 布局重构）：对话/命令/战报 + AgentInspector + 日志同栏，
+              日志从视口底部 footer 移此底部，不再割裂视线。
+              上区 flex 1（终端/战报吃满），日志固定底部 ~150px。 */}
+          <div className="app-shell__right-main">
+            {showBriefing ? <BriefingPanel /> : <CommandTerminal />}
+            <AgentInspector />
+          </div>
+          <div className="app-shell__right-log">
+            <EventLogPanel />
+          </div>
         </div>
       </main>
-
-      <footer className="app-shell__footer">
-        <EventLogPanel />
-      </footer>
     </div>
   )
 }
