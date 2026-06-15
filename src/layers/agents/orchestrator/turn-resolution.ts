@@ -31,6 +31,8 @@ import type {
   WorldState,
   AgentAction,
   ResolutionSummary,
+  CampaignRules,
+  CampaignUnit,
 } from '@/types'
 import type { LlmService, CacheStats } from '@/layers/application/services/llm-service'
 import type { PhysicsEngineClient } from '@/layers/application/services/worker-service'
@@ -45,6 +47,7 @@ import type {
 import { theaterActionToEnvelope, commanderDecisionToEnvelope } from '@/layers/agents/roles'
 import { allocateSequences, SEQUENCE_BASE, makeSeed } from './sequence-allocator'
 import { ruleEngineFallback, type RuleEngineFallbackResult } from '@/layers/agents/director/rule-engine-fallback'
+import { rollRandomEvents } from '@/layers/domain/random-events'
 import { logger } from '@/utils/logger'
 
 // =============================================================================
@@ -93,6 +96,11 @@ export interface OrchestrateTurnResolutionParams {
    * 不传时导演部按非流式产出完整战报（默认行为，测试不受影响）。
    */
   onReportChunk?: (chunk: string) => void
+  /**
+   * 战役规则（第 2 批，可选）：用于 rollRandomEvents 判定随机事件。
+   * rules.randomEvents 为空或未注入时，本回合无随机事件（默认行为，测试不受影响）。
+   */
+  campaignRules?: CampaignRules
 }
 
 /**
@@ -131,6 +139,13 @@ export interface OrchestrateTurnResolutionResult {
   cacheStats: CacheStats
   /** 是否规则引擎降级（导演部 LLM 失败时 true） */
   degraded: boolean
+  /**
+   * 第 2 批：援军注入后的世界状态（含 random_events 注入的新单位）。
+   * 调用方（turn-orchestrator）应采用此 world 替代入参 worldState，
+   * 保证援军单位持久化到存档（replay 时从 event-log 的 random_event 重建）。
+   * 无随机事件时等于入参 worldState。
+   */
+  world: WorldState
 }
 
 /**
@@ -168,7 +183,6 @@ export async function orchestrateTurnResolution(
   params: OrchestrateTurnResolutionParams,
 ): Promise<OrchestrateTurnResolutionResult> {
   const {
-    worldState,
     lockedOrders,
     scenarioSeed,
     turn,
@@ -179,6 +193,8 @@ export async function orchestrateTurnResolution(
     directorRole,
     onProgress,
   } = params
+  // worldState 用 let：第 2 批随机事件可能注入援军单位，需滚动更新（确定性链式）。
+  let worldState = params.worldState
 
   const playerFactionId = params.playerFactionId ?? resolvePlayerFactionId(worldState)
   // 所有 envelope（最终按 sequence 升序输出）
@@ -208,6 +224,29 @@ export async function orchestrateTurnResolution(
     rawEvents: rawResults.events.length,
     physicsSuccess: rawResults.success,
   })
+
+  // -------------------------------------------------------------------------
+  // 步骤1.5：第 2 批 战役随机事件（物理结算后、导演部 adjudicate 前）
+  // -------------------------------------------------------------------------
+  // 确定性：rollRandomEvents 用 DeterministicRandom.fromSequence(scenarioSeed, turn, 9999)。
+  // 不伪造：援军单位来自战役包 rules.randomEvents[].reinforcementUnits 定义。
+  // 复用覆写链路：事件 effects 已是 DirectorOverride[]，由导演部在 adjudicate 中应用 + 叙事。
+  const campaignRules = params.campaignRules
+  let randomEvents: import('@/types').RandomEvent[] = []
+  if (campaignRules?.randomEvents && campaignRules.randomEvents.length > 0) {
+    const roll = rollRandomEvents(worldState, turn, campaignRules, scenarioSeed)
+    randomEvents = roll.events
+    // 援军注入到真实 worldState（CampaignUnit → Unit 初始化 detection/orders/status）
+    if (roll.reinforcements.length > 0) {
+      worldState = applyReinforcements(worldState, roll.reinforcements)
+    }
+    logger.info('orch/resolve/random_events', '随机事件判定完成', {
+      ...logCtx,
+      triggered: randomEvents.length,
+      reinforcementCount: roll.reinforcements.length,
+      eventIds: randomEvents.map((e) => e.id),
+    })
+  }
 
   // -------------------------------------------------------------------------
   // 步骤2：批次1 参谋长（玩家侧）— chief envelopes（seq 0+，已在握手阶段预分配）
@@ -353,6 +392,7 @@ export async function orchestrateTurnResolution(
       scenarioSeed,
       turn,
       onReportChunk: params.onReportChunk,
+      randomEvents,
     })
     if (onProgress) {
       onProgress({ agentId: 'director', role: 'director', status: 'done' })
@@ -422,6 +462,7 @@ export async function orchestrateTurnResolution(
     keyEvents,
     cacheStats,
     degraded,
+    world: worldState,
   }
 }
 
@@ -470,6 +511,45 @@ function extractNodeId(envelope: ActionEnvelope): string | undefined {
 function resolvePlayerFactionId(world: WorldState): string {
   const player = world.factions.find((f) => f.side === 'player')
   return player?.id ?? world.factions[0]?.id ?? ''
+}
+
+/**
+ * 第 2 批：把援军单位（CampaignUnit）注入 worldState.units（不可变产出）。
+ *
+ * CampaignUnit 是战役包数据形态（无 runtime detection/orders/status），
+ * 注入时初始化这些字段为空（detection={} orders=[] status=模板值）。
+ * 已存在的 unitId 跳过（防重复注入，确定性幂等）。
+ *
+ * @param world 当前世界状态（只读）
+ * @param reinforcements 待注入援军（来自 rollRandomEvents.reinforcements）
+ * @returns 注入援军后的新 worldState（无新增时返回原 world）
+ */
+function applyReinforcements(
+  world: WorldState,
+  reinforcements: readonly CampaignUnit[],
+): WorldState {
+  if (reinforcements.length === 0) return world
+  const existing = new Set(world.units.map((u) => u.id))
+  const fresh = reinforcements
+    .filter((ru) => !existing.has(ru.id))
+    .map((ru) => ({
+      id: ru.id,
+      factionId: ru.factionId,
+      type: ru.type,
+      coord: { col: ru.coord.col, row: ru.coord.row },
+      strength: ru.strength,
+      personnel: ru.personnel,
+      maxPersonnel: ru.maxPersonnel,
+      fuel: ru.fuel,
+      ammo: ru.ammo,
+      morale: ru.morale,
+      fatigue: ru.fatigue,
+      detection: {},
+      orders: [],
+      status: ru.status ? [...ru.status] : [],
+    }))
+  if (fresh.length === 0) return world
+  return { ...world, units: [...world.units, ...fresh] }
 }
 
 /** director 真路径产物类型（含 appliedOverrides/keyEvents） */

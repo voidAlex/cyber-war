@@ -44,6 +44,7 @@ export type ResolutionEventKind =
   | 'casualty' // 歼灭
   | 'blockade' // 受阻/失败
   | 'recon' // 主动侦察命中（升级目标单位对该方的情报等级）
+  | 'random_event' // 战役随机事件（暴雨/毒气/援军/兵变/炮击，source:'director' 采信 log）
 
 /**
  * 物理层结算事件（event-log 一条目级产物）。

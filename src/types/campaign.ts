@@ -193,12 +193,161 @@ export interface CampaignSupplyRules {
   restockRate?: number
 }
 
+// =============================================================================
+// 随机事件规则（rules.json.randomEvents，第 2 批）
+// =============================================================================
+
+/**
+ * 随机事件类别。
+ *
+ * - weather：天气（暴雨/泥泞/严寒），通常影响全图移动/补给。
+ * - gas：化学武器（毒气），特定区域单位减员。
+ * - reinforcement：援军到达，新单位在指定回合出现。
+ * - mutiny：兵变，低士气阵营单位士气再降。
+ * - surprise：突发打击（炮击/夜袭），随机区域单位减员。
+ */
+export type RandomEventKind =
+  | 'weather'
+  | 'gas'
+  | 'reinforcement'
+  | 'mutiny'
+  | 'surprise'
+
+/**
+ * 随机事件效果模板（声明式：描述「改谁、改什么字段、改多少」）。
+ *
+ * rollRandomEvents 用确定性随机（DeterministicRandom）把 selector 解析为
+ * 具体单位，再把 delta 应用为 DirectorOverride（field=units.<unitId>.<field>）。
+ *
+ * targetKind 决定单位筛选范围：
+ * - 'all'：当前 world.units 全部单位。
+ * - 'faction'：某阵营全部单位（factionId 指定）。
+ * - 'region'：某坐标范围内的单位（coord + radius）。
+ * - 'specific'：unitIds 显式指定（用于 reinforcement 等已确定目标）。
+ *
+ * field 限定为 Unit 的数值字段（strength/morale/fatigue/fuel/ammo）；
+ * op 为 'set'（直接设值，用于 reinforcement 新单位）/ 'add'（增减，可负）。
+ */
+export interface RandomEventEffectTemplate {
+  /** 目标筛选类别 */
+  targetKind: 'all' | 'faction' | 'region' | 'specific'
+  /** faction targetKind 时指定阵营 id */
+  factionId?: string
+  /** region targetKind 时的中心坐标 */
+  coord?: { col: number; row: number }
+  /** region targetKind 时的半径（曼哈顿距离） */
+  radius?: number
+  /** specific targetKind 时指定的单位 id 列表 */
+  unitIds?: string[]
+  /** 作用字段（Unit 数值字段名，如 strength/morale） */
+  field: string
+  /** 操作类别：set 直接设值（reinforcement 用）；add 增量（可负） */
+  op: 'set' | 'add'
+  /** 数值（set 时为绝对值，add 时为增量；可负） */
+  value: number
+  /** 是否仅作用于单一目标（按权重随机挑一个）；false=全部命中目标 */
+  singleTarget?: boolean
+  /** 单一目标挑选时的筛选条件（如 morale<30 时兵变），可选 */
+  filterField?: string
+  /** filterField 的阈值（小于此值的单位才进入候选池） */
+  filterBelow?: number
+  /** 效果说明（落入 DirectorOverride.reason 供战报叙事） */
+  reason: string
+}
+
+/**
+ * 随机事件触发条件（声明式判定，rollRandomEvents 据此决定是否触发）。
+ *
+ * - 'always'：满足 turnRange 且 weight 概率命中即触发。
+ * - 'morale_below'：某阵营平均士气低于 moraleThreshold 时才进入候选池
+ *   （仍需 weight 概率）。
+ * - 'turn_in'：turnRange 显式列回合（如 [5,10,15]），不参与概率。
+ */
+export interface RandomEventTriggerCondition {
+  /** 判定类别 */
+  kind: 'always' | 'morale_below' | 'turn_in'
+  /** 阵营 id（morale_below 用） */
+  factionId?: string
+  /** 士气阈值（morale_below 用，阵营平均士气低于此值才候选） */
+  moraleThreshold?: number
+  /** 显式触发回合列表（turn_in 用，如 [5,10,15]） */
+  turns?: number[]
+}
+
+/**
+ * 随机事件模板（rules.json.randomEvents[]）。
+ *
+ * rollRandomEvents 基于 weight 概率 + triggerCondition 判定触发哪些事件，
+ * 触发后用确定性随机解析 effects 为具体 DirectorOverride[]。
+ */
+export interface RandomEventTemplate {
+  /** 事件 id（唯一） */
+  id: string
+  /** 类别 */
+  kind: RandomEventKind
+  /** 触发概率权重（0..1，每回合独立判定） */
+  weight: number
+  /** 触发条件（默认 always） */
+  triggerCondition?: RandomEventTriggerCondition
+  /** 触发回合范围 [startTurn, endTurn]（inclusive） */
+  turnRange?: [number, number]
+  /** 事件显示名（战报/UI 用） */
+  label: string
+  /** 事件描述（战报叙事用） */
+  description: string
+  /** 效果模板（声明式，rollRandomEvents 解析为 DirectorOverride[]） */
+  effects: RandomEventEffectTemplate[]
+  /**
+   * 援军单位定义（仅 reinforcement 用）。
+   * 触发时这些单位从 rules 注入到 world.units（不伪造：来自战役包定义）。
+   * key=unitId，value=CampaignUnit（不含 runtime detection/orders/status 字段）。
+   */
+  reinforcementUnits?: CampaignUnit[]
+}
+
+/**
+ * 已触发的随机事件实例（rollRandomEvents 产出，传给 director adjudicate）。
+ *
+ * effects 已解析为具体 DirectorOverride[]（field=units.<unitId>.<field>），
+ * 导演部在战报中描述事件 + 把 effects 作为已确定覆写应用。
+ */
+export interface RandomEvent {
+  /** 事件 id（来自模板） */
+  id: string
+  /** 类别 */
+  kind: RandomEventKind
+  /** 触发回合 */
+  turn: number
+  /** 显示名 */
+  label: string
+  /** 描述 */
+  description: string
+  /** 已解析为具体单位的覆写（DirectorOverride 格式，复用现有覆写链路） */
+  effects: import('@/layers/agents/protocol/schema').DirectorOverride[]
+  /**
+   * 本事件触发的援军单位 id 列表（仅 reinforcement；这些单位已在 world.units 中）。
+   * director/replay 据此知晓新增单位（采信 log，回放从 reinforcementUnits 重建）。
+   */
+  reinforcementUnitIds?: string[]
+  /**
+   * 援军单位完整定义（仅 reinforcement；用于 event-log 持久化 + 回放重建）。
+   * director 把它写入 random_event AgentAction 的 payload.data.reinforcementUnits，
+   * replay 据此在回放时把援军单位注入 world.units（采信 log，不重算）。
+   */
+  reinforcementUnits?: CampaignUnit[]
+}
+
 /** 战役包数值规则（rules.json） */
 export interface CampaignRules {
   intelDecay: CampaignIntelDecay
   combat: CampaignCombatRules
   movement?: CampaignMovementRules
   supply?: CampaignSupplyRules
+  /**
+   * 随机事件模板列表（第 2 批，可选）。
+   * rollRandomEvents 据此 + 确定性随机判定每回合触发哪些事件。
+   */
+  randomEvents?: RandomEventTemplate[]
 }
 
 // =============================================================================

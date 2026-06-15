@@ -444,6 +444,10 @@ function applyEngagementToChanges(
  *
  * - director override（kind:'adjudication', payload.kind:'override'）：
  *   按 field 路径 units.<unitId>.<field> 应用 after 值（采信 log）。
+ * - random_event（第 2 批，payload.kind:'random_event'）：
+ *   从 payload.data.effects（DirectorOverride[]）逐条应用 after 值（采信 log）。
+ *   reinforcement 单位已在 commitStateChanges 时由援军注入逻辑处理
+ *   （援军单位 id 来自 event.data.reinforcementUnitIds，回放需另行注入）。
  * - report / 其它：原文采信，不修改 world 数值（战报进 directorMemory 留痕）。
  */
 function applyTrustedAction(world: WorldState, action: AgentAction): void {
@@ -457,6 +461,54 @@ function applyTrustedAction(world: WorldState, action: AgentAction): void {
       if (unit) {
         // 采信 log 的 after 值，落到 world（不可变产出）
         setUnitField(unit, parsed.field, after)
+      }
+    }
+    return
+  }
+  // 第 2 批：random_event（source:'director'，采信 log 的 effects 数组，不重算）
+  if (payloadKind === 'random_event') {
+    const data = (action.payload['data'] as Record<string, unknown>) ?? {}
+    // 1. 注入援军单位（采信 log 的 reinforcementUnits 完整定义，不重算）
+    const reinforcementUnits = (data['reinforcementUnits'] as
+      | Array<Record<string, unknown>>
+      | undefined)
+    if (reinforcementUnits && reinforcementUnits.length > 0) {
+      const existing = new Set(world.units.map((u) => u.id))
+      for (const ru of reinforcementUnits) {
+        const id = String(ru['id'] ?? '')
+        if (!id || existing.has(id)) continue
+        const coord = ru['coord'] as { col: number; row: number } | undefined
+        if (!coord) continue
+        world.units.push({
+          id,
+          factionId: String(ru['factionId'] ?? ''),
+          type: String(ru['type'] ?? 'infantry') as Unit['type'],
+          coord: { col: coord.col, row: coord.row },
+          strength: Number(ru['strength'] ?? 0),
+          personnel: Number(ru['personnel'] ?? 0),
+          maxPersonnel: Number(ru['maxPersonnel'] ?? 0),
+          fuel: Number(ru['fuel'] ?? 0),
+          ammo: Number(ru['ammo'] ?? 0),
+          morale: Number(ru['morale'] ?? 0),
+          fatigue: Number(ru['fatigue'] ?? 0),
+          detection: {},
+          orders: [],
+          status: [],
+        })
+        existing.add(id)
+      }
+    }
+    // 2. 应用 effects（采信 log 的 after 值，落到 world）
+    const effects = (data['effects'] as Array<Record<string, unknown>>) ?? []
+    for (const eff of effects) {
+      const field = String(eff['field'] ?? '')
+      const after = eff['after']
+      const parsed = parseOverrideField(field)
+      if (parsed && after !== undefined) {
+        const unit = world.units.find((u) => u.id === parsed.unitId)
+        if (unit) {
+          setUnitField(unit, parsed.field, after)
+        }
       }
     }
     return

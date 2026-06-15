@@ -144,3 +144,133 @@ describe('directorRole.adjudicate — M2 mock 透传物理结果', () => {
     expect(result.resolutionSummary.degraded).toBe(true)
   })
 })
+
+// ============================================================================
+// 第 2 批：随机事件接线（mock 路径应用 effects + 产 random_event AgentAction）
+// ============================================================================
+
+describe('directorRole.adjudicate — 第 2 批 随机事件接线', () => {
+  it('randomEvents 传入 → effects 应用到 finalResult.stateChanges', async () => {
+    const units: Unit[] = [
+      { id: 'u1', factionId: 'blue', type: 'infantry', coord: { col: 0, row: 0 }, strength: 80, personnel: 1000, maxPersonnel: 1000, fuel: 80, ammo: 80, morale: 60, fatigue: 10, detection: {}, orders: [], status: [] },
+    ]
+    const world = makeWorld(units)
+    const result = await directorRole.adjudicate({
+      physicsResult: makePhysicsResult([]),
+      envelopes: [],
+      world,
+      scenarioSeed: 'sc:s',
+      turn: 0,
+      randomEvents: [
+        {
+          id: 'evt-rain',
+          kind: 'weather',
+          turn: 0,
+          label: '暴雨',
+          description: '暴雨降低机动',
+          effects: [
+            {
+              field: 'units.u1.fatigue',
+              before: 10,
+              after: 20,
+              reason: '暴雨泥泞',
+            },
+          ],
+        },
+      ],
+    })
+    // effects 应用到 stateChanges.unitUpdates
+    expect(result.finalResult.stateChanges.unitUpdates['u1']?.fatigue).toBe(20)
+  })
+
+  it('randomEvents 传入 → 产 random_event AgentAction（source:director）', async () => {
+    const world = makeWorld([])
+    const result = await directorRole.adjudicate({
+      physicsResult: makePhysicsResult([]),
+      envelopes: [],
+      world,
+      scenarioSeed: 'sc:s',
+      turn: 0,
+      randomEvents: [
+        {
+          id: 'evt-gas',
+          kind: 'gas',
+          turn: 0,
+          label: '毒气',
+          description: '毒气攻击',
+          effects: [],
+        },
+      ],
+    })
+    const randomEventAction = result.directorEvents.find(
+      (e) => e.payload['kind'] === 'random_event',
+    )
+    expect(randomEventAction).toBeDefined()
+    expect(randomEventAction?.source).toBe('director')
+    expect(randomEventAction?.sequence).toBe(4001) // SEQUENCE_DIRECTOR_RANDOM_EVENT_BASE
+    const data = randomEventAction?.payload['data'] as Record<string, unknown>
+    expect(data['eventId']).toBe('evt-gas')
+    expect(data['label']).toBe('毒气')
+  })
+
+  it('无 randomEvents → 不产 random_event AgentAction（兼容默认行为）', async () => {
+    const world = makeWorld([])
+    const result = await directorRole.adjudicate({
+      physicsResult: makePhysicsResult([]),
+      envelopes: [],
+      world,
+      scenarioSeed: 'sc:s',
+      turn: 0,
+    })
+    const randomEventAction = result.directorEvents.find(
+      (e) => e.payload['kind'] === 'random_event',
+    )
+    expect(randomEventAction).toBeUndefined()
+  })
+
+  it('reinforcement 随机事件：reinforcementUnits 写入 random_event payload（供回放重建）', async () => {
+    const world = makeWorld([])
+    const result = await directorRole.adjudicate({
+      physicsResult: makePhysicsResult([]),
+      envelopes: [],
+      world,
+      scenarioSeed: 'sc:s',
+      turn: 0,
+      randomEvents: [
+        {
+          id: 'evt-reinforce',
+          kind: 'reinforcement',
+          turn: 0,
+          label: '援军',
+          description: '援军到达',
+          effects: [],
+          reinforcementUnitIds: ['reinforce-1'],
+          reinforcementUnits: [
+            {
+              id: 'reinforce-1',
+              factionId: 'blue',
+              type: 'infantry',
+              coord: { col: 0, row: 0 },
+              strength: 80,
+              personnel: 1000,
+              maxPersonnel: 1000,
+              fuel: 80,
+              ammo: 80,
+              morale: 70,
+              fatigue: 10,
+              status: [],
+            },
+          ],
+        },
+      ],
+    })
+    const randomEventAction = result.directorEvents.find(
+      (e) => e.payload['kind'] === 'random_event',
+    )
+    const data = randomEventAction?.payload['data'] as Record<string, unknown>
+    expect(data['reinforcementUnitIds']).toEqual(['reinforce-1'])
+    const reinforcementUnits = data['reinforcementUnits'] as Array<Record<string, unknown>>
+    expect(reinforcementUnits).toHaveLength(1)
+    expect(reinforcementUnits[0]['id']).toBe('reinforce-1')
+  })
+})

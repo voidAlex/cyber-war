@@ -23,6 +23,7 @@ import type {
   AgentAction,
   ResolutionSummary,
   WorldState,
+  RandomEvent,
 } from '@/types'
 import type { ResolutionResult, ResolutionEvent } from '@/layers/domain/combat'
 import type { ValidateFunction } from 'ajv'
@@ -61,6 +62,17 @@ export interface DirectorAdjudicateParams {
    * 不传时按非流式产出完整战报（默认行为，mock 透传与测试不受影响）。
    */
   onReportChunk?: (chunk: string) => void
+  /**
+   * 本回合已触发的随机事件（第 2 批，物理结算后、adjudicate 前由 rollRandomEvents 产出）。
+   *
+   * 每个 RandomEvent.effects 已是确定性的 DirectorOverride[]（field=units.<id>.<field>）。
+   * 导演部职责：
+   * 1. 在战报叙事中描述事件 + 影响（reportText 体现，keyEvents 标记）。
+   * 2. effects 作为已确定的覆写并入 overrides（与 LLM 自身覆写合并，effects 优先）。
+   *
+   * 不传（空数组）时无随机事件，与既有行为兼容（测试不受影响）。
+   */
+  randomEvents?: RandomEvent[]
 }
 
 /**
@@ -181,6 +193,12 @@ export const directorRole: DirectorRole = createDirectorRole()
 // 不会同时产出 3998 和 3999 事件）。即便同时存在，id 也不冲突。
 export const SEQUENCE_DIRECTOR_REPORT = 3997
 export const SEQUENCE_DIRECTOR_MOCK_COMPRESS = 3998
+/**
+ * 第 2 批：随机事件专用 sequence 槽（4001+，与 3997-4000 段位区分）。
+ *
+ * 多个随机事件按 4001 + index 偏移占用，保证同回合互斥 event id。
+ */
+export const SEQUENCE_DIRECTOR_RANDOM_EVENT_BASE = 4001
 
 // ============================================================================
 // M3 真 LLM 导演部（终裁 + 覆写留痕 + 流式战报；失败回退 mock）
@@ -240,8 +258,23 @@ async function adjudicateWithLlm(
   llmService: LlmService,
   config: LlmCallConfig,
 ): Promise<DirectorAdjudicateResult> {
-  const { physicsResult, world, scenarioSeed, turn, envelopes } = params
+  const { physicsResult, world, scenarioSeed, turn, envelopes, randomEvents } = params
   const validate = getAgentValidator('director') as ValidateFunction<DirectorAgentOutput>
+
+  // 第 2 批：随机事件 effects 作为已确定的覆写（确定性真相，导演部在叙事中体现）。
+  // 合并顺序：随机事件 effects（先，确定性）+ LLM 自身覆写（后，叙事层）。
+  // 注意：LLM 覆写可能与随机事件 effect 冲突同一字段——以 LLM 覆写为最终真相
+  // （导演层记录即真相，回放采信最终合并后的 overrides）。
+  const randomEventOverrides: DirectorOverride[] = []
+  const randomEventNarratives: string[] = []
+  for (const ev of randomEvents ?? []) {
+    randomEventOverrides.push(...ev.effects)
+    randomEventNarratives.push(
+      `[${ev.label}] ${ev.description}（effects: ${ev.effects
+        .map((e) => `${e.field}=${JSON.stringify(e.before)}→${JSON.stringify(e.after)}`)
+        .join(', ')}）`,
+    )
+  }
 
   // L3 任务文本：物理结算结果 + 锁定指令 + 回合号（属 L3 安全）
   const physicsBrief = JSON.stringify({
@@ -260,7 +293,12 @@ async function adjudicateWithLlm(
   const ordersBrief = JSON.stringify(
     envelopes.map((e) => ({ faction: e.faction, intent: e.intent, sequence: e.sequence })),
   )
-  const task = `回合 ${turn}。请对以下物理结算结果进行终裁，产出叙事战报（reportText），必要时覆写数值（overrides，每条必含 field/before/after/reason），并记录关键事件（keyEvents）。\n物理结算：${physicsBrief}\n锁定指令：${ordersBrief}`
+  // 第 2 批：随机事件段落（导演部在战报中描述事件 + 体现 effects 影响）
+  const randomEventsBrief =
+    randomEventNarratives.length > 0
+      ? `\n本回合随机事件（已确定，请在战报中体现，effects 已应用）：\n${randomEventNarratives.join('\n')}`
+      : ''
+  const task = `回合 ${turn}。请对以下物理结算结果进行终裁，产出叙事战报（reportText），必要时覆写数值（overrides，每条必含 field/before/after/reason），并记录关键事件（keyEvents）。\n物理结算：${physicsBrief}\n锁定指令：${ordersBrief}${randomEventsBrief}`
 
   const opts = buildLlmOptions(config, 'director', world, task)
 
@@ -291,8 +329,11 @@ async function adjudicateWithLlm(
   }
 
   // 1. 应用 overrides 到 finalResult（覆写留痕）
-  const overrides = data.overrides ?? []
-  const finalResult = applyOverridesToResult(physicsResult, overrides)
+  // 第 2 批：随机事件 effects 先应用（确定性真相，已包含在 randomEventOverrides），
+  // 再应用 LLM 自身覆写（叙事层，可与随机事件 effect 同字段，LLM 覆写为最终真相）。
+  const llmOverrides = data.overrides ?? []
+  const mergedOverrides = [...randomEventOverrides, ...llmOverrides]
+  const finalResult = applyOverridesToResult(physicsResult, mergedOverrides)
 
   // 2. 战报摘要（reportText 来自 LLM 润色）
   const resolutionSummary = buildResolutionSummaryFromReport(
@@ -305,16 +346,21 @@ async function adjudicateWithLlm(
   // 3. 事件：physics 事件（source:'physics'）+ director 覆写事件（source:'director'）+ 战报事件
   const directorEvents: AgentAction[] = []
   directorEvents.push(...physicsEventsToAgentActions(finalResult.events, scenarioSeed, turn))
-  directorEvents.push(...overridesToDirectorActions(overrides, scenarioSeed, turn, envelopes.length))
+  directorEvents.push(...overridesToDirectorActions(mergedOverrides, scenarioSeed, turn, envelopes.length))
   directorEvents.push(
     reportToDirectorAction(data.reportText, scenarioSeed, turn, data.keyEvents ?? []),
   )
+
+  // 第 2 批：随机事件 effects 转为 'random_event' ResolutionEvent（source:'director'，回放采信）
+  for (const ev of randomEvents ?? []) {
+    directorEvents.push(randomEventToDirectorAction(ev, scenarioSeed, turn))
+  }
 
   return {
     finalResult,
     resolutionSummary,
     directorEvents,
-    appliedOverrides: overrides,
+    appliedOverrides: mergedOverrides,
     keyEvents: data.keyEvents ?? [],
   }
 }
@@ -443,15 +489,77 @@ function reportToDirectorAction(
 }
 
 /**
+ * 第 2 批：把已触发的随机事件转为 source:'director' 的 'random_event' AgentAction。
+ *
+ * 落 event-log 供回放采信（random_event 不重算，effects 原文直接应用）。
+ * sequence 用 director 段位 4001+（与 3997-4000 段位区分，多事件按 index 偏移）。
+ *
+ * payload 形如：
+ * {
+ *   kind: 'random_event',
+ *   description: '事件描述',
+ *   data: {
+ *     eventId, eventKind, label,
+ *     effects: DirectorOverride[],
+ *     reinforcementUnitIds: string[],
+ *     reinforcementUnits: CampaignUnit[]  // 完整定义，供回放重建援军
+ *   }
+ * }
+ *
+ * replay.applyResolutionEvent 的 'random_event' case 据此重建覆写 + 注入援军（采信 log）。
+ */
+function randomEventToDirectorAction(
+  ev: RandomEvent,
+  scenarioSeed: string,
+  turn: number,
+): AgentAction {
+  const sequence = SEQUENCE_DIRECTOR_RANDOM_EVENT_BASE
+  // id 含 turn + eventId，保证跨回合（同一事件多次触发）event-log 主键唯一
+  return {
+    id: `evt:${turn}:${sequence}:random-event:${ev.id}`,
+    turn,
+    agentId: 'director-random-events',
+    agentRole: 'director',
+    kind: 'adjudication',
+    source: 'director' as const,
+    payload: {
+      kind: 'random_event',
+      description: ev.description,
+      data: {
+        eventId: ev.id,
+        eventKind: ev.kind,
+        label: ev.label,
+        effects: ev.effects,
+        reinforcementUnitIds: ev.reinforcementUnitIds ?? [],
+        // 完整援军定义（供回放重建援军单位，采信 log 不重算）
+        reinforcementUnits: ev.reinforcementUnits ?? [],
+      },
+    },
+    text: `[随机事件] ${ev.label}：${ev.description}`,
+    sequence,
+    seed: `${scenarioSeed}:${turn}:${sequence}`,
+  }
+}
+
+/**
  * M2 mock 终裁实现（纯函数，可单测）。
  *
  * 不覆写任何数值，直接采信物理结果。战报从 events 拼装。
+ * 第 2 批：随机事件 effects 仍应用（确定性真相，mock 与 LLM 路径行为一致），
+ * 并产出 'random_event' AgentAction 入 event-log。
  */
 function adjudicateMock(params: DirectorAdjudicateParams): DirectorAdjudicateResult {
-  const { physicsResult, world, scenarioSeed, turn } = params
+  const { physicsResult, world, scenarioSeed, turn, randomEvents } = params
 
-  // 1. 终裁：M2 直接采信物理结果（不覆写）。M3 在此插入 LLM 覆写逻辑。
-  const finalResult: ResolutionResult = physicsResult
+  // 1. 终裁：M2 应用随机事件 effects（确定性真相），其余直接采信物理结果。
+  const randomEventOverrides: DirectorOverride[] = []
+  for (const ev of randomEvents ?? []) {
+    randomEventOverrides.push(...ev.effects)
+  }
+  const finalResult: ResolutionResult = applyOverridesToResult(
+    physicsResult,
+    randomEventOverrides,
+  )
 
   // 2. 构造战报摘要（从 events 汇总战损/占领）
   const resolutionSummary = buildResolutionSummary(finalResult, world, turn)
@@ -459,6 +567,11 @@ function adjudicateMock(params: DirectorAdjudicateParams): DirectorAdjudicateRes
   // 3. 构造导演部事件：把 physics events 转为 AgentAction（source:'physics'）入 event-log。
   //    M3 时导演部可额外产出 source:'director' 事件（覆写/润色）。
   const directorEvents = physicsEventsToAgentActions(finalResult.events, scenarioSeed, turn)
+
+  // 第 2 批：随机事件转为 'random_event' AgentAction（source:'director'，回放采信）
+  for (const ev of randomEvents ?? []) {
+    directorEvents.push(randomEventToDirectorAction(ev, scenarioSeed, turn))
+  }
 
   return { finalResult, resolutionSummary, directorEvents }
 }

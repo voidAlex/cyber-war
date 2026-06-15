@@ -24,6 +24,7 @@ import type {
   GamePhase,
   ResolutionSummary,
   WorldState,
+  CampaignRules,
 } from '@/types'
 import type {
   StateMachineContext,
@@ -441,6 +442,22 @@ export interface MultiAgentResolverDeps {
     compressor: ContextCompressor
     writeFactionFile: (factionId: string, content: string) => Promise<void>
   }
+  /**
+   * 第 2 批：战役规则（可选，含 randomEvents 模板）。
+   * 注入后编排器在物理结算后、导演部 adjudicate 前 rollRandomEvents。
+   * 不注入时本回合无随机事件（与既有行为兼容）。
+   *
+   * 若同时提供 getCampaignRules，则优先用 getCampaignRules（按 scenarioId 动态查表）；
+   * 否则用静态 campaignRules。
+   */
+  campaignRules?: CampaignRules
+  /**
+   * 第 2 批：按 scenarioId 动态查询战役规则（优先于静态 campaignRules）。
+   *
+   * 用于 store 持有多个战役包时按当前 world.scenarioId 取对应 rules。
+   * 返回 undefined 时回退到 campaignRules 字段（再 undefined 则无随机事件）。
+   */
+  getCampaignRules?: (scenarioId: string) => CampaignRules | undefined
 }
 
 /**
@@ -478,6 +495,9 @@ export function createMultiAgentResolver(
       llmConfig: deps.llmConfig,
       onProgress: deps.onProgress,
       onReportChunk: deps.onReportChunk,
+      // 第 2 批：按 scenarioId 动态查 rules（优先），否则用静态 campaignRules
+      campaignRules:
+        deps.getCampaignRules?.(world.scenarioId) ?? deps.campaignRules,
     })
 
     // 把编排器的 degraded 标志反映到 resolution.degraded（UI 据此明示降级结算）。
@@ -489,14 +509,18 @@ export function createMultiAgentResolver(
     const events: AgentAction[] = [...result.events]
     let contextSummary: { turn: number; text: string } | undefined
 
+    // 第 2 批：采用编排器返回的 world（含随机事件注入的援军单位）。
+    // 无随机事件时 result.world === 入参 world（无开销）。
+    const worldWithRandomEvents = result.world
+
     // M4-D 上下文压缩（每 5 回合，TDD §3.6）
     if (deps.compressionDeps && shouldCompressContext(world.turnIndex)) {
       const { summary, event } = await deps.compressionDeps.compressor.compress(
-        world,
+        worldWithRandomEvents,
         world.scenarioSeed,
         world.turnIndex,
       )
-      for (const f of world.factions) {
+      for (const f of worldWithRandomEvents.factions) {
         await deps.compressionDeps.writeFactionFile(f.id, summary)
       }
       events.push(event)
@@ -506,7 +530,7 @@ export function createMultiAgentResolver(
     // 应用情报增量（recon 命中的 detection/reconHits）到内存 world，
     // 让 briefing 阶段 UI 实时看到被侦察区域的敌方 level 提升。
     const worldWithIntel = applyResolutionToIntel(
-      world,
+      worldWithRandomEvents,
       result.result.stateChanges,
       world.turnIndex,
     )

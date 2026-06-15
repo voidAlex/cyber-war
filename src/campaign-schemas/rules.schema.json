@@ -41,6 +41,120 @@
         "restockRate": { "type": "number", "minimum": 0, "maximum": 100 }
       },
       "additionalProperties": false
+    },
+    "randomEvents": {
+      "type": "array",
+      "description": "战役随机事件模板列表（第 2 批）。rollRandomEvents 据此 + 确定性随机判定每回合触发哪些事件。",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": {
+            "type": "string",
+            "enum": ["weather", "gas", "reinforcement", "mutiny", "surprise"]
+          },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+          "triggerCondition": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["always", "morale_below", "turn_in"]
+              },
+              "factionId": { "type": "string" },
+              "moraleThreshold": { "type": "number", "minimum": 0, "maximum": 100 },
+              "turns": {
+                "type": "array",
+                "items": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "additionalProperties": false
+          },
+          "turnRange": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0 },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "label": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "effects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "targetKind": {
+                  "type": "string",
+                  "enum": ["all", "faction", "region", "specific"]
+                },
+                "factionId": { "type": "string" },
+                "coord": {
+                  "type": "object",
+                  "properties": {
+                    "col": { "type": "integer", "minimum": 0 },
+                    "row": { "type": "integer", "minimum": 0 }
+                  },
+                  "required": ["col", "row"],
+                  "additionalProperties": false
+                },
+                "radius": { "type": "integer", "minimum": 0, "maximum": 20 },
+                "unitIds": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "field": { "type": "string", "minLength": 1 },
+                "op": { "type": "string", "enum": ["set", "add"] },
+                "value": { "type": "number" },
+                "singleTarget": { "type": "boolean" },
+                "filterField": { "type": "string" },
+                "filterBelow": { "type": "number" },
+                "reason": { "type": "string", "minLength": 1 }
+              },
+              "required": ["targetKind", "field", "op", "value", "reason"],
+              "additionalProperties": false
+            }
+          },
+          "reinforcementUnits": {
+            "type": "array",
+            "description": "援军单位定义（仅 reinforcement），触发时注入 world.units。",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "factionId": { "type": "string", "minLength": 1 },
+                "type": {
+                  "type": "string",
+                  "enum": ["infantry", "armor", "artillery", "recon", "fortress", "support"]
+                },
+                "coord": {
+                  "type": "object",
+                  "properties": {
+                    "col": { "type": "integer", "minimum": 0 },
+                    "row": { "type": "integer", "minimum": 0 }
+                  },
+                  "required": ["col", "row"],
+                  "additionalProperties": false
+                },
+                "strength": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "personnel": { "type": "integer", "minimum": 0 },
+                "maxPersonnel": { "type": "integer", "minimum": 0 },
+                "fuel": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "ammo": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "morale": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "fatigue": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "status": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              },
+              "required": ["id", "factionId", "type", "coord", "strength", "personnel", "maxPersonnel", "fuel", "ammo", "morale", "fatigue"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["id", "kind", "weight", "label", "description", "effects"],
+        "additionalProperties": false
+      }
     }
   },
   "required": ["intelDecay", "combat"],

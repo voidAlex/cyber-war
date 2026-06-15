@@ -110,6 +110,11 @@ export type {
   CampaignVictoryCondition,
   CampaignVictoryType,
   CampaignPayload,
+  RandomEventKind,
+  RandomEventEffectTemplate,
+  RandomEventTriggerCondition,
+  RandomEventTemplate,
+  RandomEvent,
 } from './campaign'
 export { CAMPAIGN_ZIP_FILES, CAMPAIGN_SCHEMA_VERSION } from './campaign'
 

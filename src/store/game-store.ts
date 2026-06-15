@@ -37,7 +37,8 @@ import {
   type RuntimeLLMConfig,
   RuntimeConfigError,
 } from '@/layers/gateway/runtime-config'
-import type { WorldState } from '@/types'
+import { verdunRules } from '@/data/verdun-1916/rules'
+import type { WorldState, CampaignRules } from '@/types'
 import type { CacheStats } from '@/layers/application/services/llm-service'
 import type { LlmErrorBanner } from '@/layers/application/services/llm-service'
 import type { ActionEnvelope, AgentRole } from '@/types'
@@ -51,6 +52,26 @@ import { logger } from '@/utils/logger'
  * 测试环境（vitest）不 import 本 store，故不会拉起 Worker。
  */
 const physicsClient = initWorkerService()
+
+/**
+ * 内置战役包的 scenarioId → CampaignRules 查表（第 2 批随机事件用）。
+ *
+ * createMultiAgentResolver 经 getCampaignRules 按当前 world.scenarioId 取对应 rules，
+ * rules.randomEvents 为空或未注册时本回合无随机事件（默认行为兼容）。
+ * 后续支持 ZIP 导入战役包时，导入逻辑应在此注册其 rules（按 scenarioId）。
+ */
+const BUILTIN_CAMPAIGN_RULES: Record<string, CampaignRules> = {
+  'verdun-1916': verdunRules,
+}
+
+/**
+ * 按 scenarioId 查战役规则（第 2 批随机事件）。
+ *
+ * 优先查内置注册表；未注册返回 undefined（编排器据此跳过随机事件）。
+ */
+function getCampaignRulesByScenario(scenarioId: string): CampaignRules | undefined {
+  return BUILTIN_CAMPAIGN_RULES[scenarioId]
+}
 
 /**
  * M3 多 Agent 结算器：物理引擎 + 多 Agent 编排（解锁时用 LLM 角色，否则 mock）。
@@ -88,6 +109,8 @@ function buildMultiAgentResolver(
     commanderRole,
     directorRole: directorRoleInst,
     llmConfig: llmConfig ?? undefined,
+    // 第 2 批：按 scenarioId 动态查 rules（随机事件）
+    getCampaignRules: getCampaignRulesByScenario,
     onProgress: (entry) => {
       // 把编排进度映射到 store.agentProgressById
       get().setAgentProgress({
