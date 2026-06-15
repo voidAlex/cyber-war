@@ -45,6 +45,9 @@ export type ResolutionEventKind =
   | 'blockade' // 受阻/失败
   | 'recon' // 主动侦察命中（升级目标单位对该方的情报等级）
   | 'random_event' // 战役随机事件（暴雨/毒气/援军/兵变/炮击，source:'director' 采信 log）
+  | 'supply_cut' // 第 4 批：单位补给本回合被切断（上回合连通→本回合切断）
+  | 'supply_restored' // 第 4 批：单位补给本回合恢复（上回合切断→本回合连通）
+  | 'supply_blocked' // 第 4 批：resupply 命令因不连通被拒绝（不 +25）
 
 /**
  * 物理层结算事件（event-log 一条目级产物）。

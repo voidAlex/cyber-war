@@ -36,7 +36,9 @@ import {
   resolveMovement,
   getCellAt,
   computeBaselineConsumption,
+  SEVERED_SUPPLY_MULTIPLIER,
 } from '@/layers/domain/physics-rules'
+import { computeSupplyConnectivity, type SupplyConnectivity } from '@/layers/domain/supply'
 
 // =============================================================================
 // 主入口：restoreFromEventLog
@@ -393,6 +395,44 @@ function applyResolutionEvent(
       }
       break
     }
+    case 'supply_cut': {
+      // 第 4 批：单位本回合补给被切断。数值（fuel/ammo ×2 + morale -5）已由
+      // computeTurnBaseline 据连通性算入 baseline 增量；此处仅确保 low_supply 标记落地
+      // （double-write 安全：若 baseline 已设 status，?? 合并保留之）。
+      const unitId = String(evt.data.unitId ?? '')
+      if (unitId) {
+        const unit = getEffectiveUnit(world, stateChanges, unitId)
+        if (unit && !unit.status.includes('low_supply')) {
+          const existing = stateChanges.unitUpdates[unitId] ?? {}
+          stateChanges.unitUpdates[unitId] = {
+            ...existing,
+            status: [...unit.status, 'low_supply'],
+          }
+        }
+      }
+      break
+    }
+    case 'supply_restored': {
+      // 第 4 批：单位本回合补给恢复。移除 low_supply 标记（采信 log：恢复即移除，
+      // 与 worker applySupplyState「连通不主动改」+ worker 翻转检测配合）。
+      const unitId = String(evt.data.unitId ?? '')
+      if (unitId) {
+        const unit = getEffectiveUnit(world, stateChanges, unitId)
+        if (unit && unit.status.includes('low_supply')) {
+          const existing = stateChanges.unitUpdates[unitId] ?? {}
+          stateChanges.unitUpdates[unitId] = {
+            ...existing,
+            status: unit.status.filter((s) => s !== 'low_supply'),
+          }
+        }
+      }
+      break
+    }
+    case 'supply_blocked': {
+      // 第 4 批：resupply 命令被拒（不 +25）。原 resupply 数值未应用，此处无操作
+      // （double-write 安全）；事件本身仅作叙事采信。
+      break
+    }
     default:
       // casualty（衍生）/ blockade（失败占位）：不单独应用
       break
@@ -635,20 +675,48 @@ function eventsForTurn(events: readonly AgentAction[], turn: number): AgentActio
 /**
  * 计算本回合基线消耗（从回合开始的 world.units 算，与 worker applyBaselineToAll 同构）。
  *
- * 返回 unitId → 基线后数值（fuel/ammo/fatigue），不立即应用到 stateChanges；
+ * 第 4 批：基线消耗据补给连通性 ×SEVERED_SUPPLY_MULTIPLIER（与 worker 一致），
+ * 并附带 supply 切断的 status/morale 变更（low_supply 标记 + 士气 -5）。
+ * supply 翻转事件（supply_cut/restored）**不在此处生成**——回放采信 log 中的
+ * 原事件（applyResolutionEvent 的 supply_* case 处理 status 落地）；
+ * 此处只算数值增量（fuel/ammo/fatigue + status/morale 增量）。
+ *
+ * 返回 unitId → 基线后数值 + 可选 status/morale，不立即应用到 stateChanges；
  * 由 mergeBaselineIntoChanges 在命令结算后用 `??` 语义合并。
  */
 function computeTurnBaseline(
   world: WorldState,
-): Record<string, { fuel: number; ammo: number; fatigue: number }> {
-  const out: Record<string, { fuel: number; ammo: number; fatigue: number }> = {}
+): Record<string, { fuel: number; ammo: number; fatigue: number; status?: Unit['status']; morale?: number }> {
+  // 按阵营预计算连通性（与 worker applyBaselineToAll 同构）
+  const factionIds = new Set(world.units.map((u) => u.factionId))
+  const connByFaction = new Map<string, Map<string, SupplyConnectivity>>()
+  for (const fid of factionIds) {
+    connByFaction.set(fid, computeSupplyConnectivity(world.map, world.units, fid))
+  }
+
+  const out: Record<string, { fuel: number; ammo: number; fatigue: number; status?: Unit['status']; morale?: number }> = {}
   for (const unit of world.units) {
     if (unit.strength <= 0) continue
-    const b = computeBaselineConsumption(unit)
+    const conn = connByFaction.get(unit.factionId)?.get(unit.id)
+    const connected = conn ? conn.connected : true
+    const mult = connected ? 1.0 : SEVERED_SUPPLY_MULTIPLIER
+    const b = computeBaselineConsumption(unit, mult)
+
+    // 切断时附带 status（low_supply）+ morale -5（与 worker applySupplyState 同构）
+    let status: Unit['status'] | undefined
+    let morale: number | undefined
+    if (!connected) {
+      const hasLowSupply = unit.status.includes('low_supply')
+      status = hasLowSupply ? unit.status : [...unit.status, 'low_supply']
+      morale = Math.max(0, unit.morale - 5)
+    }
+
     out[unit.id] = {
       fuel: Math.max(0, unit.fuel - b.fuelCost),
       ammo: Math.max(0, unit.ammo - b.ammoCost),
       fatigue: Math.max(0, Math.min(100, unit.fatigue + b.fatigueDelta)),
+      ...(status !== undefined ? { status } : {}),
+      ...(morale !== undefined ? { morale } : {}),
     }
   }
   return out
@@ -659,10 +727,11 @@ function computeTurnBaseline(
  *
  * 语义：`existing.field ?? baseline.field`——命令结算涉及的字段优先，
  * 基线只补充未被任何命令触及的单位/字段（如无指令的 red-1 的每回合 -2 fuel）。
+ * 第 4 批：status/morale 同样走 `??` 合并（与 fuel/ammo/fatigue 一致）。
  */
 function mergeBaselineIntoChanges(
   stateChanges: CombatStateChanges,
-  baseline: Record<string, { fuel: number; ammo: number; fatigue: number }>,
+  baseline: Record<string, { fuel: number; ammo: number; fatigue: number; status?: Unit['status']; morale?: number }>,
 ): void {
   for (const [unitId, b] of Object.entries(baseline)) {
     const existing = stateChanges.unitUpdates[unitId] ?? {}

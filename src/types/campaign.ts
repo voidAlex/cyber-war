@@ -17,6 +17,8 @@ import type {
   UnitStatusFlag,
   GridType,
   TerrainType,
+  SupplyLine,
+  SupplyNetwork,
 } from './index'
 
 // =============================================================================
@@ -59,6 +61,8 @@ export interface CampaignMapCell {
   movementCost: number
   defenseBonus: number
   isObjective: boolean
+  /** 是否为补给源（第 4 批；与 MapCell.isSupplySource 对齐） */
+  isSupplySource?: boolean
 }
 
 /** 战役包高价值节点（堡垒/城市/隘口，胜负条件引用） */
@@ -76,7 +80,17 @@ export interface CampaignMap {
   rows: number
   cells: CampaignMapCell[]
   highValueNodes: CampaignHighValueNode[]
+  /**
+   * 补给网络（第 4 批，可选；与 GameMap.supplyNetwork 同构）。
+   *
+   * 每条 SupplyLine 属某阵营，cellIds[0]=补给源（对应 cell.isSupplySource=true）。
+   * 缺省时所有单位恒为连通状态。
+   */
+  supplyNetwork?: SupplyNetwork
 }
+
+// 重新导出 SupplyLine/SupplyNetwork 供消费方就近引用（与 GameMap 共用同一类型契约）
+export type { SupplyLine, SupplyNetwork }
 
 // =============================================================================
 // factions.json
@@ -191,6 +205,13 @@ export interface CampaignSupplyRules {
   sustainCostPerTurn?: number
   lowSupplyThreshold?: number
   restockRate?: number
+  /**
+   * 补给被切断时的基线消耗倍率（第 4 批，可选）。
+   *
+   * 缺省取 SEVERED_SUPPLY_MULTIPLIER（=2.0）：被切断的单位每回合燃料/弹药
+   * 基线消耗 × 此倍率（连通时为 1.0）。
+   */
+  severedMultiplier?: number
 }
 
 // =============================================================================

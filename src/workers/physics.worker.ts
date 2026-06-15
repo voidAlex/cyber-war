@@ -21,7 +21,7 @@
 
 /// <reference lib="webworker" />
 
-import type { WorldState, ActionEnvelope, IntelObservation, IntelLevel } from '@/types'
+import type { WorldState, ActionEnvelope, IntelObservation, IntelLevel, Unit } from '@/types'
 import { DeterministicRandom } from '@/layers/domain/deterministic-random'
 import {
   resolveEngagement,
@@ -36,7 +36,12 @@ import {
   resolveMovement,
   getCellAt,
   isAnnihilated,
+  SEVERED_SUPPLY_MULTIPLIER,
 } from '@/layers/domain/physics-rules'
+import {
+  computeSupplyConnectivity,
+  applySupplyState,
+} from '@/layers/domain/supply'
 import type {
   ResolutionResult,
   ResolutionEvent,
@@ -144,7 +149,12 @@ export function simulateTurn(
 
   // 第一遍：应用回合基线消耗（油/弹/疲劳恢复）到所有单位
   // 注意：基线消耗不带随机数，是确定性常量；此处先建立基线变更增量。
-  const baselineUpdates = applyBaselineToAll(worldState, turn)
+  // 第 4 批：基线消耗同时按补给连通性 ×SEVERED_SUPPLY_MULTIPLIER，
+  //         并产出 supply_cut / supply_restored 事件（上回合 vs 本回合连通性翻转）。
+  const baselineResult = applyBaselineToAll(worldState, turn)
+  const baselineUpdates = baselineResult.updates
+  // 补给事件先入流（sequence 段位 2500-2999，与命令 0-1999、director 3000+ 区分）
+  events.push(...baselineResult.events)
 
   // 第二遍：逐个命令结算
   for (const envelope of ordered) {
@@ -425,6 +435,12 @@ function resolveCaptureOrder(
 
 /**
  * 结算补给命令。
+ *
+ * 第 4 批：补给命令前先检查单位的补给连通性（computeSupplyConnectivity）。
+ * 若不连通（敌方占据其补给线路径）→ 拒绝补给（push 'supply_blocked' 事件，不 +25），
+ * 体现"补给车队无法抵达被切断的单位"。连通时正常 +25（applyResupply）。
+ *
+ * 不伪造：连通性仅据 map.supplyNetwork 判定；无网络时恒连通（兼容旧行为）。
  */
 function resolveResupplyOrder(
   worldState: WorldState,
@@ -442,6 +458,31 @@ function resolveResupplyOrder(
   const unit = getEffectiveUnit(worldState, stateChanges, unitId)
   if (!unit) {
     events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+
+  // 第 4 批：连通性检查——补给车队需沿 supplyNetwork 抵达该单位。
+  const conn = computeSupplyConnectivity(worldState.map, worldState.units, unit.factionId)
+  const unitConn = conn.get(unit.id)
+  const connected = unitConn ? unitConn.connected : true
+
+  if (!connected) {
+    // 不连通：拒绝补给（不 +25），push 'supply_blocked'
+    events.push({
+      id: `evt:${envelope.sequence}:supply_blocked:0`,
+      source: 'physics',
+      turn,
+      sequence: envelope.sequence,
+      agentId: envelope.agentId,
+      kind: 'supply_blocked',
+      description: `${unitId} 补给被阻断，补给车队无法抵达（blockedAt: ${unitConn?.blockedAt ?? '?'})`,
+      data: {
+        unitId,
+        factionId: unit.factionId,
+        blockedAt: unitConn?.blockedAt ?? null,
+        sources: unitConn?.sources ?? [],
+      },
+    })
     return
   }
 
@@ -634,38 +675,140 @@ function resolveReconOrder(
 // ============================================================================
 
 /**
- * 给所有单位应用回合基线消耗（油/弹/疲劳恢复）。
- * 返回增量 map（不直接修改 worldState）。
+ * 补给事件专用 sequence 段位（第 4 批）。
+ *
+ * - 2500..2998：supply_cut / supply_restored（每单位本回合翻转占一槽，按 i 偏移）。
+ *   与命令（0..1999）、director（3000+）、随机事件（4001+）、决策覆写（4010+）互斥，
+ *   保证同回合 event id 唯一（event-log 主键契约）。
+ */
+const SEQUENCE_SUPPLY_BASE = 2500
+
+/**
+ * applyBaselineToAll 返回结构（第 4 批扩展）。
+ */
+interface BaselineResult {
+  /** 单位数值增量（fuel/ammo/fatigue/status/morale） */
+  updates: Record<string, Partial<{ fuel: number; ammo: number; fatigue: number; status: Unit['status']; morale: number }>>
+  /** 本回合产出的补给事件（supply_cut / supply_restored） */
+  events: ResolutionEvent[]
+}
+
+/**
+ * 给所有单位应用回合基线消耗（油/弹/疲劳恢复）+ 补给连通性影响（第 4 批）。
+ *
+ * 流程：
+ * 1. 对每个阵营调 computeSupplyConnectivity（纯函数 BFS）。
+ * 2. 对每个活单位：
+ *    - supplyMultiplier = 连通 ? 1.0 : SEVERED_SUPPLY_MULTIPLIER。
+ *    - computeBaselineConsumption(unit, supplyMultiplier) 算基线（切断则 ×2）。
+ *    - applySupplyState：切断时加 low_supply + morale -5（连通时不动）。
+ *    - 翻转检测：上回合是否切断（用 unit.status 含 'low_supply' 作代理信号），
+ *      与本回合连通性比较，产出 supply_cut（上连→本断）/ supply_restored（上断→本连）。
+ *
+ * 不修改 worldState（不可变产出）。返回增量 + 事件，由 simulateTurn 合并。
+ *
+ * 确定性：computeSupplyConnectivity 纯函数，事件 sequence 按单位遍历顺序稳定分配。
  */
 function applyBaselineToAll(
   worldState: WorldState,
-  _turn: number,
-): Record<string, Partial<{ fuel: number; ammo: number; fatigue: number }>> {
-  const updates: Record<string, Partial<{ fuel: number; ammo: number; fatigue: number }>> = {}
+  turn: number,
+): BaselineResult {
+  const updates: BaselineResult['updates'] = {}
+  const events: ResolutionEvent[] = []
+
+  // 按阵营分组预计算连通性（避免重复 BFS）
+  const factionIds = new Set(worldState.units.map((u) => u.factionId))
+  const connectivityByFaction = new Map<string, Map<string, import('@/layers/domain/supply').SupplyConnectivity>>()
+  for (const fid of factionIds) {
+    connectivityByFaction.set(fid, computeSupplyConnectivity(worldState.map, worldState.units, fid))
+  }
+
+  let supplyEvtIndex = 0
   for (const unit of worldState.units) {
     if (isAnnihilated(unit)) continue
-    const baseline = computeBaselineConsumption(unit)
+
+    const conn = connectivityByFaction.get(unit.factionId)
+    const unitConn = conn?.get(unit.id)
+    const connected = unitConn ? unitConn.connected : true // 缺省连通（无网络时）
+
+    // 1. 基线消耗（切断则 ×SEVERED_SUPPLY_MULTIPLIER）
+    const mult = connected ? 1.0 : SEVERED_SUPPLY_MULTIPLIER
+    const baseline = computeBaselineConsumption(unit, mult)
+
+    // 2. applySupplyState：切断加 low_supply + morale -5
+    const supplyChange = applySupplyState(unit, connected)
+
     updates[unit.id] = {
       fuel: Math.max(0, unit.fuel - baseline.fuelCost),
       ammo: Math.max(0, unit.ammo - baseline.ammoCost),
       fatigue: Math.max(0, Math.min(100, unit.fatigue + baseline.fatigueDelta)),
+      ...(supplyChange.status !== undefined ? { status: supplyChange.status } : {}),
+      ...(supplyChange.morale !== undefined ? { morale: supplyChange.morale } : {}),
+    }
+
+    // 3. 翻转检测：用 unit.status 含 'low_supply' 作为"上回合被切断"代理。
+    const wasSevered = unit.status.includes('low_supply')
+    if (!connected && !wasSevered) {
+      // 上回合连通 → 本回合切断
+      const sequence = SEQUENCE_SUPPLY_BASE + supplyEvtIndex
+      supplyEvtIndex += 1
+      events.push({
+        id: `evt:${sequence}:supply_cut:0`,
+        source: 'physics',
+        turn,
+        sequence,
+        kind: 'supply_cut',
+        description: `${unit.id} 补给线被切断，物资加速消耗`,
+        data: {
+          unitId: unit.id,
+          factionId: unit.factionId,
+          sources: unitConn?.sources ?? [],
+          blockedAt: unitConn?.blockedAt ?? null,
+          fuelCostMult: mult,
+          moralePenalty: 5,
+        },
+      })
+    } else if (connected && wasSevered) {
+      // 上回合切断 → 本回合恢复
+      const sequence = SEQUENCE_SUPPLY_BASE + supplyEvtIndex
+      supplyEvtIndex += 1
+      events.push({
+        id: `evt:${sequence}:supply_restored:0`,
+        source: 'physics',
+        turn,
+        sequence,
+        kind: 'supply_restored',
+        description: `${unit.id} 补给线恢复畅通`,
+        data: {
+          unitId: unit.id,
+          factionId: unit.factionId,
+          sources: unitConn?.sources ?? [],
+        },
+      })
     }
   }
-  return updates
+
+  return { updates, events }
 }
 
 /**
  * 合并基线变更与命令变更（命令变更优先）。
+ *
+ * 第 4 批：基线变更现在也可能含 status（low_supply）/ morale（切断惩罚），
+ * 与 fuel/ammo/fatigue 同样以 `existing ?? baseline` 语义合并——命令结算
+ * 涉及的字段优先，基线只补未触及字段。
  */
 function mergeBaseline(
   existing: Record<string, unknown>,
-  baseline: Partial<{ fuel: number; ammo: number; fatigue: number }>,
+  baseline: Partial<{ fuel: number; ammo: number; fatigue: number; status: Unit['status']; morale: number }>,
 ): Record<string, unknown> {
   // 命令已写入的字段优先（命令结算基于 baseline 后的值，已在 getEffectiveUnit 中体现）
   return {
     fuel: existing.fuel ?? baseline.fuel,
     ammo: existing.ammo ?? baseline.ammo,
     fatigue: existing.fatigue ?? baseline.fatigue,
+    morale: existing.morale ?? baseline.morale,
+    status: existing.status ?? baseline.status,
     ...stripUndefined(existing),
   }
 }

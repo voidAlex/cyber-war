@@ -41,6 +41,9 @@ export type {
   TerrainType,
   MapCell,
   HighValueNode,
+  SupplyLine,
+  SupplyLineType,
+  SupplyNetwork,
 } from './map'
 
 // === 命令与 Agent ===

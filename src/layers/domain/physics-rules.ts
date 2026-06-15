@@ -89,6 +89,15 @@ export const RESUPPLY_AMOUNT = 25
 /** 低补给阈值（status 加 low_supply 标记） */
 export const LOW_SUPPLY_THRESHOLD = 20
 
+/**
+ * 补给被切断时的基线消耗倍率（第 4 批）。
+ *
+ * 连通=1.0，切断=SEVERED_SUPPLY_MULTIPLIER（=2.0，可被 rules.supply.severedMultiplier 覆写）。
+ * 见 computeBaselineConsumption 的 supplyMultiplier 参数。
+ * 与 src/layers/domain/supply.ts 中 SEVERED_SUPPLY_MULTIPLIER 保持同步（同名同值）。
+ */
+export const SEVERED_SUPPLY_MULTIPLIER = 2.0
+
 /** 每回合疲劳自然恢复（未行动单位） */
 export const FATIGUE_RECOVERY_PER_TURN = 5
 
@@ -215,17 +224,29 @@ export function resolveMovement(input: MovementInput): MovementResult {
  * 回合基线消耗：每单位每回合扣基线 fuel/ammo。
  *
  * 纯函数返回消耗量，实际扣减由调用方应用到新状态（不可变产出）。
+ *
+ * @param unit 单位
+ * @param supplyMultiplier 补给倍率（第 4 批，默认 1.0）：
+ *   - 1.0（连通）：基线消耗不变。
+ *   - >1.0（切断）：基线消耗按倍率放大（如 SEVERED_SUPPLY_MULTIPLIER=2.0 →
+ *     fuel/ammo 基线消耗 ×2，体现补给被切断时物资加速耗尽）。
+ *   由 worker applyBaselineToAll 据 computeSupplyConnectivity 结果注入。
  */
-export function computeBaselineConsumption(unit: Unit): {
+export function computeBaselineConsumption(
+  unit: Unit,
+  supplyMultiplier: number = 1.0,
+): {
   fuelCost: number
   ammoCost: number
   fatigueDelta: number
 } {
   // 未行动单位疲劳自然恢复（负 delta）
   const hasOrder = unit.orders.length > 0
+  const mult = Math.max(0, supplyMultiplier)
   return {
-    fuelCost: FUEL_BASELINE_PER_TURN,
-    ammoCost: AMMO_BASELINE_PER_TURN,
+    // 基线消耗按倍率放大（向上取整，避免 1.0→整数无损；2.0→×2）
+    fuelCost: Math.ceil(FUEL_BASELINE_PER_TURN * mult),
+    ammoCost: Math.ceil(AMMO_BASELINE_PER_TURN * mult),
     fatigueDelta: hasOrder ? 0 : -FATIGUE_RECOVERY_PER_TURN,
   }
 }

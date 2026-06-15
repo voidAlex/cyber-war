@@ -103,3 +103,14 @@ export type {
   DiplomaticResponse,
   DiplomaticRequestResult,
 } from './diplomacy-request'
+
+// 补给线/后勤（第 4 批：网络化补给判定）
+export {
+  computeSupplyConnectivity,
+  applySupplyState,
+  findSupplyCutOpportunities,
+  resolveSupplyMultiplier,
+  SEVERED_SUPPLY_MULTIPLIER,
+  SEVERED_MORALE_PENALTY,
+} from './supply'
+export type { SupplyConnectivity } from './supply'

@@ -328,7 +328,9 @@ async function adjudicateWithLlm(
     randomEventNarratives.length > 0
       ? `\n本回合随机事件（已确定，请在战报中体现，effects 已应用）：\n${randomEventNarratives.join('\n')}`
       : ''
-  const task = `回合 ${turn}。请对以下物理结算结果进行终裁，产出叙事战报（reportText），必要时覆写数值（overrides，每条必含 field/before/after/reason），并记录关键事件（keyEvents）。\n物理结算：${physicsBrief}\n锁定指令：${ordersBrief}${randomEventsBrief}`
+  // 第 4 批：补给线态势段落（导演部在战报中描述补给受威胁/恢复）
+  const supplyBrief = buildSupplySituationBrief(physicsResult)
+  const task = `回合 ${turn}。请对以下物理结算结果进行终裁，产出叙事战报（reportText），必要时覆写数值（overrides，每条必含 field/before/after/reason），并记录关键事件（keyEvents）。\n物理结算：${physicsBrief}\n锁定指令：${ordersBrief}${randomEventsBrief}${supplyBrief}`
 
   const opts = buildLlmOptions(config, 'director', world, task)
 
@@ -898,6 +900,44 @@ function buildReportText(events: readonly ResolutionEvent[], turn: number): stri
     lines.push(`  - ${evt.description}`)
   }
   return lines.join('\n')
+}
+
+/**
+ * 汇总本回合补给线态势（第 4 批），注入 LLM director task 文本。
+ *
+ * 从 physicsResult.events 提取 supply_cut / supply_restored / supply_blocked，
+ * 按阵营与状态汇总成自然语言段落，提示导演部在战报中描述"补给受威胁/恢复"。
+ * 无补给事件时返回空串（不影响既有行为）。
+ */
+function buildSupplySituationBrief(result: ResolutionResult): string {
+  const cuts: string[] = []
+  const restores: string[] = []
+  const blocked: string[] = []
+  for (const evt of result.events) {
+    if (evt.kind === 'supply_cut') {
+      const unitId = String(evt.data.unitId ?? '')
+      const blockedAt = evt.data.blockedAt ? `（阻断点 ${evt.data.blockedAt}）` : ''
+      cuts.push(`${unitId}${blockedAt}`)
+    } else if (evt.kind === 'supply_restored') {
+      restores.push(String(evt.data.unitId ?? ''))
+    } else if (evt.kind === 'supply_blocked') {
+      blocked.push(String(evt.data.unitId ?? ''))
+    }
+  }
+  if (cuts.length === 0 && restores.length === 0 && blocked.length === 0) {
+    return ''
+  }
+  const parts: string[] = []
+  if (cuts.length > 0) {
+    parts.push(`补给线被切断的单位：${cuts.join('、')}（物资加速消耗、士气下降）`)
+  }
+  if (restores.length > 0) {
+    parts.push(`补给线恢复的单位：${restores.join('、')}`)
+  }
+  if (blocked.length > 0) {
+    parts.push(`补给车队无法抵达（resupply 被拒）：${blocked.join('、')}`)
+  }
+  return `\n本回合补给线态势（请在战报中体现）：\n${parts.join('\n')}`
 }
 
 /**

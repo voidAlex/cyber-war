@@ -98,7 +98,19 @@ function buildVerdunCells(): CampaignMap['cells'] {
         }
       }
 
-      cells.push({ id, col, row, terrain, movementCost, defenseBonus, isObjective })
+      cells.push({
+        id,
+        col,
+        row,
+        terrain,
+        movementCost,
+        defenseBonus,
+        isObjective,
+        // 第 4 批：凡尔登城为法军补给源（"神圣之路"起点 / 分发中枢）
+        ...(col === 2 && row === 4 ? { isSupplySource: true } : {}),
+        // 德军补给源：东岸最东角（cell-9-7，模拟德军后方战略铁路终点）
+        ...(col === 9 && row === 7 ? { isSupplySource: true } : {}),
+      })
     }
   }
   return cells
@@ -137,4 +149,52 @@ export const verdunMap: CampaignMap = {
       controlThreshold: 3,
     },
   ],
+  /**
+   * 补给网络（第 4 批，法/德各一条）。
+   *
+   * 史实（查证自维基/百科）：
+   * - 法军"神圣之路"（Voie Sacrée）：凡尔登城 ↔ 巴勒迪克（Bar-le-Duc，西南方）
+   *   的公路，贝当用以轮换部队与补给，是凡尔登苦撑的生命线。游戏内简化为
+   *   凡尔登城(cell-2-4, source)→西岸森林(cell-1-4)→后方集结场(cell-0-4)的
+   *   短路径，并向东延伸过默兹河渡口(cell-5-4)到苏维尔堡前线(cell-7-4)，
+   *   覆盖法军主力单位的补给路径。
+   *   德军若占领渡口(cell-4-4/cell-5-4)即切断法军对东岸要塞的补给。
+   * - 德军补给：从东岸后方战略铁路(cell-9-7, source)沿东岸北上至前线
+   *   (cell-8-2 附近)，支撑德军主攻。
+   *
+   * 设计：cellIds[0]=source（isSupplySource=true），后续向前线延伸。
+   * computeSupplyConnectivity 沿路径判连通性，敌方占据任一中间 cell 即阻断。
+   */
+  supplyNetwork: {
+    lines: [
+      {
+        id: 'fr-voie-sacree',
+        factionId: 'france',
+        type: 'road',
+        // 凡尔登城(source)→西岸后方→默兹渡口→苏维尔堡前线（法军补给动脉）
+        cellIds: [
+          'cell-2-4', // 凡尔登城（source，分发中枢）
+          'cell-3-4', // 默兹河西岸东缘
+          'cell-4-4', // 默兹河西岸前沿
+          'cell-5-4', // 默兹河渡口（关键瓶颈）
+          'cell-6-4', // 默兹河东岸前沿
+          'cell-7-4', // 苏维尔堡（法军前线中枢）
+        ],
+      },
+      {
+        id: 'de-ostbahn',
+        factionId: 'germany',
+        type: 'rail',
+        // 德军后方战略铁路(source)→东岸北上→前线（支撑德军主攻）
+        cellIds: [
+          'cell-9-7', // 德军后方铁路终点（source）
+          'cell-9-6', // 东岸南部
+          'cell-9-5', // 东岸中部
+          'cell-9-4', // 东岸北部集结
+          'cell-8-4', // 东岸前沿
+          'cell-8-3', // 沃堡前线（德军主攻方向）
+        ],
+      },
+    ],
+  },
 }

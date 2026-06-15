@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "campaign-schemas/map.schema.json",
   "title": "CampaignMap",
-  "description": "战役地图（网格类型/列/行/单元数组/高价值节点）。严格校验供 ajv 导入包。",
+  "description": "战役地图（网格类型/列/行/单元数组/高价值节点/补给网络）。严格校验供 ajv 导入包。",
   "type": "object",
   "properties": {
     "gridType": { "type": "string", "enum": ["square", "hex"] },
@@ -23,7 +23,8 @@
           },
           "movementCost": { "type": "number", "minimum": 0, "maximum": 100 },
           "defenseBonus": { "type": "number", "minimum": 0, "maximum": 1 },
-          "isObjective": { "type": "boolean" }
+          "isObjective": { "type": "boolean" },
+          "isSupplySource": { "type": "boolean" }
         },
         "required": ["id", "col", "row", "terrain", "movementCost", "defenseBonus", "isObjective"],
         "additionalProperties": false
@@ -42,6 +43,32 @@
         "required": ["id", "name", "cellId", "controlThreshold"],
         "additionalProperties": false
       }
+    },
+    "supplyNetwork": {
+      "type": "object",
+      "description": "补给网络（第 4 批）：多条补给线，每条属某阵营，cellIds[0]=补给源。",
+      "properties": {
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "factionId": { "type": "string", "minLength": 1 },
+              "cellIds": {
+                "type": "array",
+                "minItems": 2,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "type": { "type": "string", "enum": ["road", "rail", "river"] }
+            },
+            "required": ["id", "factionId", "cellIds", "type"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["lines"],
+      "additionalProperties": false
     }
   },
   "required": ["gridType", "cols", "rows", "cells", "highValueNodes"],
