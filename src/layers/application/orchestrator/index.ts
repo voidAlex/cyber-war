@@ -9,13 +9,16 @@
 
 export {
   advanceTurn,
+  resumeTurnAfterDecision,
   createDefaultResolver,
+  createMultiAgentResolver,
   TURN_CANCELLED,
   TURN_PERSIST_FAILED,
 } from './turn-orchestrator'
 export type {
   TurnOrchestratorServices,
   AdvanceTurnResult,
+  DecisionResumeHandle,
 } from './turn-orchestrator'
 export {
   isPersistGateSatisfied,

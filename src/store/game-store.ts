@@ -21,8 +21,10 @@ import { wegoReducer } from '@/layers/application/state-machine/reducer'
 import { persistenceService } from '@/layers/application/services/persistence-service'
 import {
   advanceTurn,
+  resumeTurnAfterDecision,
   createMultiAgentResolver,
 } from '@/layers/application/orchestrator/turn-orchestrator'
+import type { DecisionResumeHandle } from '@/layers/application/orchestrator/turn-orchestrator'
 import { initWorkerService } from '@/layers/application/services/worker-service'
 import { llmService } from '@/layers/application/services/llm-service'
 import { errorToBanner } from '@/layers/application/services/llm-service'
@@ -216,6 +218,14 @@ export interface GameStoreState {
    */
   selectedUnitId: string | null
 
+  // —— 第 3 批：战术决策挂起句柄 ——
+  // advanceTurn 在导演部产出 pendingDecision 时挂起，返回此句柄。
+  // 玩家在 DecisionPanel 选择后，store 据此调 resumeTurnAfterDecision 完成本回合。
+  // 挂起期间 context.game.phase === 'decision'。
+  // 瞬态运行时数据，不进 reducer/context（落盘仅经 event-log）。
+  /** 决策挂起句柄（advanceTurn 暂停时填充，resumeTurnAfterDecision 完成后清空）。 */
+  pendingDecisionHandle: DecisionResumeHandle | null
+
   // —— 动作 ——
   /** dispatch 一个纯 action 到 reducer（守卫拒绝时设 userError） */
   dispatch: (action: StateMachineAction) => boolean
@@ -229,6 +239,20 @@ export interface GameStoreState {
   deleteSave: (saveId: string) => Promise<void>
   /** 推进一个完整回合（走 advanceTurn，persist-gate 强制落盘） */
   advance: () => Promise<void>
+  /**
+   * 第 3 批：解决战术决策（decision 阶段玩家选择后调用）。
+   *
+   * 流程：
+   * 1. dispatch RESOLVE_DECISION（纯函数 reducer，应用所选选项 overrides 到 world）。
+   * 2. 调 resumeTurnAfterDecision 完成本回合（decision → persist → idle → NEXT_TURN）。
+   *
+   * @param optionId 玩家选择的选项 id；null=跳过（不选，无后果）
+   * @param overrides 所选选项的 overrides（与 RESOLVE_DECISION 同源；跳过时为空数组）
+   */
+  resolveDecision: (
+    optionId: string | null,
+    overrides: import('@/layers/agents/protocol/schema').DirectorOverride[],
+  ) => Promise<void>
   /** 直接从 WorldState 设置上下文（测试/恢复用） */
   setFromWorld: (world: WorldState, saveId?: string) => void
   /** 清除 userError */
@@ -304,6 +328,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   selectedUnitId: null,
 
+  // 第 3 批：决策挂起句柄（初始无挂起）
+  pendingDecisionHandle: null,
+
   dispatch(action) {
     const ctx = get().context
     if (ctx === null) {
@@ -348,6 +375,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         persisting: false,
         // 新建存档视为已落盘（createSave 内已写 world-state），允许 START_TURN
         persistCompleted: true,
+        pendingDecision: null,
         error: null,
       }
       const all = await persistenceService.listSaves()
@@ -374,6 +402,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         lastResolution: null,
         persisting: false,
         persistCompleted: true,
+        pendingDecision: null,
         error: null,
       }
       set({ context: ctx, saveId, busy: false })
@@ -426,6 +455,19 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         persistence: persistenceService,
         resolve: resolver,
       })
+      // 第 3 批：若在 decision 阶段挂起，存挂起句柄并保持 busy（等玩家选择）。
+      if (result.pausedAtDecision && result.decisionHandle) {
+        set({
+          context: result.context,
+          busy: false,
+          // 流式战报已完成（briefing 阶段已显示）；decision 阶段保持 streamingReport=false
+          streamingReport: false,
+          cacheStats: llmService.getCacheStats(),
+          degraded: result.context.lastResolution?.degraded ?? false,
+          pendingDecisionHandle: result.decisionHandle,
+        })
+        return
+      }
       // 结算完成：回写缓存统计、降级标志、envelopes（供 Inspector）
       set({
         context: result.context,
@@ -433,6 +475,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         streamingReport: false,
         cacheStats: llmService.getCacheStats(),
         degraded: result.context.lastResolution?.degraded ?? false,
+        pendingDecisionHandle: null,
       })
     } catch (err) {
       set({ streamingReport: false })
@@ -454,6 +497,50 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }
   },
 
+  // 第 3 批：解决战术决策（decision 阶段玩家选择后调用）
+  async resolveDecision(optionId, overrides) {
+    const ctx = get().context
+    const handle = get().pendingDecisionHandle
+    if (ctx === null || handle === null) {
+      set({ userError: '无待解决的战术决策' })
+      return
+    }
+    set({ busy: true, userError: null })
+    try {
+      // 1. dispatch RESOLVE_DECISION（纯函数 reducer，应用 overrides 到 world）
+      const ok = get().dispatch({ type: 'RESOLVE_DECISION', optionId, overrides })
+      if (!ok) {
+        set({ busy: false })
+        return
+      }
+      // dispatch 后 context 已更新（phase=persist，world 已应用 overrides）
+      const resolvedCtx = get().context
+      if (resolvedCtx === null) {
+        set({ busy: false, userError: '决策解决后上下文丢失' })
+        return
+      }
+      // 2. 调 resumeTurnAfterDecision 完成本回合（persist → idle → NEXT_TURN）
+      const result = await resumeTurnAfterDecision(resolvedCtx, {
+        persistence: persistenceService,
+      }, handle, optionId, overrides)
+      set({
+        context: result.context,
+        busy: false,
+        pendingDecisionHandle: null,
+      })
+    } catch (err) {
+      // 落盘失败等：上下文可能已被部分推进，从 error.context 恢复（若存在）
+      const banner = errorToBanner(err)
+      set({ llmError: banner, cacheStats: llmService.getCacheStats() })
+      const maybeCtx = (err as { context?: StateMachineContext }).context
+      if (maybeCtx) {
+        set({ context: maybeCtx, busy: false, userError: `决策解决失败：${String(err)}`, pendingDecisionHandle: null })
+      } else {
+        set({ busy: false, userError: `决策解决失败：${String(err)}`, pendingDecisionHandle: null })
+      }
+    }
+  },
+
   setFromWorld(world, saveId) {
     const ctx: StateMachineContext = {
       game: { phase: 'idle', world },
@@ -462,6 +549,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       lastResolution: null,
       persisting: false,
       persistCompleted: true,
+      pendingDecision: null,
       error: null,
     }
     set({ context: ctx, saveId: saveId ?? get().saveId })

@@ -29,5 +29,7 @@ export { default as DiplomacyPanel } from './DiplomacyPanel'
 export { default as ForcesPanel } from './ForcesPanel'
 export { default as UnitDetailPanel } from './units/UnitDetailPanel'
 export { default as CollapsibleSection } from './CollapsibleSection'
+// 第 3 批：战术决策面板（decision 阶段显示）
+export { default as DecisionPanel } from './DecisionPanel'
 // A 标题屏主菜单（UI 重构第 2 批）：configUnlocked && context===null 时显示
 export { default as TitleScreen } from './title/TitleScreen'

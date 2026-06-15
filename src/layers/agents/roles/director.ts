@@ -24,6 +24,8 @@ import type {
   ResolutionSummary,
   WorldState,
   RandomEvent,
+  TacticalDecision,
+  TacticalDecisionTemplate,
 } from '@/types'
 import type { ResolutionResult, ResolutionEvent } from '@/layers/domain/combat'
 import type { ValidateFunction } from 'ajv'
@@ -73,6 +75,19 @@ export interface DirectorAdjudicateParams {
    * 不传（空数组）时无随机事件，与既有行为兼容（测试不受影响）。
    */
   randomEvents?: RandomEvent[]
+  /**
+   * 第 3 批：战役战术决策模板（可选，来自 CampaignRules.decisions）。
+   *
+   * 导演部按 triggerCondition 判定是否触发本回合的决策：
+   * - 'turn_in'：确定性触发（如第 3/10 回合的历史节点）。
+   * - 'morale_below'：某阵营平均士气低于阈值时触发（动态态势）。
+   *
+   * 触发后产出 TacticalDecision（具体选项 + 已解析 overrides），
+   * 由编排器 OFFER_DECISION 挂起，等玩家选择。
+   *
+   * 不传（空数组）时无决策，与既有行为兼容。
+   */
+  decisionTemplates?: TacticalDecisionTemplate[]
 }
 
 /**
@@ -96,6 +111,14 @@ export interface DirectorAdjudicateResult {
   appliedOverrides?: DirectorOverride[]
   /** 本回合关键叙事事件（M3 LLM 产出，落 directorMemory.keyEvents） */
   keyEvents?: string[]
+  /**
+   * 第 3 批：本回合触发的战术决策（可选）。
+   *
+   * 导演部按 rules.decisions 模板 + 本回合态势产出。
+   * 编排器据此 OFFER_DECISION 挂起，等玩家在 decision 阶段选择。
+   * 不触发（无匹配模板）时为 undefined，与既有行为兼容。
+   */
+  pendingDecision?: TacticalDecision
 }
 
 /**
@@ -199,6 +222,13 @@ export const SEQUENCE_DIRECTOR_MOCK_COMPRESS = 3998
  * 多个随机事件按 4001 + index 偏移占用，保证同回合互斥 event id。
  */
 export const SEQUENCE_DIRECTOR_RANDOM_EVENT_BASE = 4001
+/**
+ * 第 3 批：战术决策后果专用 sequence 槽（4010+，与随机事件 4001 段位区分）。
+ *
+ * 玩家在 decision 阶段选择某选项后，其 overrides 落 event-log。
+ * 每个 override 按 4010 + index 偏移占用，保证同回合互斥 event id。
+ */
+export const SEQUENCE_DIRECTOR_DECISION_OVERRIDE_BASE = 4010
 
 // ============================================================================
 // M3 真 LLM 导演部（终裁 + 覆写留痕 + 流式战报；失败回退 mock）
@@ -258,7 +288,7 @@ async function adjudicateWithLlm(
   llmService: LlmService,
   config: LlmCallConfig,
 ): Promise<DirectorAdjudicateResult> {
-  const { physicsResult, world, scenarioSeed, turn, envelopes, randomEvents } = params
+  const { physicsResult, world, scenarioSeed, turn, envelopes, randomEvents, decisionTemplates } = params
   const validate = getAgentValidator('director') as ValidateFunction<DirectorAgentOutput>
 
   // 第 2 批：随机事件 effects 作为已确定的覆写（确定性真相，导演部在叙事中体现）。
@@ -356,12 +386,17 @@ async function adjudicateWithLlm(
     directorEvents.push(randomEventToDirectorAction(ev, scenarioSeed, turn))
   }
 
+  // 第 3 批：战术决策触发判定（与 mock 路径一致，按模板 triggerCondition + 当前态势产出）。
+  // LLM 路径仅用模板触发，选项与后果复用模板（保证确定性：决策后果可重放，不依赖 LLM 输出）。
+  const pendingDecision = generateTacticalDecision(world, turn, decisionTemplates ?? [])
+
   return {
     finalResult,
     resolutionSummary,
     directorEvents,
     appliedOverrides: mergedOverrides,
     keyEvents: data.keyEvents ?? [],
+    pendingDecision,
   }
 }
 
@@ -547,9 +582,11 @@ function randomEventToDirectorAction(
  * 不覆写任何数值，直接采信物理结果。战报从 events 拼装。
  * 第 2 批：随机事件 effects 仍应用（确定性真相，mock 与 LLM 路径行为一致），
  * 并产出 'random_event' AgentAction 入 event-log。
+ * 第 3 批：按 rules.decisions 模板判定是否触发本回合战术决策，
+ * 触发则产出 TacticalDecision（pendingDecision）由编排器 OFFER_DECISION 挂起。
  */
 function adjudicateMock(params: DirectorAdjudicateParams): DirectorAdjudicateResult {
-  const { physicsResult, world, scenarioSeed, turn, randomEvents } = params
+  const { physicsResult, world, scenarioSeed, turn, randomEvents, decisionTemplates } = params
 
   // 1. 终裁：M2 应用随机事件 effects（确定性真相），其余直接采信物理结果。
   const randomEventOverrides: DirectorOverride[] = []
@@ -573,7 +610,161 @@ function adjudicateMock(params: DirectorAdjudicateParams): DirectorAdjudicateRes
     directorEvents.push(randomEventToDirectorAction(ev, scenarioSeed, turn))
   }
 
-  return { finalResult, resolutionSummary, directorEvents }
+  // 第 3 批：战术决策触发判定（确定性：turn_in 或 morale_below，非随机）。
+  // mock 与 LLM 路径行为一致：均按模板 triggerCondition + 当前态势产出决策。
+  const pendingDecision = generateTacticalDecision(world, turn, decisionTemplates ?? [])
+
+  return { finalResult, resolutionSummary, directorEvents, pendingDecision }
+}
+
+// =============================================================================
+// 第 3 批：战术决策生成（纯函数，按模板 + 当前态势产出运行时 TacticalDecision）
+// =============================================================================
+
+/**
+ * 按模板 + 当前回合/态势判定是否触发战术决策，触发则产出运行时 TacticalDecision。
+ *
+ * 判定规则（确定性，非随机）：
+ * - 'turn_in'：turn 在 triggerCondition.turns 列表中即触发（如第 3/10 回合历史节点）。
+ * - 'morale_below'：某阵营平均士气低于 moraleThreshold 时触发（动态态势）。
+ *
+ * 一个回合至多触发一个决策（取第一个匹配的模板，避免 UI 决策面板拥挤）。
+ *
+ * 选项的 overrides 从模板解析：模板用 `__add_N__`（增量）/ `__current__`（占位）约定，
+ * 此处按当前 world 把占位符解析为具体 DirectorOverride（field=units.<id>.<field>）：
+ * - before：从 world.units 取当前值（找不到单位则跳过该 override）。
+ * - after：`__add_N__` → before + N；其它（已是具体值）→ 原值。
+ *
+ * 仅保留单位真实存在的 override（绝不伪造单位）。
+ *
+ * @param world 当前世界状态（读 units 取 before 值）
+ * @param turn 本回合号
+ * @param templates 战役决策模板列表（来自 rules.decisions）
+ * @returns TacticalDecision 或 undefined（无匹配模板）
+ */
+export function generateTacticalDecision(
+  world: WorldState,
+  turn: number,
+  templates: readonly TacticalDecisionTemplate[],
+): TacticalDecision | undefined {
+  for (const tpl of templates) {
+    if (!shouldTriggerDecision(tpl, world, turn)) continue
+    const decision = resolveDecisionTemplate(tpl, world, turn)
+    if (decision) return decision
+  }
+  return undefined
+}
+
+/** 判定某决策模板本回合是否触发（按 triggerCondition）。 */
+function shouldTriggerDecision(
+  tpl: TacticalDecisionTemplate,
+  world: WorldState,
+  turn: number,
+): boolean {
+  const cond = tpl.triggerCondition
+  if (cond.kind === 'turn_in') {
+    return (cond.turns ?? []).includes(turn)
+  }
+  if (cond.kind === 'morale_below') {
+    if (!cond.factionId || cond.moraleThreshold === undefined) return false
+    const factionUnits = world.units.filter((u) => u.factionId === cond.factionId)
+    if (factionUnits.length === 0) return false
+    const avgMorale =
+      factionUnits.reduce((sum, u) => sum + u.morale, 0) / factionUnits.length
+    return avgMorale < (cond.moraleThreshold ?? 0)
+  }
+  return false
+}
+
+/**
+ * 把决策模板解析为运行时 TacticalDecision（overrides 已解析到具体单位）。
+ *
+ * 返回 undefined 当且仅当所有选项的 overrides 都解析失败（无任何单位命中）。
+ */
+function resolveDecisionTemplate(
+  tpl: TacticalDecisionTemplate,
+  world: WorldState,
+  turn: number,
+): TacticalDecision | undefined {
+  const options = tpl.options
+    .map((optTpl) => {
+      const overrides: DirectorOverride[] = []
+      for (const ovTpl of optTpl.overrides) {
+        const resolved = resolveOverrideTemplate(ovTpl, world)
+        if (resolved) overrides.push(resolved)
+      }
+      return {
+        id: optTpl.id,
+        label: optTpl.label,
+        description: optTpl.description,
+        overrides,
+      }
+    })
+    // 仅保留至少有一条可解析 override 的选项（避免空后果选项误导玩家）
+    .filter((opt) => opt.overrides.length > 0)
+
+  if (options.length === 0) return undefined
+
+  return {
+    id: tpl.id,
+    turn,
+    label: tpl.label,
+    description: tpl.description,
+    options,
+  }
+}
+
+/**
+ * 解析单条 override 模板为具体 DirectorOverride。
+ *
+ * - field：`units.<unitId>.<field>` → 按 unitId 查 world.units。
+ * - before：模板 `__current__` → 取 world 中单位当前值；其它 → 原值。
+ * - after：模板 `__add_N__` → before + N（N 可负）；其它 → 原值。
+ *
+ * 单位不存在时返回 null（绝不伪造单位）。
+ */
+function resolveOverrideTemplate(
+  ovTpl: TacticalDecisionTemplate['options'][number]['overrides'][number],
+  world: WorldState,
+): DirectorOverride | null {
+  const parsed = parseDecisionField(ovTpl.field)
+  if (!parsed) return null
+  const { unitId, field } = parsed
+  const unit = world.units.find((u) => u.id === unitId)
+  if (!unit) return null
+  const record = unit as unknown as Record<string, unknown>
+  const currentValue = record[field]
+  // before 解析：__current__ → 当前值；否则原值
+  const before =
+    ovTpl.before === '__current__' ? currentValue : ovTpl.before
+  // after 解析：__add_N__ → before + N；否则原值
+  let after: unknown = ovTpl.after
+  if (typeof ovTpl.after === 'string') {
+    const addMatch = /^__add_(-?\d+(?:\.\d+)?)__$/.exec(ovTpl.after)
+    if (addMatch) {
+      const delta = Number(addMatch[1])
+      after =
+        typeof before === 'number'
+          ? before + delta
+          : delta // before 非 number（异常）退化为 delta，保证有数值
+    }
+  }
+  return {
+    field: ovTpl.field,
+    before,
+    after,
+    reason: ovTpl.reason,
+  }
+}
+
+/** 解析 override field 路径 `units.<unitId>.<field>` → { unitId, field }。 */
+function parseDecisionField(
+  field: string,
+): { unitId: string; field: string } | null {
+  const parts = field.split('.')
+  if (parts.length < 3) return null
+  if (parts[0] !== 'units') return null
+  return { unitId: parts[1], field: parts.slice(2).join('.') }
 }
 
 /**

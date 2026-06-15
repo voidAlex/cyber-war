@@ -47,6 +47,7 @@ export function createInitialContext(
     lastResolution: null,
     persisting: false,
     persistCompleted: false,
+    pendingDecision: null,
     error: null,
   }
 }
@@ -197,6 +198,31 @@ export function wegoReducer(
       return accepted(next, fromPhase)
     }
 
+    case 'OFFER_DECISION': {
+      // briefing → decision（导演部产出 pendingDecision，挂起等玩家选择）
+      const next: StateMachineContext = {
+        ...ctx,
+        game: { ...ctx.game, phase: 'decision' },
+        pendingDecision: action.decision,
+        error: null,
+      }
+      return accepted(next, fromPhase)
+    }
+
+    case 'RESOLVE_DECISION': {
+      // decision → persist（玩家选择或跳过）
+      // 把所选选项的后果 overrides（DirectorOverride[]）应用到 world.units。
+      // 跳过（optionId=null）时 overrides 为空，world 不变。
+      const world = applyDecisionOverrides(ctx.game.world, action.overrides)
+      const next: StateMachineContext = {
+        ...ctx,
+        game: { ...ctx.game, phase: 'persist', world },
+        pendingDecision: null,
+        error: null,
+      }
+      return accepted(next, fromPhase)
+    }
+
     case 'PERSIST_COMPLETE': {
       // persist → idle（落盘完成；置 persistCompleted=true 放行 NEXT_TURN）
       const next: StateMachineContext = {
@@ -299,3 +325,50 @@ export function wegoReducer(
 
 // —— reducer 内主守卫由 guardAction 完成；
 //    迁移表 isValidTransition 供 guard/transitions 复核，本文件不再直接引用。
+
+// =============================================================================
+// 第 3 批：战术决策后果应用（纯函数，复用 DirectorOverride → Unit 字段路径语义）
+// =============================================================================
+
+/**
+ * 把战术决策的后果 overrides（DirectorOverride[]）应用到 world.units。
+ *
+ * 纯函数 + 不可变产出。field 路径约定 `units.<unitId>.<field>`
+ * （与 director.applyOverridesToResult / replay.applyTrustedAction 同构）。
+ *
+ * 仅修改真实存在的单位（绝不伪造单位）；非法路径跳过。
+ * 应用到 Unit 的数值字段（strength/morale/fatigue/fuel/ammo/personnel）。
+ *
+ * 注：此处的"应用"是把 after 值直接写到 world.units（与 director 的 finalResult.stateChanges
+ * 分开，因战术决策发生在物理结算之后的 decision 阶段，绕过 stateChanges 增量链路）。
+ */
+function applyDecisionOverrides(
+  world: WorldState,
+  overrides: readonly import('@/layers/agents/protocol/schema').DirectorOverride[],
+): WorldState {
+  if (overrides.length === 0) return world
+  const newUnits = world.units.map((unit) => ({ ...unit }))
+  let changed = false
+  for (const ov of overrides) {
+    const parsed = parseDecisionField(ov.field)
+    if (!parsed) continue
+    const { unitId, field } = parsed
+    const idx = newUnits.findIndex((u) => u.id === unitId)
+    if (idx < 0) continue
+    const record = newUnits[idx] as unknown as Record<string, unknown>
+    record[field] = ov.after
+    changed = true
+  }
+  if (!changed) return world
+  return { ...world, units: newUnits }
+}
+
+/** 解析 override field 路径 `units.<unitId>.<field>` → { unitId, field }。 */
+function parseDecisionField(
+  field: string,
+): { unitId: string; field: string } | null {
+  const parts = field.split('.')
+  if (parts.length < 3) return null
+  if (parts[0] !== 'units') return null
+  return { unitId: parts[1], field: parts.slice(2).join('.') }
+}

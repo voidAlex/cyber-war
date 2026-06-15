@@ -79,6 +79,103 @@ describe('wegoReducer — 合法主链路转换', () => {
     expect(r.state.persistCompleted).toBe(false)
   })
 
+  // 第 3 批：战术决策 OFFER_DECISION / RESOLVE_DECISION
+  it('OFFER_DECISION: briefing → decision（存 pendingDecision）', () => {
+    const ctx = makeContextAtPhase('briefing')
+    const decision = {
+      id: 'd1',
+      turn: 3,
+      label: '兵力集中',
+      description: '请选择',
+      options: [
+        {
+          id: 'opt-a',
+          label: 'A',
+          description: 'A',
+          overrides: [
+            {
+              field: 'units.u1.strength',
+              before: 80,
+              after: 95,
+              reason: '提升',
+            },
+          ],
+        },
+      ],
+    }
+    const r = wegoReducer(ctx, { type: 'OFFER_DECISION', decision })
+    expect(r.ok).toBe(true)
+    expect(r.state.game.phase).toBe('decision')
+    expect(r.state.pendingDecision).toEqual(decision)
+  })
+
+  it('RESOLVE_DECISION: decision → persist（应用 overrides 到 world）', () => {
+    // 构造 decision 阶段 ctx + 含可被覆写单位的 world
+    const world = makeWorld()
+    world.units = [
+      {
+        id: 'u1',
+        factionId: 'blue',
+        type: 'infantry',
+        coord: { col: 0, row: 0 },
+        strength: 80,
+        personnel: 1000,
+        maxPersonnel: 1000,
+        fuel: 80,
+        ammo: 80,
+        morale: 60,
+        fatigue: 10,
+        detection: {},
+        orders: [],
+        status: [],
+      },
+    ]
+    const ctx = makeContextAtPhase('decision')
+    ctx.game.world = world
+    ctx.pendingDecision = {
+      id: 'd1',
+      turn: 3,
+      label: 'l',
+      description: 'd',
+      options: [],
+    }
+    const r = wegoReducer(ctx, {
+      type: 'RESOLVE_DECISION',
+      optionId: 'opt-a',
+      overrides: [
+        { field: 'units.u1.strength', before: 80, after: 95, reason: '提升' },
+      ],
+    })
+    expect(r.ok).toBe(true)
+    expect(r.state.game.phase).toBe('persist')
+    expect(r.state.pendingDecision).toBeNull()
+    // overrides 已应用到 world.units
+    const updatedUnit = r.state.game.world.units.find((u) => u.id === 'u1')
+    expect(updatedUnit?.strength).toBe(95)
+  })
+
+  it('RESOLVE_DECISION 跳过（optionId=null, 空 overrides）: world 不变', () => {
+    const ctx = makeContextAtPhase('decision')
+    ctx.pendingDecision = {
+      id: 'd1',
+      turn: 3,
+      label: 'l',
+      description: 'd',
+      options: [],
+    }
+    const originalWorld = ctx.game.world
+    const r = wegoReducer(ctx, {
+      type: 'RESOLVE_DECISION',
+      optionId: null,
+      overrides: [],
+    })
+    expect(r.ok).toBe(true)
+    expect(r.state.game.phase).toBe('persist')
+    expect(r.state.pendingDecision).toBeNull()
+    // 无 overrides → world 引用不变（性能优化）
+    expect(r.state.game.world).toBe(originalWorld)
+  })
+
   it('PERSIST_COMPLETE: persist → idle（放行 NEXT_TURN）', () => {
     const ctx = makeContextAtPhase('persist')
     const r = wegoReducer(ctx, { type: 'PERSIST_COMPLETE' })

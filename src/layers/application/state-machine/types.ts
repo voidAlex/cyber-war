@@ -22,8 +22,10 @@ import type {
   GamePhase,
   WorldState,
   ResolutionSummary,
+  TacticalDecision,
 } from '@/types'
 import type { ActionEnvelope } from '@/types'
+import type { DirectorOverride } from '@/layers/agents/protocol/schema'
 
 /**
  * reducer 执行结果封装（含可能的守卫错误）。
@@ -63,6 +65,13 @@ export interface StateMachineContext {
   persisting: boolean
   /** persist 是否已完成落盘（PERSIST_COMPLETE 后置 true，NEXT_TURN 前置守卫） */
   persistCompleted: boolean
+  /**
+   * 待解决的战术决策（第 3 批，decision 阶段填充）。
+   *
+   * 由 OFFER_DECISION 注入（导演部产出的 TacticalDecision）；
+   * RESOLVE_DECISION 后清空。null=无待决策。
+   */
+  pendingDecision: TacticalDecision | null
   /** 最近一次错误（状态机内判，UI 展示；null=无错误） */
   error: string | null
 }
@@ -103,6 +112,24 @@ export type StateMachineAction =
       contextSummary?: { turn: number; text: string }
     } // resolution → briefing
   | { type: 'ENTER_PERSIST' } // briefing → persist
+  // —— 第 3 批：战术决策树 ——
+  | {
+      // briefing → decision（导演部产出 pendingDecision 后，编排器触发此 action）
+      type: 'OFFER_DECISION'
+      /** 导演部产出的战术决策（含选项与后果模板，UI 据此渲染 DecisionPanel） */
+      decision: TacticalDecision
+    }
+  | {
+      // decision → persist（玩家选择某选项或跳过后，UI 触发此 action）
+      type: 'RESOLVE_DECISION'
+      /** 玩家选择的选项 id；null/'skip' 表示跳过（不选，无后果直接落盘） */
+      optionId: string | null
+      /**
+       * 所选选项的后果覆写（DirectorOverride[]，已解析到具体单位）。
+       * 跳过时为空数组。编排器据此应用到 world + 落 event-log（source:'director'）。
+       */
+      overrides: DirectorOverride[]
+    }
   | { type: 'PERSIST_COMPLETE' } // persist → idle（persist-gate 守卫此信号，置 persistCompleted=true）
   | { type: 'NEXT_TURN' } // idle → idle 且 turnIndex+1（受 persistCompleted 守卫）
   // —— 命令链路（M2 接入，M1 保留守卫可测）——

@@ -27,7 +27,7 @@
  */
 
 import { useEffect, type JSX } from 'react'
-import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector, IntelligencePanel, DiplomacyPanel, ForcesPanel, UnitDetailPanel, CollapsibleSection } from '@/layers/ui'
+import { SaveListPanel, CampaignPanel, TurnControlPanel, Sandbox, CommandTerminal, BriefingPanel, EventLogPanel, LLMConfigPanel, ErrorBanner, AgentInspector, IntelligencePanel, DiplomacyPanel, ForcesPanel, UnitDetailPanel, CollapsibleSection, DecisionPanel } from '@/layers/ui'
 import TitleScreen from '@/layers/ui/title/TitleScreen'
 import SandboxErrorBoundary from '@/layers/ui/sandbox/SandboxErrorBoundary'
 import { useGameStore } from '@/store/game-store'
@@ -130,8 +130,9 @@ export default function App(): JSX.Element {
   }
 
   // ③ inGame：已进入游戏（context !== null）→ 三栏游戏界面（D 布局）
-  // 右栏：briefing 阶段显示战报，其他阶段显示命令终端
+  // 右栏：briefing 阶段显示战报；decision 阶段显示战术决策面板；其他阶段显示命令终端
   const showBriefing = phase === 'briefing'
+  const showDecision = phase === 'decision'
 
   return (
     <div className="app-shell">
@@ -198,7 +199,13 @@ export default function App(): JSX.Element {
               日志从视口底部 footer 移此底部，不再割裂视线。
               上区 flex 1（终端/战报吃满），日志固定底部 ~150px。 */}
           <div className="app-shell__right-main">
-            {showBriefing ? <BriefingPanel /> : <CommandTerminal />}
+            {showDecision ? (
+              <DecisionPanel />
+            ) : showBriefing ? (
+              <BriefingPanel />
+            ) : (
+              <CommandTerminal />
+            )}
             <AgentInspector />
           </div>
           <div className="app-shell__right-log">

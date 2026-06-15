@@ -161,4 +161,129 @@ export const verdunRules: CampaignRules = {
       ],
     },
   ],
+  // 第 3 批：战术决策模板（凡尔登两个历史节点）
+  decisions: [
+    // === 第 3 回合：兵力集中方向（战役初期主攻方向抉择） ===
+    {
+      id: 'verdun-focus-direction',
+      // 确定性触发：第 3 回合（战役初期，攻方需选定主攻方向）
+      triggerCondition: { kind: 'turn_in', turns: [3] },
+      label: '兵力集中方向',
+      description:
+        '战役进入第 3 天，前线指挥官请示兵力集中方向。杜奥蒙堡为德军要塞核心，默兹河两岸地形复杂但分散防守。请决定本阶段主攻方向。',
+      options: [
+        {
+          id: 'focus-douaumont',
+          label: '集中攻击杜奥蒙堡',
+          description:
+            '将主力集中于杜奥蒙堡方向，强攻这座要塞核心。攻方战力提升，但防守方因压力激增而疲劳加剧。',
+          overrides: [
+            // 攻方（德国）主攻步兵 strength +15
+            {
+              field: 'units.de-infantry-21.strength',
+              before: '__current__',
+              after: '__add_15__',
+              reason: '集中主力于杜奥蒙方向，攻方战力提升',
+            },
+            // 守方（法国）杜奥蒙堡 fatigue +20（高强度防御压力）
+            {
+              field: 'units.fr-fortress-douaumont.fatigue',
+              before: '__current__',
+              after: '__add_20__',
+              reason: '杜奥蒙方向防御压力激增，守军疲劳加剧',
+            },
+          ],
+        },
+        {
+          id: 'spread-meuse',
+          label: '牵制默兹河两岸',
+          description:
+            '在默兹河两岸分散部署，牵制敌军防线。整体战力分散，但降低单一方向损失。',
+          overrides: [
+            // 攻守双方主力步兵 strength 各 -5（分散消耗）
+            {
+              field: 'units.de-infantry-7.strength',
+              before: '__current__',
+              after: '__add_-5__',
+              reason: '分散部署降低单一方向战力',
+            },
+            {
+              field: 'units.fr-infantry-37.strength',
+              before: '__current__',
+              after: '__add_-5__',
+              reason: '默兹河两岸牵制，双方均分散消耗',
+            },
+          ],
+        },
+        {
+          id: 'hold-reinforce',
+          label: '坚守待援',
+          description:
+            '转入防御，等待援军到达。守军士气提升，但本回合无进攻进展。',
+          overrides: [
+            // 守方（法国）杜奥蒙堡 morale +15（坚守提振士气）
+            {
+              field: 'units.fr-fortress-douaumont.morale',
+              before: '__current__',
+              after: '__add_15__',
+              reason: '转入防御待援，守军士气提振',
+            },
+          ],
+        },
+      ],
+    },
+    // === 第 10 回合：尼韦勒 vs 贝当路线（战役中期战略路线抉择） ===
+    {
+      id: 'verdun-nivelle-petain',
+      // 确定性触发：第 10 回合（战役中期，战略路线分歧）
+      triggerCondition: { kind: 'turn_in', turns: [10] },
+      label: '尼韦勒 vs 贝当路线',
+      description:
+        '战役进入关键阶段，统帅部出现路线分歧。尼韦勒主张激进反攻收复失地，贝当主张稳健轮换消耗敌军。请决定本阶段战略路线。',
+      options: [
+        {
+          id: 'nivelle-aggressive',
+          label: '尼韦勒激进反攻',
+          description:
+            '采纳尼韦勒的激进反攻方案，集中兵力发动大规模反击。进攻性大幅提升，但风险极高，可能遭受惨重损失。',
+          overrides: [
+            // 法军主攻步兵 strength +20 但 morale -10（高风险）
+            {
+              field: 'units.fr-infantry-37.strength',
+              before: '__current__',
+              after: '__add_20__',
+              reason: '激进反攻集结兵力，攻方战力提升',
+            },
+            {
+              field: 'units.fr-infantry-37.morale',
+              before: '__current__',
+              after: '__add_-10__',
+              reason: '激进反攻风险高，士兵士气受压',
+            },
+          ],
+        },
+        {
+          id: 'petain-steady',
+          label: '贝当稳健轮换',
+          description:
+            '采纳贝当的稳健轮换方案，前线部队定期轮换休整。士气与疲劳好转，但本回合不发动进攻。',
+          overrides: [
+            // 法军主力步兵 morale +15、fatigue -15（轮换休整）
+            {
+              field: 'units.fr-infantry-2.morale',
+              before: '__current__',
+              after: '__add_15__',
+              reason: '稳健轮换提振士气',
+            },
+            {
+              field: 'units.fr-infantry-2.fatigue',
+              before: '__current__',
+              after: '__add_-15__',
+              reason: '前线轮换休整，疲劳缓解',
+            },
+          ],
+        },
+      ],
+    },
+  ],
 }

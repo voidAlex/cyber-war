@@ -53,6 +53,7 @@ export function makeContext(overrides: Partial<StateMachineContext> = {}): State
     lastResolution: null,
     persisting: false,
     persistCompleted: false,
+    pendingDecision: null,
     error: null,
     ...overrides,
   }

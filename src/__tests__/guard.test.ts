@@ -18,6 +18,7 @@ import {
 } from '@/layers/application/state-machine/guard'
 import { isValidTransition, VALID_TRANSITIONS } from '@/layers/application/state-machine/transitions'
 import { makeContext, makeContextAtPhase } from './test-helpers'
+import type { TacticalDecision } from '@/types'
 
 describe('canSubmitOrder', () => {
   it('planning/handshake 允许', () => {
@@ -81,6 +82,53 @@ describe('guardAction', () => {
       expect(guardAction(makeContextAtPhase(phase), { type: 'RETRY', reason: 'r' })).toBeNull()
     }
   })
+  // 第 3 批：战术决策守卫
+  it('OFFER_DECISION 仅 briefing 放行', () => {
+    const decision: TacticalDecision = {
+      id: 'test-decision',
+      turn: 0,
+      label: '测试决策',
+      description: '测试',
+      options: [
+        {
+          id: 'opt-a',
+          label: 'A',
+          description: 'A',
+          overrides: [],
+        },
+      ],
+    }
+    expect(guardAction(makeContextAtPhase('briefing'), { type: 'OFFER_DECISION', decision })).toBeNull()
+    expect(
+      guardAction(makeContextAtPhase('idle'), { type: 'OFFER_DECISION', decision }),
+    ).not.toBeNull()
+    expect(
+      guardAction(makeContextAtPhase('decision'), { type: 'OFFER_DECISION', decision }),
+    ).not.toBeNull()
+  })
+  it('RESOLVE_DECISION 仅 decision 放行', () => {
+    expect(
+      guardAction(makeContextAtPhase('decision'), {
+        type: 'RESOLVE_DECISION',
+        optionId: null,
+        overrides: [],
+      }),
+    ).toBeNull()
+    expect(
+      guardAction(makeContextAtPhase('briefing'), {
+        type: 'RESOLVE_DECISION',
+        optionId: null,
+        overrides: [],
+      }),
+    ).not.toBeNull()
+    expect(
+      guardAction(makeContextAtPhase('persist'), {
+        type: 'RESOLVE_DECISION',
+        optionId: null,
+        overrides: [],
+      }),
+    ).not.toBeNull()
+  })
 })
 
 describe('isActionAllowed（基于 phase 的便捷守卫）', () => {
@@ -113,12 +161,30 @@ describe('isValidTransition / VALID_TRANSITIONS', () => {
     expect(isValidTransition('planning', 'resolution')).toBe(false)
     expect(isValidTransition('locked', 'idle')).toBe(false)
   })
-  it('VALID_TRANSITIONS 表覆盖全部 7 阶段', () => {
+  it('VALID_TRANSITIONS 表覆盖全部 8 阶段（含第 3 批 decision）', () => {
     const phases = Object.keys(VALID_TRANSITIONS)
-    expect(phases).toHaveLength(7)
+    expect(phases).toHaveLength(8)
     expect(phases.sort()).toEqual(
-      ['briefing', 'handshake', 'idle', 'locked', 'persist', 'planning', 'resolution'],
+      [
+        'briefing',
+        'decision',
+        'handshake',
+        'idle',
+        'locked',
+        'persist',
+        'planning',
+        'resolution',
+      ],
     )
+  })
+  // 第 3 批：战术决策转换链
+  it('briefing → decision → persist 合法（第 3 批战术决策）', () => {
+    expect(isValidTransition('briefing', 'decision')).toBe(true)
+    expect(isValidTransition('decision', 'persist')).toBe(true)
+    // briefing 仍可直接进 persist（无决策时）
+    expect(isValidTransition('briefing', 'persist')).toBe(true)
+    // decision 不能跳回 briefing（单向）
+    expect(isValidTransition('decision', 'briefing')).toBe(false)
   })
 })
 

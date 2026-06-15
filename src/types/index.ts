@@ -115,6 +115,13 @@ export type {
   RandomEventTriggerCondition,
   RandomEventTemplate,
   RandomEvent,
+  // 第 3 批：战术决策树
+  TacticalDecisionOverrideTemplate,
+  TacticalDecisionOptionTemplate,
+  TacticalDecisionTriggerCondition,
+  TacticalDecisionTemplate,
+  TacticalDecisionOption,
+  TacticalDecision,
 } from './campaign'
 export { CAMPAIGN_ZIP_FILES, CAMPAIGN_SCHEMA_VERSION } from './campaign'
 

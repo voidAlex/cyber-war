@@ -4,8 +4,9 @@
  * 借鉴 src-legacy/game/state-machine.ts 的 VALID_TRANSITIONS 表骨架，
  * 重写时剥离副作用，仅保留「阶段 → 合法目标阶段」的纯映射。
  *
- * 状态机线性链（含失败回路）：
+ * 状态机线性链（含失败回路 + 第 3 批 decision 分支）：
  *   idle → planning → handshake → locked → resolution → briefing → persist → idle
+ *   briefing → decision → persist（第 3 批战术决策树：briefing 后弹决策，玩家选后落盘）
  *   resolution → locked（结算失败回退）
  *   persist → briefing（落盘失败回退）
  *
@@ -22,6 +23,11 @@ import type { GamePhase } from '@/types'
  * 失败回路（对应重写计划「失败回路 resolution→locked、persist→briefing」）：
  * - resolution 失败可回 locked 重新结算
  * - persist 失败可回 briefing 再次进入持久化
+ *
+ * 第 3 批战术决策树：briefing → decision → persist
+ * - briefing 可进 decision（导演部有 pendingDecision 时由编排器触发 OFFER_DECISION）
+ * - decision 可回 persist（玩家 RESOLVE_DECISION 后落盘）
+ * - 玩家也可"跳过"决策（不选任何选项，直接 RESOLVE_DECISION 空 overrides → persist）
  */
 export const VALID_TRANSITIONS: Readonly<Record<GamePhase, readonly GamePhase[]>> = {
   idle: ['planning', 'idle'], // idle→idle（NEXT_TURN 推进回合，保持 idle 阶段）
@@ -29,7 +35,8 @@ export const VALID_TRANSITIONS: Readonly<Record<GamePhase, readonly GamePhase[]>
   handshake: ['locked', 'planning'],
   locked: ['resolution'],
   resolution: ['briefing', 'locked'], // resolution → locked 失败回路
-  briefing: ['persist'],
+  briefing: ['decision', 'persist'], // briefing → decision（第 3 批）或 persist（无决策）
+  decision: ['persist'], // decision → persist（玩家选择或跳过后落盘）
   persist: ['idle', 'briefing'], // persist → briefing 失败回路
 }
 

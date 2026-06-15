@@ -337,6 +337,116 @@ export interface RandomEvent {
   reinforcementUnits?: CampaignUnit[]
 }
 
+/**
+ * 战术决策后果（DirectorOverride 模板，第 3 批）。
+ *
+ * 与运行时 DirectorOverride 的差别：模板里的 field 在导演部产出时
+ * 可仍保留 `units.<unitId>.<field>` 形态（已具体到某 unit），
+ * 或用占位符（如 `units.<attacker>.strength`）由导演部按本回合态势解析。
+ * 实际 director mock 路径会按当前 world 把占位符替换为具体单位。
+ */
+export interface TacticalDecisionOverrideTemplate {
+  /** 被覆写字段路径：`units.<unitId>.<field>`（field 为 Unit 数值字段） */
+  field: string
+  /** 覆写前值（占位符或具体值；导演部按当前 world 填充） */
+  before: unknown
+  /** 覆写后值（占位符或具体值；导演部按当前 world 填充） */
+  after: unknown
+  /** 后果说明（落入战报叙事） */
+  reason: string
+}
+
+/**
+ * 战术决策选项模板（第 3 批）。
+ *
+ * 每个选项含 label/description + 后果 overrides 模板（导演部按当前态势解析）。
+ * 玩家选择后，导演部/编排器把 overrides 应用到 world（复用 DirectorOverride 链路）。
+ */
+export interface TacticalDecisionOptionTemplate {
+  /** 选项 id（决策内唯一） */
+  id: string
+  /** 选项标签（UI 卡片标题） */
+  label: string
+  /** 选项描述（UI 卡片正文，说明后果） */
+  description: string
+  /** 选项后果覆写模板（DirectorOverride 模板） */
+  overrides: TacticalDecisionOverrideTemplate[]
+}
+
+/**
+ * 战术决策触发条件（声明式判定，第 3 批）。
+ *
+ * - 'turn_in'：指定回合（如 [3, 10]），到达即触发（确定性，非随机）。
+ * - 'morale_below'：某阵营平均士气低于阈值时触发（动态态势条件）。
+ */
+export interface TacticalDecisionTriggerCondition {
+  /** 判定类别 */
+  kind: 'turn_in' | 'morale_below'
+  /** turn_in 用：触发回合列表（如 [3, 10]） */
+  turns?: number[]
+  /** morale_below 用：阵营 id */
+  factionId?: string
+  /** morale_below 用：阵营平均士气阈值 */
+  moraleThreshold?: number
+}
+
+/**
+ * 战术决策模板（rules.json.decisions[]，第 3 批）。
+ *
+ * 导演部（mock + LLM）按 triggerCondition 判定是否触发：
+ * - turn_in：确定性触发（历史节点如第 3/10 回合）。
+ * - morale_below：态势触发。
+ *
+ * 触发后产出运行时 TacticalDecision（具体选项 + 已解析 overrides）。
+ */
+export interface TacticalDecisionTemplate {
+  /** 决策 id（唯一） */
+  id: string
+  /** 触发条件 */
+  triggerCondition: TacticalDecisionTriggerCondition
+  /** 决策标签（UI 标题） */
+  label: string
+  /** 决策描述（UI 正文，说明背景） */
+  description: string
+  /** 选项模板（2-3 个，各有后果） */
+  options: TacticalDecisionOptionTemplate[]
+}
+
+/**
+ * 运行时战术决策选项（导演部产出，UI 展示用）。
+ *
+ * 与模板的差别：overrides 已是具体 DirectorOverride（field 路径已解析到具体单位）。
+ */
+export interface TacticalDecisionOption {
+  /** 选项 id（来自模板） */
+  id: string
+  /** 选项标签 */
+  label: string
+  /** 选项描述 */
+  description: string
+  /** 已解析到具体单位的后果覆写（DirectorOverride 格式，复用现有覆写链路） */
+  overrides: import('@/layers/agents/protocol/schema').DirectorOverride[]
+}
+
+/**
+ * 运行时战术决策实例（导演部产出，存入 context.pendingDecision）。
+ *
+ * 由 DirectorAdjudicateResult.pendingDecision 传递到编排器 → OFFER_DECISION 存入 ctx →
+ * UI 据此渲染 DecisionPanel → 玩家选择 → RESOLVE_DECISION 应用 overrides。
+ */
+export interface TacticalDecision {
+  /** 决策 id（来自模板） */
+  id: string
+  /** 触发回合 */
+  turn: number
+  /** 决策标签（UI 标题） */
+  label: string
+  /** 决策描述（UI 正文） */
+  description: string
+  /** 选项列表（2-3 个，各有后果） */
+  options: TacticalDecisionOption[]
+}
+
 /** 战役包数值规则（rules.json） */
 export interface CampaignRules {
   intelDecay: CampaignIntelDecay
@@ -348,6 +458,12 @@ export interface CampaignRules {
    * rollRandomEvents 据此 + 确定性随机判定每回合触发哪些事件。
    */
   randomEvents?: RandomEventTemplate[]
+  /**
+   * 战术决策模板列表（第 3 批，可选）。
+   * 导演部按 triggerCondition 判定是否触发（如第 3/10 回合的历史节点）。
+   * 触发后产出 TacticalDecision → 玩家选择 → 后果 DirectorOverride 应用。
+   */
+  decisions?: TacticalDecisionTemplate[]
 }
 
 // =============================================================================

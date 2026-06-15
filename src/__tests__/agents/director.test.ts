@@ -274,3 +274,158 @@ describe('directorRole.adjudicate — 第 2 批 随机事件接线', () => {
     expect(reinforcementUnits[0]['id']).toBe('reinforce-1')
   })
 })
+
+// ============================================================================
+// 第 3 批：战术决策生成（generateTacticalDecision + adjudicate pendingDecision）
+// ============================================================================
+
+import { generateTacticalDecision } from '@/layers/agents/roles/director'
+import type { TacticalDecisionTemplate } from '@/types'
+
+describe('第 3 批：generateTacticalDecision 战术决策生成', () => {
+  /** 构造含单位的测试世界（带 strength/morale 可被决策覆写） */
+  function makeWorldWithUnits(units: Unit[]): WorldState {
+    return makeWorld(units)
+  }
+
+  /** 测试用决策模板：第 3 回合触发，2 选项 */
+  const tpl: TacticalDecisionTemplate = {
+    id: 'test-focus',
+    triggerCondition: { kind: 'turn_in', turns: [3] },
+    label: '兵力集中方向',
+    description: '请决定主攻方向',
+    options: [
+      {
+        id: 'focus',
+        label: '集中攻击',
+        description: '攻方战力提升',
+        overrides: [
+          {
+            field: 'units.attacker.strength',
+            before: '__current__',
+            after: '__add_15__',
+            reason: '集中主力战力提升',
+          },
+        ],
+      },
+      {
+        id: 'spread',
+        label: '分散牵制',
+        description: '双方分散消耗',
+        overrides: [
+          {
+            field: 'units.attacker.strength',
+            before: '__current__',
+            after: '__add_-5__',
+            reason: '分散降低战力',
+          },
+          {
+            field: 'units.defender.strength',
+            before: '__current__',
+            after: '__add_-5__',
+            reason: '双方均分散消耗',
+          },
+        ],
+      },
+    ],
+  }
+
+  it('turn_in 第 3 回合触发：产出 TacticalDecision（overrides 已解析到具体单位）', () => {
+    const units: Unit[] = [
+      { id: 'attacker', factionId: 'blue', type: 'infantry', coord: { col: 0, row: 0 }, strength: 80, personnel: 1000, maxPersonnel: 1000, fuel: 80, ammo: 80, morale: 60, fatigue: 10, detection: {}, orders: [], status: [] },
+      { id: 'defender', factionId: 'red', type: 'infantry', coord: { col: 1, row: 0 }, strength: 90, personnel: 1000, maxPersonnel: 1000, fuel: 80, ammo: 80, morale: 60, fatigue: 10, detection: {}, orders: [], status: [] },
+    ]
+    const world = makeWorldWithUnits(units)
+    const decision = generateTacticalDecision(world, 3, [tpl])
+    expect(decision).toBeDefined()
+    expect(decision!.id).toBe('test-focus')
+    expect(decision!.turn).toBe(3)
+    expect(decision!.options).toHaveLength(2)
+    // focus 选项：before=80（当前值），after=95（80+15）
+    const focus = decision!.options.find((o) => o.id === 'focus')!
+    expect(focus.overrides[0].before).toBe(80)
+    expect(focus.overrides[0].after).toBe(95)
+    // spread 选项：两条 override
+    const spread = decision!.options.find((o) => o.id === 'spread')!
+    expect(spread.overrides).toHaveLength(2)
+    expect(spread.overrides[0].after).toBe(75) // 80-5
+    expect(spread.overrides[1].after).toBe(85) // 90-5
+  })
+
+  it('turn_in 非触发回合：返回 undefined', () => {
+    const units: Unit[] = [
+      { id: 'attacker', factionId: 'blue', type: 'infantry', coord: { col: 0, row: 0 }, strength: 80, personnel: 1000, maxPersonnel: 1000, fuel: 80, ammo: 80, morale: 60, fatigue: 10, detection: {}, orders: [], status: [] },
+    ]
+    const world = makeWorldWithUnits(units)
+    // 第 5 回合不在 turns=[3]，不触发
+    expect(generateTacticalDecision(world, 5, [tpl])).toBeUndefined()
+  })
+
+  it('选项 overrides 引用不存在的单位时跳过该 override（绝不伪造单位）', () => {
+    const world = makeWorldWithUnits([]) // 无任何单位
+    const decision = generateTacticalDecision(world, 3, [tpl])
+    // 所有选项的 overrides 都解析失败（单位不存在）→ options 为空 → 返回 undefined
+    expect(decision).toBeUndefined()
+  })
+
+  it('morale_below 触发：阵营平均士气低于阈值时触发', () => {
+    const moraleTpl: TacticalDecisionTemplate = {
+      id: 'test-morale',
+      triggerCondition: { kind: 'morale_below', factionId: 'red', moraleThreshold: 50 },
+      label: '兵变风险',
+      description: '低士气决策',
+      options: [
+        {
+          id: 'rally',
+          label: '提振士气',
+          description: 'morale +20',
+          overrides: [
+            {
+              field: 'units.r1.morale',
+              before: '__current__',
+              after: '__add_20__',
+              reason: '提振',
+            },
+          ],
+        },
+      ],
+    }
+    const units: Unit[] = [
+      { id: 'r1', factionId: 'red', type: 'infantry', coord: { col: 0, row: 0 }, strength: 80, personnel: 1000, maxPersonnel: 1000, fuel: 80, ammo: 80, morale: 30, fatigue: 10, detection: {}, orders: [], status: [] },
+    ]
+    const world = makeWorldWithUnits(units)
+    // red 平均士气 30 < 50 → 触发
+    const decision = generateTacticalDecision(world, 0, [moraleTpl])
+    expect(decision).toBeDefined()
+    expect(decision!.id).toBe('test-morale')
+  })
+
+  it('adjudicate 传 decisionTemplates → pendingDecision 产出', async () => {
+    const units: Unit[] = [
+      { id: 'attacker', factionId: 'blue', type: 'infantry', coord: { col: 0, row: 0 }, strength: 80, personnel: 1000, maxPersonnel: 1000, fuel: 80, ammo: 80, morale: 60, fatigue: 10, detection: {}, orders: [], status: [] },
+    ]
+    const world = makeWorldWithUnits(units)
+    const result = await directorRole.adjudicate({
+      physicsResult: makePhysicsResult([]),
+      envelopes: [],
+      world,
+      scenarioSeed: 'sc:s',
+      turn: 3, // 第 3 回合 → 触发 turn_in
+      decisionTemplates: [tpl],
+    })
+    expect(result.pendingDecision).toBeDefined()
+    expect(result.pendingDecision!.id).toBe('test-focus')
+  })
+
+  it('adjudicate 不传 decisionTemplates → pendingDecision undefined（兼容）', async () => {
+    const world = makeWorldWithUnits([])
+    const result = await directorRole.adjudicate({
+      physicsResult: makePhysicsResult([]),
+      envelopes: [],
+      world,
+      scenarioSeed: 'sc:s',
+      turn: 3,
+    })
+    expect(result.pendingDecision).toBeUndefined()
+  })
+})

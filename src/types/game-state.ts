@@ -22,6 +22,8 @@ import type { WorldState } from './world-state'
  * - locked：锁定期，双方计划冻结，准备结算
  * - resolution：结算期，导演部接管结算
  * - briefing：战报期，战报分发、沙盘更新、情报半衰
+ * - decision：战术决策期（第 3 批），briefing 后由导演部弹出战术决策选项，
+ *   玩家选择后果（DirectorOverride[]）后进 persist；可选择"跳过"无后果。
  * - persist：持久化期，world-state 落盘 + 快照
  */
 export type GamePhase =
@@ -31,6 +33,7 @@ export type GamePhase =
   | 'locked'
   | 'resolution'
   | 'briefing'
+  | 'decision'
   | 'persist'
 
 /**

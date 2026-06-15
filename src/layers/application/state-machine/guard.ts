@@ -94,6 +94,16 @@ export function guardAction(
       if (phase !== 'briefing') return `当前阶段为 ${phase}，无法进入持久化`
       return null
 
+    case 'OFFER_DECISION':
+      // 第 3 批：仅 briefing 阶段允许弹出战术决策
+      if (phase !== 'briefing') return `当前阶段为 ${phase}，无法弹出战术决策`
+      return null
+
+    case 'RESOLVE_DECISION':
+      // 第 3 批：仅 decision 阶段允许解决（玩家选择/跳过）
+      if (phase !== 'decision') return `当前阶段为 ${phase}，无法解决战术决策`
+      return null
+
     case 'PERSIST_COMPLETE':
       if (phase !== 'persist') return `当前阶段为 ${phase}，无法完成持久化`
       return null
@@ -154,6 +164,8 @@ export function isActionAllowed(
     ENTER_RESOLUTION: 'locked',
     FINISH_RESOLUTION: 'resolution',
     ENTER_PERSIST: 'briefing',
+    OFFER_DECISION: 'briefing',
+    RESOLVE_DECISION: 'decision',
     PERSIST_COMPLETE: 'persist',
     RESOLUTION_FAILED: 'resolution',
     PERSIST_FAILED: 'persist',

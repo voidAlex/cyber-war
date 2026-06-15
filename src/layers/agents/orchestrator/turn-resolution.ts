@@ -33,6 +33,7 @@ import type {
   ResolutionSummary,
   CampaignRules,
   CampaignUnit,
+  TacticalDecision,
 } from '@/types'
 import type { LlmService, CacheStats } from '@/layers/application/services/llm-service'
 import type { PhysicsEngineClient } from '@/layers/application/services/worker-service'
@@ -45,6 +46,7 @@ import type {
   LlmCallConfig,
 } from '@/layers/agents/roles'
 import { theaterActionToEnvelope, commanderDecisionToEnvelope } from '@/layers/agents/roles'
+import { generateTacticalDecision } from '@/layers/agents/roles/director'
 import { allocateSequences, SEQUENCE_BASE, makeSeed } from './sequence-allocator'
 import { ruleEngineFallback, type RuleEngineFallbackResult } from '@/layers/agents/director/rule-engine-fallback'
 import { rollRandomEvents } from '@/layers/domain/random-events'
@@ -146,6 +148,14 @@ export interface OrchestrateTurnResolutionResult {
    * 无随机事件时等于入参 worldState。
    */
   world: WorldState
+  /**
+   * 第 3 批：本回合触发的战术决策（可选）。
+   *
+   * 导演部按 rules.decisions 模板 + 本回合态势产出。
+   * 调用方（turn-orchestrator）据此 OFFER_DECISION 挂起，等玩家在 decision 阶段选择。
+   * 不触发时为 undefined（与既有行为兼容）。
+   */
+  pendingDecision?: TacticalDecision
 }
 
 /**
@@ -393,6 +403,8 @@ export async function orchestrateTurnResolution(
       turn,
       onReportChunk: params.onReportChunk,
       randomEvents,
+      // 第 3 批：战役决策模板（导演部按 triggerCondition 判定是否触发本回合决策）
+      decisionTemplates: campaignRules?.decisions,
     })
     if (onProgress) {
       onProgress({ agentId: 'director', role: 'director', status: 'done' })
@@ -443,6 +455,18 @@ export async function orchestrateTurnResolution(
     ? (directorResult.keyEvents ?? [])
     : []
 
+  // 第 3 批：战术决策触发判定。
+  // - director 真路径（mock + LLM）已在 adjudicate 内按模板产出 pendingDecision。
+  // - 规则引擎兜底路径（RuleEngineFallbackResult）无 pendingDecision 字段，
+  //   此处按模板补一次生成（保证降级时决策仍可触发，确定性不受 LLM 失败影响）。
+  // 决策后果仅来自模板（不依赖 LLM 输出），回放采信模板解析结果，确定性红线守住。
+  let pendingDecision = isDirectorRealResult(directorResult)
+    ? directorResult.pendingDecision
+    : undefined
+  if (!pendingDecision && campaignRules?.decisions && campaignRules.decisions.length > 0) {
+    pendingDecision = generateTacticalDecision(worldState, turn, campaignRules.decisions)
+  }
+
   const cacheStats = llmService.getCacheStats()
   logger.info('orch/resolve/complete', '回合编排完成', {
     ...logCtx,
@@ -463,6 +487,8 @@ export async function orchestrateTurnResolution(
     cacheStats,
     degraded,
     world: worldState,
+    // 第 3 批：战术决策（导演部按 rules.decisions 模板产出，undefined=无决策）
+    pendingDecision,
   }
 }
 

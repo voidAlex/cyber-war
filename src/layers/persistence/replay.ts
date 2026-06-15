@@ -444,6 +444,12 @@ function applyEngagementToChanges(
  *
  * - director override（kind:'adjudication', payload.kind:'override'）：
  *   按 field 路径 units.<unitId>.<field> 应用 after 值（采信 log）。
+ *   这覆盖两类来源：
+ *   1. 导演部终裁覆写（director LLM/mock 产出）。
+ *   2. 第 3 批战术决策后果（玩家在 decision 阶段选择后，编排器把所选选项的
+ *      DirectorOverride[] 转 source:'director' 的 override 事件入 event-log，
+ *      payload 额外带 decisionOptionId 标记来源；回放统一采信 after 值，
+ *      不重新让玩家选——满足第 3 批「回放采信 log」约束）。
  * - random_event（第 2 批，payload.kind:'random_event'）：
  *   从 payload.data.effects（DirectorOverride[]）逐条应用 after 值（采信 log）。
  *   reinforcement 单位已在 commitStateChanges 时由援军注入逻辑处理

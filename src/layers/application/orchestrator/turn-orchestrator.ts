@@ -25,6 +25,8 @@ import type {
   ResolutionSummary,
   WorldState,
   CampaignRules,
+  TacticalDecision,
+  TacticalDecisionTemplate,
 } from '@/types'
 import type {
   StateMachineContext,
@@ -36,6 +38,7 @@ import type { PhysicsEngineClient } from '@/layers/application/services/worker-s
 import type { ResolutionResult } from '@/layers/domain/combat'
 import { applyResolutionToIntel } from '@/layers/domain/combat'
 import type { DirectorRole, ContextCompressor } from '@/layers/agents/roles/director'
+import { SEQUENCE_DIRECTOR_DECISION_OVERRIDE_BASE } from '@/layers/agents/roles/director'
 import { shouldCompressContext } from '@/layers/agents/roles/context-compression'
 import { appendDiagnostic } from '@/layers/persistence/diagnostics'
 import { logger } from '@/utils/logger'
@@ -71,6 +74,15 @@ export interface TurnOrchestratorServices {
      * 压缩事件已包含在 events 中（source:'rule-engine'，回放采信）。
      */
     contextSummary?: { turn: number; text: string }
+    /**
+     * 第 3 批：本回合触发的战术决策（可选）。
+     *
+     * resolver 内部（导演部 adjudicate）按 rules.decisions 模板产出。
+     * 编排器据此在 FINISH_RESOLUTION 后决定路径：
+     * - 有 pendingDecision：OFFER_DECISION 挂起（briefing → decision），等玩家选择；
+     * - 无 pendingDecision：直接 ENTER_PERSIST（briefing → persist）。
+     */
+    pendingDecision?: TacticalDecision
   }>
 }
 
@@ -88,6 +100,40 @@ export interface AdvanceTurnResult {
   context: StateMachineContext
   /** 编排过程中 dispatch 的全部 action（调试/日志用） */
   actions: StateMachineAction[]
+  /**
+   * 第 3 批：是否在 decision 阶段挂起（等玩家选择战术决策）。
+   *
+   * - true：context.game.phase === 'decision'，context.pendingDecision 已填充。
+   *   调用方（store）应展示 DecisionPanel，等玩家 RESOLVE_DECISION 后
+   *   调 resumeTurnAfterDecision 完成本回合（decision → persist → idle → NEXT_TURN）。
+   * - false（默认）：本回合已完整推进到下一 idle（无决策或已跳过）。
+   */
+  pausedAtDecision?: boolean
+  /**
+   * 第 3 批：decision 阶段挂起时的「挂起句柄」。
+   *
+   * 仅当 pausedAtDecision=true 时存在。携带 resumeTurnAfterDecision 所需的运行时状态
+   * （本回合已结算但未落盘的 events + 回合号），不进 reducer/context（保持纯函数边界）。
+   * 调用方（store）应在 RESOLVE_DECISION 后把它原样传给 resumeTurnAfterDecision。
+   */
+  decisionHandle?: DecisionResumeHandle
+}
+
+/**
+ * 第 3 批：decision 阶段挂起后的恢复句柄（advanceTurn 暂停时返回，resume 时消费）。
+ *
+ * 携带本回合已结算但未落盘的运行时状态（events + turn + scenarioSeed），
+ * 供 resumeTurnAfterDecision 在玩家选择后完成 persist → idle → NEXT_TURN。
+ *
+ * 不进 reducer/context（瞬态运行时数据，落盘仅经 events）。
+ */
+export interface DecisionResumeHandle {
+  /** 本回合已结算但未落盘的事件（physics + director + random_events） */
+  events: AgentAction[]
+  /** 本回合号（落盘日志上下文用） */
+  turn: number
+  /** 场景种子（决策后果事件 seed 用） */
+  scenarioSeed: string
 }
 
 /**
@@ -183,7 +229,13 @@ export async function advanceTurn(
 
   // resolution：调用结算服务（M1 空回合，产出空 ResolutionResult + 空 events）
   const resolve = services.resolve ?? defaultEmptyResolution
-  const { resolution, events, world: resolvedWorld, contextSummary } = await resolve(cur, signal)
+  const {
+    resolution,
+    events,
+    world: resolvedWorld,
+    contextSummary,
+    pendingDecision,
+  } = await resolve(cur, signal)
 
   // resolution → briefing
   // - 可选注入 resolver 产出的 world（已含 detection/reconHits 增量，让 UI 实时看到 level 提升）。
@@ -206,9 +258,124 @@ export async function advanceTurn(
     degraded: resolution.degraded,
   })
 
-  // briefing → persist
-  cur = step(cur, { type: 'ENTER_PERSIST' }, signal)
-  actions.push({ type: 'ENTER_PERSIST' })
+  // 第 3 批：战术决策挂起判定。
+  // 导演部产出 pendingDecision 时，本回合在 briefing 后插入 decision 阶段：
+  // OFFER_DECISION 挂起（不进 persist），等玩家在 DecisionPanel 选择 RESOLVE_DECISION，
+  // 再由 resumeTurnAfterDecision 完成本回合（persist → idle → NEXT_TURN）。
+  if (pendingDecision) {
+    cur = step(cur, { type: 'OFFER_DECISION', decision: pendingDecision }, signal)
+    actions.push({ type: 'OFFER_DECISION', decision: pendingDecision })
+    logger.info('orch/turn/decision_pause', `战术决策挂起（turn=${turn0}）`, {
+      scope: 'save',
+      saveId,
+      turn: turn0,
+      decisionId: pendingDecision.id,
+      decisionLabel: pendingDecision.label,
+    })
+    // 返回挂起句柄：携带本回合未落盘 events，供 resumeTurnAfterDecision 消费。
+    const decisionHandle: DecisionResumeHandle = {
+      events,
+      turn: turn0,
+      scenarioSeed: cur.game.world.scenarioSeed,
+    }
+    return { context: cur, actions, pausedAtDecision: true, decisionHandle }
+  }
+
+  // 无决策：briefing → persist → idle → NEXT_TURN（原闭环）
+  const persistResult = await runPersistPhase(cur, services, events, turn0, signal)
+  return { context: persistResult.context, actions: [...actions, ...persistResult.actions] }
+}
+
+/**
+ * 第 3 批：决策挂起后恢复——玩家 RESOLVE_DECISION 后完成本回合。
+ *
+ * 流程（decision → persist → idle → NEXT_TURN）：
+ * 1. ctx 应处于 decision 阶段且 pendingDecision 已由 RESOLVE_DECISION 清空
+ *    （world 已应用所选选项的 overrides）。
+ * 2. 调用方（store）先 dispatch RESOLVE_DECISION（纯函数 reducer，应用 overrides 到 world），
+ *    再把更新后的 ctx + advanceTurn 返回的 decisionHandle 传入本方法。
+ * 3. 本方法把决策后果 overrides 转 source:'director' 事件并入 events（落 event-log，回放采信），
+ *    再走 persist → idle → NEXT_TURN（与无决策路径完全一致）。
+ *
+ * 决策后果留痕：所选选项的 overrides 落 event-log（source:'director'，回放采信，不重算）。
+ * 跳过（optionId=null）时无后果事件，events 仅含原 physics/director/random_events。
+ *
+ * @param ctx 玩家 RESOLVE_DECISION 后的上下文（phase 应为 persist，world 已应用 overrides）
+ * @param services 副作用服务句柄
+ * @param handle advanceTurn 暂停时返回的 DecisionResumeHandle（携带未落盘 events + turn）
+ * @param optionId 玩家选择的选项 id（null=跳过）；用于日志上下文
+ * @param overrides 玩家选择的选项的 overrides（来自 DecisionPanel，与 RESOLVE_DECISION 同源）
+ * @param signal AbortSignal
+ */
+export async function resumeTurnAfterDecision(
+  ctx: StateMachineContext,
+  services: TurnOrchestratorServices,
+  handle: DecisionResumeHandle,
+  optionId: string | null,
+  overrides: import('@/layers/agents/protocol/schema').DirectorOverride[],
+  signal: AbortSignal = new AbortController().signal,
+): Promise<AdvanceTurnResult> {
+  const actions: StateMachineAction[] = []
+  const cur = ctx
+  const saveId = cur.game.world.saveId
+
+  // 决策后果 overrides 转 source:'director' 事件并入 events（落 event-log，回放采信）。
+  // 跳过（optionId=null）时 overrides 为空，无后果事件。
+  const decisionEvents = decisionOverridesToEvents(
+    overrides,
+    handle.scenarioSeed,
+    handle.turn,
+    optionId,
+  )
+  const allEvents: AgentAction[] = [...handle.events, ...decisionEvents]
+
+  logger.info('orch/turn/decision_resume', `战术决策已解决（optionId=${optionId ?? 'skip'}）`, {
+    scope: 'save',
+    saveId,
+    turn: handle.turn,
+    optionId,
+    overridesCount: overrides.length,
+  })
+
+  // 走 persist → idle → NEXT_TURN（与无决策路径一致）
+  const result = await runPersistPhase(cur, services, allEvents, handle.turn, signal)
+  return { context: result.context, actions: [...actions, ...result.actions] }
+}
+
+/**
+ * 持久化阶段闭环（briefing/persist → persist → idle → NEXT_TURN）。
+ *
+ * advanceTurn（无决策）与 resumeTurnAfterDecision（决策后）共用此方法：
+ * 1. ENTER_PERSIST（briefing → persist）。
+ * 2. await writeTurn 落盘（含 events；落盘 turnIndex+1，刷新显示正确回合）。
+ * 3. PERSIST_COMPLETE → NEXT_TURN。
+ *
+ * 落盘失败回路：persist → briefing，抛 TURN_PERSIST_FAILED。
+ *
+ * @param ctx 进入 persist 前的上下文（phase 应为 briefing 或 persist-after-decision）
+ * @param services 副作用服务句柄
+ * @param events 本回合全部事件（含决策后果 overrides 事件，落 event-log）
+ * @param turn0 本回合号（日志上下文）
+ * @param signal AbortSignal
+ */
+async function runPersistPhase(
+  ctx: StateMachineContext,
+  services: TurnOrchestratorServices,
+  events: AgentAction[],
+  turn0: number,
+  signal: AbortSignal,
+): Promise<AdvanceTurnResult> {
+  const actions: StateMachineAction[] = []
+  let cur = ctx
+  const saveId = cur.game.world.saveId
+
+  // briefing → persist（或 decision 后的 persist-after-resolve 已由 reducer 完成 phase 迁移，
+  // 但 resumeTurnAfterDecision 路径下 ctx.phase 可能已是 persist——此处守卫：
+  // 若已是 persist 则跳过 ENTER_PERSIST，避免重复迁移）。
+  if (cur.game.phase === 'briefing') {
+    cur = step(cur, { type: 'ENTER_PERSIST' }, signal)
+    actions.push({ type: 'ENTER_PERSIST' })
+  }
 
   // persist：**await** 落盘（非 fire-and-forget，关键防坑）
   //
@@ -282,6 +449,46 @@ export async function advanceTurn(
 }
 
 /**
+ * 第 3 批：把玩家选择的决策后果 overrides 转 source:'director' AgentAction（落 event-log）。
+ *
+ * 与 director.overridesToDirectorActions 同构，但 sequence 用决策专用槽位 4010+，
+ * 与 director 自身覆写（3000+）和随机事件（4001+）区分，保证同回合互斥 event id。
+ *
+ * 跳过（optionId=null）时返回空数组（无后果事件）。
+ */
+function decisionOverridesToEvents(
+  overrides: readonly import('@/layers/agents/protocol/schema').DirectorOverride[],
+  scenarioSeed: string,
+  turn: number,
+  optionId: string | null,
+): AgentAction[] {
+  if (overrides.length === 0) return []
+  return overrides.map((ov, i) => {
+    const sequence = SEQUENCE_DIRECTOR_DECISION_OVERRIDE_BASE + i
+    return {
+      id: `evt:${turn}:${sequence}:decision-override:${optionId ?? 'skip'}:${i}`,
+      turn,
+      agentId: 'director-decision',
+      agentRole: 'director',
+      kind: 'adjudication',
+      source: 'director' as const,
+      payload: {
+        kind: 'override',
+        field: ov.field,
+        before: ov.before,
+        after: ov.after,
+        reason: ov.reason,
+        // 标记此 override 来自战术决策（区别于导演部终裁覆写）
+        decisionOptionId: optionId,
+      },
+      text: `[战术决策] ${ov.field}: ${JSON.stringify(ov.before)} → ${JSON.stringify(ov.after)}（${ov.reason}）`,
+      sequence,
+      seed: `${scenarioSeed}:${turn}:${sequence}`,
+    }
+  })
+}
+
+/**
  * M1 默认空结算：产出空 ResolutionResult + 空 events。
  *
  * M2+ 由 services.resolve 注入真实物理/Agent 结算。
@@ -294,6 +501,7 @@ async function defaultEmptyResolution(
   events: AgentAction[]
   world?: WorldState
   contextSummary?: { turn: number; text: string }
+  pendingDecision?: TacticalDecision
 }> {
   const resolution: ResolutionSummary = {
     turn: ctx.game.world.turnIndex,
@@ -338,6 +546,11 @@ export function createDefaultResolver(
     compressor: ContextCompressor
     writeFactionFile: (factionId: string, content: string) => Promise<void>
   },
+  /**
+   * 第 3 批：战役战术决策模板（可选，来自 CampaignRules.decisions）。
+   * 注入后，导演部 adjudicate 内按 triggerCondition 判定是否触发本回合决策。
+   */
+  decisionTemplates?: TacticalDecisionTemplate[],
 ): NonNullable<TurnOrchestratorServices['resolve']> {
   return async (ctx, _signal) => {
     const world = ctx.game.world
@@ -362,6 +575,8 @@ export function createDefaultResolver(
       world,
       scenarioSeed: world.scenarioSeed,
       turn,
+      // 第 3 批：决策模板（导演部按 triggerCondition 判定是否触发）
+      decisionTemplates,
     })
 
     const events: AgentAction[] = [...directorResult.directorEvents]
@@ -395,6 +610,8 @@ export function createDefaultResolver(
       events,
       world: worldWithIntel,
       contextSummary,
+      // 第 3 批：战术决策（导演部按模板产出，undefined=无决策）
+      pendingDecision: directorResult.pendingDecision,
     }
   }
 }
@@ -540,6 +757,8 @@ export function createMultiAgentResolver(
       events,
       world: worldWithIntel,
       contextSummary,
+      // 第 3 批：战术决策（编排器按 rules.decisions 模板产出，undefined=无决策）
+      pendingDecision: result.pendingDecision,
     }
   }
 }
