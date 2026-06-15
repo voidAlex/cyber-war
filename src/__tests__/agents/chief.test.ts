@@ -379,3 +379,45 @@ describe('chiefRole.chat — 多轮上下文（history 参数）', () => {
     expect(r.text).not.toContain('接你刚才提到的')
   })
 })
+
+describe('chiefRole.parseCommand — recon 意图（主动侦察）', () => {
+  it('"侦察杜奥蒙堡" → recon + 节点 cell 坐标 (2,2)，自动选蓝方单位', async () => {
+    const r = await chiefRole.parseCommand('侦察杜奥蒙堡', makeCtx())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.intent).toBe('recon')
+    expect(r.targetCoord).toEqual({ col: 2, row: 2 })
+    // 未指明单位时自动选蓝方首个单位（first-armor），绝不伪造
+    expect(r.targetUnitIds).toEqual(['first-armor'])
+  })
+
+  it('"侦察 C3" → recon + 坐标 (2,2)', async () => {
+    const r = await chiefRole.parseCommand('first-armor 侦察 C3', makeCtx())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.intent).toBe('recon')
+    expect(r.targetCoord).toEqual({ col: 2, row: 2 })
+    expect(r.targetUnitIds).toEqual(['first-armor'])
+  })
+
+  it('"侦察敌方步兵" → recon + 目标敌方单位所在 cell', async () => {
+    const r = await chiefRole.parseCommand('first-armor 侦察 enemy-infantry', makeCtx())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.intent).toBe('recon')
+    // enemy-infantry 在 (3,3)
+    expect(r.targetCoord).toEqual({ col: 3, row: 3 })
+    expect(r.targetUnitId).toBe('enemy-infantry')
+  })
+
+  it('classifyInput 把"侦察"识别为 command（非 chat）', () => {
+    expect(classifyInput('侦察杜奥蒙堡')).toBe('command')
+    expect(classifyInput('recon C3')).toBe('command')
+  })
+
+  it('侦察目标无法解析时返回 clarify（不伪造坐标）', async () => {
+    // "侦察" + 无法识别的目标（既非坐标也非节点也非敌方单位）
+    const r = await chiefRole.parseCommand('first-armor 侦察火星', makeCtx())
+    expect(r.kind).toBe('clarify')
+  })
+})

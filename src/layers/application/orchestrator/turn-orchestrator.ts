@@ -33,6 +33,7 @@ import { wegoReducer } from '@/layers/application/state-machine/reducer'
 import type { PersistenceService } from '@/layers/application/services/persistence-service'
 import type { PhysicsEngineClient } from '@/layers/application/services/worker-service'
 import type { ResolutionResult } from '@/layers/domain/combat'
+import { applyResolutionToIntel } from '@/layers/domain/combat'
 import type { DirectorRole, ContextCompressor } from '@/layers/agents/roles/director'
 import { shouldCompressContext } from '@/layers/agents/roles/context-compression'
 import { appendDiagnostic } from '@/layers/persistence/diagnostics'
@@ -55,6 +56,13 @@ export interface TurnOrchestratorServices {
   resolve?: (ctx: StateMachineContext, signal: AbortSignal) => Promise<{
     resolution: ResolutionSummary
     events: AgentAction[]
+    /**
+     * 可选：结算后应用了情报增量（detection/reconHits）的新 world。
+     * resolver 在结算 recon 命中后注入（调 applyResolutionToIntel），
+     * 让 briefing 阶段 UI 立即看到被侦察区域的敌方 level 提升（无需 reload）。
+     * 缺失时 advanceTurn 沿用原 world。
+     */
+    world?: WorldState
     /**
      * M4-D 上下文压缩产物（可选，每 5 回合）。
      * 仅当 shouldCompressContext(turn) 时由 resolver 注入：
@@ -174,12 +182,19 @@ export async function advanceTurn(
 
   // resolution：调用结算服务（M1 空回合，产出空 ResolutionResult + 空 events）
   const resolve = services.resolve ?? defaultEmptyResolution
-  const { resolution, events, contextSummary } = await resolve(cur, signal)
+  const { resolution, events, world: resolvedWorld, contextSummary } = await resolve(cur, signal)
 
-  // resolution → briefing（M4-D：可选注入上下文压缩产物，更新 worldState.contextSummaries）
-  const finishAction: StateMachineAction = contextSummary
-    ? { type: 'FINISH_RESOLUTION', resolution, contextSummary }
-    : { type: 'FINISH_RESOLUTION', resolution }
+  // resolution → briefing
+  // - 可选注入 resolver 产出的 world（已含 detection/reconHits 增量，让 UI 实时看到 level 提升）。
+  // - M4-D：可选注入上下文压缩产物，更新 worldState.contextSummaries。
+  const finishAction: StateMachineAction =
+    resolvedWorld !== undefined && contextSummary !== undefined
+      ? { type: 'FINISH_RESOLUTION', resolution, world: resolvedWorld, contextSummary }
+      : resolvedWorld !== undefined
+        ? { type: 'FINISH_RESOLUTION', resolution, world: resolvedWorld }
+        : contextSummary
+          ? { type: 'FINISH_RESOLUTION', resolution, contextSummary }
+          : { type: 'FINISH_RESOLUTION', resolution }
   cur = step(cur, finishAction, signal)
   actions.push(finishAction)
   logger.info('orch/turn/resolved', `结算完成（events=${events.length}）`, {
@@ -276,6 +291,7 @@ async function defaultEmptyResolution(
 ): Promise<{
   resolution: ResolutionSummary
   events: AgentAction[]
+  world?: WorldState
   contextSummary?: { turn: number; text: string }
 }> {
   const resolution: ResolutionSummary = {
@@ -366,9 +382,17 @@ export function createDefaultResolver(
     }
 
     // 5. 返回战报摘要 + 事件（落盘 event-log，source:'physics'）+ 可选压缩产物
+    //    应用情报增量（recon 命中的 detection/reconHits）到内存 world，
+    //    让 briefing 阶段 UI 实时看到被侦察区域的敌方 level 提升。
+    const worldWithIntel = applyResolutionToIntel(
+      world,
+      directorResult.finalResult.stateChanges,
+      turn,
+    )
     return {
       resolution: directorResult.resolutionSummary,
       events,
+      world: worldWithIntel,
       contextSummary,
     }
   }
@@ -479,9 +503,18 @@ export function createMultiAgentResolver(
       contextSummary = { turn: world.turnIndex, text: summary }
     }
 
+    // 应用情报增量（recon 命中的 detection/reconHits）到内存 world，
+    // 让 briefing 阶段 UI 实时看到被侦察区域的敌方 level 提升。
+    const worldWithIntel = applyResolutionToIntel(
+      world,
+      result.result.stateChanges,
+      world.turnIndex,
+    )
+
     return {
       resolution,
       events,
+      world: worldWithIntel,
       contextSummary,
     }
   }

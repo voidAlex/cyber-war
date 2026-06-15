@@ -46,7 +46,19 @@ export type StateMachineAction =
   | { type: 'CONFIRM_ORDER'; envelopeId: string } // handshake 确认入队
   | { type: 'LOCK_ORDERS' } // handshake → locked
   | { type: 'ENTER_RESOLUTION' } // locked → resolution
-  | { type: 'FINISH_RESOLUTION'; resolution: import('./world-state').ResolutionSummary } // resolution → briefing
+  | {
+      // resolution → briefing
+      type: 'FINISH_RESOLUTION'
+      resolution: import('./world-state').ResolutionSummary
+      /**
+       * 可选：结算后应用了情报增量（detection/reconHits）的新 world。
+       * resolver 在结算 recon 命中后注入，让 briefing 阶段 UI 立即看到
+       * 被侦察区域的敌方 level 提升（无需 reload）。缺失时沿用原 world。
+       */
+      world?: import('./world-state').WorldState
+      // M4-D 上下文压缩（每 5 回合）：可选的压缩产物，更新 worldState.contextSummaries。
+      contextSummary?: { turn: number; text: string }
+    }
   | { type: 'ENTER_PERSIST' } // briefing → persist
   | { type: 'PERSIST_COMPLETE' } // persist → idle（persist-gate 守卫此信号）
   | { type: 'RETRY'; reason: string } // 失败重试回路

@@ -60,6 +60,7 @@ const INTENT_NAMES: Record<string, string> = {
   attack: '攻击',
   capture_node: '占领',
   hold: '固守',
+  recon: '侦察',
 }
 
 /**

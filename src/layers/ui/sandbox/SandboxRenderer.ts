@@ -41,6 +41,7 @@ import {
   extractTargetCoord,
   extractUnitId,
   isMoveLikeOrder,
+  isReconOrder,
 } from './payload'
 import {
   computeIntelRender,
@@ -67,6 +68,9 @@ import {
   PREVIEW_LINE_ALPHA,
   PREVIEW_LINE_COLOR,
   PREVIEW_LINE_WIDTH,
+  RECON_LINE_ALPHA,
+  RECON_LINE_COLOR,
+  RECON_LINE_WIDTH,
   SELECTED_COLOR,
   STRENGTH_BAR_BG,
   STRENGTH_COLOR_HIGH,
@@ -410,7 +414,7 @@ export class SandboxRenderer {
     }
   }
 
-  /** 重绘预演虚线：每条 move/capture 订单从单位当前 coord 到 targetCoord。 */
+  /** 重绘预演虚线：move/capture 用青虚线（终点圆点），recon 用蓝虚线（终点十字）。 */
   private redrawPreview(): void {
     const g = this.previewGraphics
     g.clear()
@@ -422,8 +426,6 @@ export class SandboxRenderer {
     for (const u of units) unitById.set(u.id, u)
 
     for (const order of this.pendingOrders) {
-      // 只画 move/capture 类（payload.kind 或顶层 intent 含 move/capture 关键词）
-      if (!isMoveLikeOrder(order)) continue
       // payload 里找 unitId（宽容命名，由 payload.extractUnitId 处理）
       const unitId = extractUnitId(order.payload)
       if (unitId === null) continue
@@ -434,6 +436,38 @@ export class SandboxRenderer {
 
       const from = cellCenter(unit.coord.col, unit.coord.row)
       const to = cellCenter(target.col, target.row)
+
+      // recon 命令：蓝虚线（短虚线段区分）+ 终点十字标记（表示侦察区域）
+      if (isReconOrder(order)) {
+        drawDashedLine(
+          g,
+          from.x,
+          from.y,
+          to.x,
+          to.y,
+          3,
+          3,
+          RECON_LINE_COLOR,
+          RECON_LINE_WIDTH,
+          RECON_LINE_ALPHA,
+        )
+        // 终点十字（侦察目标标记，区别移动的圆点）
+        const arm = 5
+        g.moveTo(to.x - arm, to.y).lineTo(to.x + arm, to.y).stroke({
+          color: RECON_LINE_COLOR,
+          width: RECON_LINE_WIDTH,
+          alpha: RECON_LINE_ALPHA,
+        })
+        g.moveTo(to.x, to.y - arm).lineTo(to.x, to.y + arm).stroke({
+          color: RECON_LINE_COLOR,
+          width: RECON_LINE_WIDTH,
+          alpha: RECON_LINE_ALPHA,
+        })
+        continue
+      }
+
+      // move/capture 命令：青虚线 + 终点圆点
+      if (!isMoveLikeOrder(order)) continue
       drawDashedLine(
         g,
         from.x,

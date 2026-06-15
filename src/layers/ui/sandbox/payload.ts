@@ -95,3 +95,28 @@ export function isMoveLikeOrder(order: ActionEnvelope): boolean {
     intent.includes('推进')
   )
 }
+
+/**
+ * 判断订单是否为 recon（侦察）类（用于预演蓝虚线过滤）。
+ *
+ * 宽容判断：payload.kind 命中 recon/scout，
+ * 或 intent 文本含 recon/scout/侦察/侦查/探查。
+ * 与 {@link isMoveLikeOrder} 互斥（recon 用蓝虚线，move/capture 用青虚线）。
+ */
+export function isReconOrder(order: ActionEnvelope): boolean {
+  const kind = order.payload.kind
+  if (typeof kind === 'string') {
+    const k = kind.toLowerCase()
+    if (k === 'recon' || k === 'scout' || k === 'spy' || k === 'spot' || k === 'probe') {
+      return true
+    }
+  }
+  const intent = order.intent.toLowerCase()
+  return (
+    intent.includes('recon') ||
+    intent.includes('scout') ||
+    intent.includes('侦察') ||
+    intent.includes('侦查') ||
+    intent.includes('探查')
+  )
+}

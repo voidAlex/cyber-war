@@ -355,3 +355,153 @@ describe('simulateTurn 结果结构', () => {
     })
   })
 })
+
+describe('simulateTurn recon（主动侦察）', () => {
+  it('recon 命中目标 cell 内敌方单位 → 升级 detection + recon event + reconHits', () => {
+    // 侦察执行单位（recon 类型，100% 成功）+ 目标 cell 上的敌方单位（L0 盲区）
+    const world = makeWorld([
+      makeUnit({ id: 'scout', factionId: 'blue', type: 'recon', coord: { col: 0, row: 0 } }),
+      makeUnit({
+        id: 'enemy-inf',
+        factionId: 'red',
+        coord: { col: 1, row: 0 },
+        detection: {}, // blue 对其 L0 盲区
+      }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        faction: 'blue',
+        intent: 'recon',
+        payload: { unitId: 'scout', target: { col: 1, row: 0 } },
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+
+    // 产出 recon 事件
+    const reconEvt = result.events.find((e) => e.kind === 'recon')
+    expect(reconEvt).toBeDefined()
+    expect(reconEvt?.source).toBe('physics')
+    expect(reconEvt?.data.reconUnit).toBe('scout')
+    expect(reconEvt?.data.observer).toBe('blue')
+    expect(reconEvt?.data.discovered).toEqual(['enemy-inf'])
+
+    // detection 增量写入 stateChanges（recon 类型 +2，L0→L2）
+    const upd = result.stateChanges.unitUpdates['enemy-inf']
+    expect(upd?.detection).toBeDefined()
+    expect(upd?.detection?.['blue'].level).toBe(2)
+    expect(upd?.detection?.['blue'].lastSeenTurn).toBe(1)
+    expect(upd?.detection?.['blue'].staleTurns).toBe(0)
+
+    // reconHits 流追加
+    expect(result.stateChanges.intelReconHits).toEqual([
+      { observerFactionId: 'blue', unitId: 'enemy-inf' },
+    ])
+
+    // event.data 含完整 detectionDelta（供回放重建）
+    const delta =
+      (reconEvt?.data.detectionDelta as Record<string, Record<string, { level: number }>>) ?? {}
+    expect(delta['enemy-inf']?.['blue']?.level).toBe(2)
+  })
+
+  it('recon 目标 cell 无敌方单位 → 空发现（不伪造）', () => {
+    const world = makeWorld([
+      makeUnit({ id: 'scout', factionId: 'blue', type: 'recon', coord: { col: 0, row: 0 } }),
+      // 目标 cell (1,0) 无任何单位
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        faction: 'blue',
+        intent: 'recon',
+        payload: { unitId: 'scout', target: { col: 1, row: 0 } },
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+
+    const reconEvt = result.events.find((e) => e.kind === 'recon')
+    expect(reconEvt).toBeDefined()
+    expect(reconEvt?.data.discovered).toEqual([])
+    expect(result.stateChanges.intelReconHits ?? []).toEqual([])
+    // 无 detection 增量（不伪造）
+    expect(Object.keys(result.stateChanges.unitUpdates).some((k) => k !== 'scout')).toBe(false)
+  })
+
+  it('recon 缺 unitId → blockade 失败事件', () => {
+    const world = makeWorld([
+      makeUnit({ id: 'scout', factionId: 'blue', type: 'recon' }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        faction: 'blue',
+        intent: 'recon',
+        payload: { target: { col: 1, row: 0 } }, // 缺 unitId
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+    expect(result.events.some((e) => e.kind === 'blockade')).toBe(true)
+    expect(result.events.some((e) => e.kind === 'recon')).toBe(false)
+  })
+
+  it('recon 命中同一 cell 多个敌方单位 → 全部刷新', () => {
+    const world = makeWorld([
+      makeUnit({ id: 'scout', factionId: 'blue', type: 'recon', coord: { col: 0, row: 0 } }),
+      makeUnit({ id: 'e1', factionId: 'red', coord: { col: 1, row: 0 }, detection: {} }),
+      makeUnit({ id: 'e2', factionId: 'red', coord: { col: 1, row: 0 }, detection: {} }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        faction: 'blue',
+        intent: 'recon',
+        payload: { unitId: 'scout', target: { col: 1, row: 0 } },
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+    const reconEvt = result.events.find((e) => e.kind === 'recon')
+    expect(reconEvt?.data.discovered).toHaveLength(2)
+    expect(result.stateChanges.intelReconHits ?? []).toHaveLength(2)
+  })
+
+  it('recon 确定性：相同输入两次结算 → 相同 detection delta', () => {
+    const world = makeWorld([
+      makeUnit({ id: 'scout', factionId: 'blue', type: 'recon', coord: { col: 0, row: 0 } }),
+      makeUnit({ id: 'e1', factionId: 'red', coord: { col: 1, row: 0 }, detection: {} }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        faction: 'blue',
+        intent: 'recon',
+        payload: { unitId: 'scout', target: { col: 1, row: 0 } },
+      }),
+    ]
+    const r1 = simulateTurn(world, orders, 's', 1)
+    const r2 = simulateTurn(world, orders, 's', 1)
+    expect(r1.stateChanges.unitUpdates['e1']?.detection).toEqual(
+      r2.stateChanges.unitUpdates['e1']?.detection,
+    )
+    expect(r1.stateChanges.intelReconHits).toEqual(r2.stateChanges.intelReconHits)
+  })
+
+  it('recon 支持 targetUnitId（定位敌方单位所在 cell）', () => {
+    const world = makeWorld([
+      makeUnit({ id: 'scout', factionId: 'blue', type: 'recon', coord: { col: 0, row: 0 } }),
+      makeUnit({ id: 'target', factionId: 'red', coord: { col: 1, row: 1 }, detection: {} }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        faction: 'blue',
+        intent: 'recon',
+        payload: { unitId: 'scout', targetUnitId: 'target' },
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+    const reconEvt = result.events.find((e) => e.kind === 'recon')
+    expect(reconEvt?.data.discovered).toEqual(['target'])
+    expect(reconEvt?.data.targetCell).toEqual({ col: 1, row: 1 })
+    expect(reconEvt?.data.targetUnitId).toBe('target')
+  })
+})

@@ -137,6 +137,10 @@ const INTENT_KEYWORDS: ReadonlyArray<{ intent: CommandIntent; words: readonly st
     words: ['攻击', '进攻', '打击', '突击', '交火', '歼击', 'attack', 'assault', 'engage', 'strike'],
   },
   {
+    intent: 'recon',
+    words: ['侦察', '侦查', '探查', '探测', '刺探', '窥探', 'recon', 'reconnaissance', 'scout', 'spy', 'spot', 'probe'],
+  },
+  {
     intent: 'move',
     words: ['移动', '机动', '前进', '推进', '行军', '开进', '转移到', '前往', 'move', 'march', 'advance', 'go to'],
   },
@@ -607,8 +611,11 @@ function parseCommandMock(
   }
 
   // 2. 识别目标单位（玩家可控）
+  //    recon 意图允许不指明单位：玩家常说「侦察杜奥蒙」而省略侦察单位，
+  //    此时在 case 'recon' 分支内自动选首个 recon 类型单位兜底（绝不伪造，从真实单位选）。
+  //    其他意图（move/attack/capture/hold）必须显式匹配单位，否则 clarify。
   const matchedUnits = matchUnits(trimmed, playerUnits)
-  if (matchedUnits.length === 0) {
+  if (matchedUnits.length === 0 && intent !== 'recon') {
     return clarify(
       input,
       '未匹配到任何己方单位，请指明具体单位',
@@ -675,6 +682,56 @@ function parseCommandMock(
     case 'hold': {
       const summary = matchedUnits.map((u) => u.id).join('、') + ' 就地固守'
       return parsed('hold', matchedUnits.map((u) => u.id), { summary })
+    }
+
+    case 'recon': {
+      // 侦察执行单位：玩家未指明时自动选首个 recon 类型单位（专业侦察），否则取首个单位。
+      // 绝不伪造——候选仅来自真实 playerUnits。
+      let reconUnits = matchedUnits
+      if (reconUnits.length === 0) {
+        const professional = playerUnits.filter((u) => u.type === 'recon')
+        reconUnits = professional.length > 0 ? [professional[0]] : [playerUnits[0]]
+      }
+      // 侦察目标解析顺序：坐标（C3）→ 高价值节点名（杜奥蒙堡→节点 cell）→ 敌方单位（其 cell）
+      // 1) 坐标（字母+数字 或 数字对）
+      const coord = matchCoord(trimmed, ctx.world.map.cols, ctx.world.map.rows)
+      let targetCoord: GridCoord | null = coord
+      let targetUnitId: string | undefined
+      if (targetCoord === null) {
+        // 2) 高价值节点名（如「侦察杜奥蒙」→ 节点 cell 坐标）
+        const node = matchNode(trimmed, ctx.world.map.highValueNodes)
+        if (node !== null) {
+          targetCoord = parseCellId(node.cellId)
+        }
+      }
+      if (targetCoord === null) {
+        // 3) 目标敌方单位（如「侦察敌方步兵」→ 其所在 cell）
+        const enemyUnits = ctx.world.units.filter((u) => u.factionId !== ctx.playerFactionId)
+        const targetEnemy = matchUnits(trimmed, enemyUnits)[0]
+        if (targetEnemy !== undefined) {
+          targetCoord = { ...targetEnemy.coord }
+          targetUnitId = targetEnemy.id
+        }
+      }
+      if (targetCoord === null) {
+        return clarify(
+          input,
+          '未解析到侦察目标，请指明目标坐标（如 C3）、节点名（如 杜奥蒙堡）或敌方单位',
+          [
+            coordFormatHint(ctx.world.map.cols, ctx.world.map.rows),
+            ...(ctx.world.map.highValueNodes.length > 0
+              ? [`可侦察节点：${ctx.world.map.highValueNodes.slice(0, 3).map((n) => n.name).join('、')}`]
+              : []),
+          ],
+        )
+      }
+      const targetDesc = targetUnitId ?? `(${targetCoord.col},${targetCoord.row})`
+      const summary = reconUnits.map((u) => u.id).join('、') + ` 侦察 ${targetDesc}`
+      return parsed('recon', reconUnits.map((u) => u.id), {
+        targetCoord,
+        targetUnitId,
+        summary,
+      })
     }
 
     default: {

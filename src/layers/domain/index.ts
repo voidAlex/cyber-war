@@ -41,6 +41,7 @@ export {
   extractPayloadField,
   extractCoord,
   makeEventId,
+  applyResolutionToIntel,
 } from './combat'
 export type {
   ResolutionEvent,

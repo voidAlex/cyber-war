@@ -21,7 +21,7 @@
 
 /// <reference lib="webworker" />
 
-import type { WorldState, ActionEnvelope } from '@/types'
+import type { WorldState, ActionEnvelope, IntelObservation, IntelLevel } from '@/types'
 import { DeterministicRandom } from '@/layers/domain/deterministic-random'
 import {
   resolveEngagement,
@@ -29,6 +29,7 @@ import {
   extractPayloadField,
   extractCoord,
 } from '@/layers/domain/combat'
+import { refreshOnRecon } from '@/layers/domain/intelligence'
 import {
   applyResupply,
   computeBaselineConsumption,
@@ -115,6 +116,9 @@ installWorkerHandler()
  * - 'attack' / 'attack_node'：{ unitId, targetUnitId }
  * - 'capture_node'：{ unitId, targetUnitId, nodeId }
  * - 'resupply'：{ unitId }
+ * - 'recon' / 'scout'：{ unitId, target: {col,row} | "col,row" | targetUnitId }
+ *   侦察执行单位 unitId 派往 target 坐标或目标敌方单位，命中后调
+ *   refreshOnRecon 升级该方对目标 cell 内敌方单位的情报等级（不伪造：无敌方单位则空发现）。
  * - 其它 intent：记为 action_executed 占位事件（不结算）。
  *
  * @param worldState 只读世界状态
@@ -161,6 +165,9 @@ export function simulateTurn(
       case 'resupply':
         resolveResupplyOrder(worldState, envelope, rng, events, stateChanges, turn)
         break
+      case 'recon':
+        resolveReconOrder(worldState, envelope, rng, events, stateChanges, turn)
+        break
       default:
         events.push({
           id: `evt:${envelope.sequence}:action_executed:0`,
@@ -196,7 +203,7 @@ export function simulateTurn(
 /**
  * 归一化 intent 字符串到内部类别。
  */
-function normalizeIntent(intent: string): 'move' | 'attack' | 'capture' | 'resupply' | 'other' {
+function normalizeIntent(intent: string): 'move' | 'attack' | 'capture' | 'resupply' | 'recon' | 'other' {
   const lower = intent.toLowerCase().trim()
   if (lower === 'move' || lower === 'movement' || lower === 'march' || lower === 'advance') {
     return 'move'
@@ -209,6 +216,10 @@ function normalizeIntent(intent: string): 'move' | 'attack' | 'capture' | 'resup
   }
   if (lower === 'resupply' || lower === 'refuel' || lower === 'rearm' || lower === 'logistics') {
     return 'resupply'
+  }
+  // 主动侦察/间谍：recon/scout/spy/spot 等别名归一为 recon
+  if (lower === 'recon' || lower === 'reconnaissance' || lower === 'scout' || lower === 'spy' || lower === 'spot' || lower === 'probe') {
+    return 'recon'
   }
   return 'other'
 }
@@ -455,6 +466,165 @@ function resolveResupplyOrder(
       fuelAfter: resupplied.fuel,
       ammoBefore: unit.ammo,
       ammoAfter: resupplied.ammo,
+    },
+  })
+}
+
+/**
+ * 结算侦察命令（recon / scout）。
+ *
+ * 设计（重写计划「第 1 批：主动侦察/间谍」）：
+ * - 侦察执行单位 unitId 派往目标 cell（payload.target）或目标敌方单位（payload.targetUnitId）。
+ * - observer = envelope.faction（侦察执行方 factionId）。
+ * - 命中目标 cell 内的**敌方单位**（factionId !== observer），逐个调
+ *   {@link refreshOnRecon} 升级 observer 对该单位的情报等级：
+ *     - recon 类型单位：gainedLevel = 当前 +2（封顶 L3）。
+ *     - 其他类型单位：gainedLevel = 当前 +1（封顶 L3），且有 0.7 成功率
+ *       （非专业侦察单位侦察能力有限，失败则该目标不刷新但仍记 event）。
+ * - 把 detection 增量写入 stateChanges.unitUpdates[enemyId].detection[observer]
+ *   + intelReconHits 追加。
+ * - push 'recon' ResolutionEvent（data: reconUnit/targetCell/discovered[]/levelsGained[]）。
+ * - **不伪造**：目标 cell 无敌方单位 → discovered=[] 空发现（绝不编造）。
+ * - **确定性**：成功率判定用注入的 rng（DeterministicRandom.fromSequence）。
+ *
+ * 失败分支（缺 unitId/单位不存在/无目标）→ push blockade 事件（与 move/attack 一致）。
+ */
+function resolveReconOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  rng: DeterministicRandom,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const observer = envelope.faction
+  const reconUnitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!reconUnitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少侦察单位 unitId', {}))
+    return
+  }
+  const reconUnit = getEffectiveUnit(worldState, stateChanges, reconUnitId)
+  if (!reconUnit) {
+    events.push(makeBlockadeEvent(envelope, turn, `侦察单位 ${reconUnitId} 不存在`, { unitId: reconUnitId }))
+    return
+  }
+  // 侦察单位必须属执行方（防 envelope.faction 与 unitId 不一致）
+  if (reconUnit.factionId !== observer) {
+    events.push(makeBlockadeEvent(envelope, turn, `侦察单位 ${reconUnitId} 不属 ${observer} 阵营`, {
+      unitId: reconUnitId,
+      unitFaction: reconUnit.factionId,
+      observer,
+    }))
+    return
+  }
+
+  // 解析目标：targetCoord（payload.target）优先；否则 targetUnitId 定位其所在 cell
+  const targetCoord = extractCoord(envelope, 'target')
+  const targetUnitId = extractPayloadField<string>(envelope, 'targetUnitId')
+
+  // 确定要侦察的目标 cell（用于「找该 cell 上的敌方单位」）
+  let reconCellCoord: { col: number; row: number } | null = targetCoord ?? null
+  let explicitTargetUnitId: string | null = null
+  if (reconCellCoord === null && targetUnitId) {
+    // 目标单位所在 cell
+    const targetUnit = worldState.units.find((u) => u.id === targetUnitId)
+    if (targetUnit) {
+      reconCellCoord = { ...targetUnit.coord }
+      explicitTargetUnitId = targetUnitId
+    }
+  }
+  if (reconCellCoord === null) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少侦察目标（target 坐标或 targetUnitId）', {
+      unitId: reconUnitId,
+    }))
+    return
+  }
+
+  // 找目标 cell 上的敌方单位（factionId !== observer）
+  const isProfessionalRecon = reconUnit.type === 'recon'
+  const enemiesInCell = worldState.units.filter(
+    (u) =>
+      u.factionId !== observer &&
+      u.coord.col === reconCellCoord!.col &&
+      u.coord.row === reconCellCoord!.row,
+  )
+
+  const discovered: string[] = []
+  const levelsGained: Array<{ unitId: string; beforeLevel: number; afterLevel: number }> = []
+  // detectionDelta：unitId → { observer → 刷新后的完整 IntelObservation }
+  // 落入 event.data 供回放精确重建（含 lastSeenTurn/staleTurns，不靠推断）。
+  const detectionDelta: Record<string, Record<string, IntelObservation>> = {}
+
+  for (const enemy of enemiesInCell) {
+    // 当前观测记录（缺失则视为 L0 盲区，构造初始观测）
+    const curObs: IntelObservation =
+      enemy.detection[observer] ?? {
+        level: 0 as IntelLevel,
+        lastSeenTurn: -1,
+        staleTurns: 0,
+      }
+
+    // 成功率判定（确定性随机）：专业 recon 单位 100% 成功，其他 0.7
+    if (!isProfessionalRecon) {
+      const roll = rng.nextFloat()
+      if (roll > 0.7) {
+        // 侦察未命中该单位：不计入 discovered，但仍可继续尝试同 cell 其他单位
+        continue
+      }
+    }
+
+    // 获得的情报级别：recon 单位 +2，其他 +1，封顶 L3
+    const gain = isProfessionalRecon ? 2 : 1
+    const gainedLevel = Math.min(3, curObs.level + gain) as IntelLevel
+    const refreshed = refreshOnRecon(curObs, turn, gainedLevel)
+
+    // 写入 stateChanges.unitUpdates[enemy.id].detection[observer]
+    const existingUpd = stateChanges.unitUpdates[enemy.id] ?? {}
+    const existingDet =
+      (existingUpd.detection as Record<string, IntelObservation> | undefined) ?? {}
+    stateChanges.unitUpdates[enemy.id] = {
+      ...existingUpd,
+      detection: { ...existingDet, [observer]: refreshed },
+    }
+
+    // 同步到 detectionDelta（落 event.data 供回放重建）
+    if (!detectionDelta[enemy.id]) detectionDelta[enemy.id] = {}
+    detectionDelta[enemy.id][observer] = refreshed
+
+    // 追加 reconHits 流
+    if (!stateChanges.intelReconHits) stateChanges.intelReconHits = []
+    stateChanges.intelReconHits.push({ observerFactionId: observer, unitId: enemy.id })
+
+    discovered.push(enemy.id)
+    levelsGained.push({
+      unitId: enemy.id,
+      beforeLevel: curObs.level,
+      afterLevel: refreshed.level,
+    })
+  }
+
+  // 侦察事件（即便无发现也记，表示该单位本回合执行了侦察动作）
+  events.push({
+    id: `evt:${envelope.sequence}:recon:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'recon',
+    description:
+      discovered.length > 0
+        ? `${reconUnitId} 侦察 (${reconCellCoord.col},${reconCellCoord.row})：发现 ${discovered.length} 个敌方单位`
+        : `${reconUnitId} 侦察 (${reconCellCoord.col},${reconCellCoord.row})：未发现敌方单位`,
+    data: {
+      reconUnit: reconUnitId,
+      observer,
+      targetCell: { col: reconCellCoord.col, row: reconCellCoord.row },
+      targetUnitId: explicitTargetUnitId ?? undefined,
+      discovered,
+      levelsGained,
+      professionalRecon: isProfessionalRecon,
+      // 完整 detection 增量（unitId → observer → IntelObservation），供回放精确重建
+      detectionDelta,
     },
   })
 }

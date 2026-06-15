@@ -20,6 +20,7 @@ import type {
   ActionEnvelope,
   GridCoord,
   MapCell,
+  IntelObservation,
 } from '@/types'
 import type { DeterministicRandom } from './deterministic-random'
 import {
@@ -42,6 +43,7 @@ export type ResolutionEventKind =
   | 'resupply' // 补给
   | 'casualty' // 歼灭
   | 'blockade' // 受阻/失败
+  | 'recon' // 主动侦察命中（升级目标单位对该方的情报等级）
 
 /**
  * 物理层结算事件（event-log 一条目级产物）。
@@ -87,15 +89,33 @@ export interface ResolutionResult {
  * 单位级状态变更（不可变产出，由 Worker 汇总、主线程应用）。
  */
 export interface CombatStateChanges {
-  /** 单位更新：unitId → 变更字段部分 */
+  /** 单位更新：unitId → 变更字段部分（detection 仅 recon 命中时写入局部观测记录） */
   unitUpdates: Record<
     string,
-    Partial<Pick<Unit, 'strength' | 'personnel' | 'fuel' | 'ammo' | 'morale' | 'fatigue' | 'coord' | 'status'>>
+    Partial<
+      Pick<
+        Unit,
+        'strength' | 'personnel' | 'fuel' | 'ammo' | 'morale' | 'fatigue' | 'coord' | 'status'
+      > & {
+        /**
+         * recon 命中产出的情报观测增量：key=observerFactionId（侦察执行方），
+         * value=刷新后的 IntelObservation（已调 refreshOnRecon）。
+         * 仅含本回合被侦察刷新的（observerFactionId, unitId）组合，
+         * 应用时合并到 world.units[unitId].detection[observerFactionId]。
+         */
+        detection?: Record<string, IntelObservation>
+      }
+    >
   >
   /** 本回合被歼灭的 unitId 列表 */
   annihilated: string[]
   /** 高价值节点控制变更 */
   objectiveChanges: Array<{ nodeId: string; toFactionId: string }>
+  /**
+   * 本回合 recon 命中记录（追加到 world.intel.reconHits 流）。
+   * 每条 = 一次（observerFactionId, unitId）侦察刷新，turn 由结算回合填充。
+   */
+  intelReconHits?: Array<{ observerFactionId: string; unitId: string }>
 }
 
 // ============================================================================
@@ -374,3 +394,77 @@ export function extractCoord(envelope: ActionEnvelope, key = 'target'): GridCoor
 
 // 重新导出 physics-rules 判定函数供 worker/测试便捷引用
 export { isAnnihilated as combatIsAnnihilated, isLowSupply as combatIsLowSupply } from './physics-rules'
+
+// ============================================================================
+// 纯函数：把 recon 命中的情报增量应用到 world（内存实时应用 + 回放重建共用）
+// ============================================================================
+
+/**
+ * 把结算结果中的情报增量（detection 局部观测 + reconHits 流）应用到 world。
+ *
+ * 用途（两处共用同一逻辑，保证内存实时态与回放重建态一致）：
+ * - **内存实时应用**：resolver 结算后调用，让 UI 在 briefing 阶段立即看到
+ *   被侦察区域的敌方 level 提升（无需 reload）。
+ * - **回放重建**：replay.restoreFromEventLog 在 commit 阶段同样应用
+ *   （回放从 event-log 重算 detection，保证二次回放一致）。
+ *
+ * 处理：
+ * - stateChanges.unitUpdates[unitId].detection[observerFactionId] 合并到
+ *   world.units[unitId].detection[observerFactionId]（覆盖该观测记录，level 不降）。
+ * - stateChanges.intelReconHits 追加到 world.intel.reconHits（turn 填结算回合）。
+ *
+ * 不可变产出：返回新 world（深拷贝 units/intel），不修改输入。
+ * 仅当 stateChanges 含 detection 增量或 intelReconHits 时才拷贝（无变更直接返回原 world）。
+ *
+ * @param world 当前世界状态（只读）
+ * @param stateChanges 物理结算的增量（含 detection/intelReconHits）
+ * @param turn 结算回合（reconHits 流的 turn 字段）
+ * @returns 应用情报增量后的新 world（无变更时返回原 world）
+ */
+export function applyResolutionToIntel(
+  world: WorldState,
+  stateChanges: CombatStateChanges,
+  turn: number,
+): WorldState {
+  // 收集有 detection 增量的 unitId
+  const detectionUnitIds = Object.entries(stateChanges.unitUpdates)
+    .filter(([, upd]) => upd && typeof upd === 'object' && 'detection' in upd && upd.detection)
+    .map(([id]) => id)
+  const reconHits = stateChanges.intelReconHits ?? []
+
+  // 无情报变更：直接返回原 world（避免无谓深拷贝）
+  if (detectionUnitIds.length === 0 && reconHits.length === 0) {
+    return world
+  }
+
+  // 应用 detection 增量（不可变：仅替换被刷新单位的 detection）
+  const detectionSet = new Set(detectionUnitIds)
+  const newUnits = world.units.map((unit) => {
+    if (!detectionSet.has(unit.id)) return unit
+    const upd = stateChanges.unitUpdates[unit.id]
+    const detDelta = upd?.detection
+    if (!detDelta) return unit
+    // 合并：observerFactionId → 刷新后的 IntelObservation（覆盖该观测）
+    const mergedDetection: Record<string, IntelObservation> = { ...unit.detection }
+    for (const [observerFactionId, observation] of Object.entries(detDelta)) {
+      mergedDetection[observerFactionId] = observation
+    }
+    return { ...unit, detection: mergedDetection }
+  })
+
+  // 追加 reconHits（turn 填结算回合）
+  const newReconHits = reconHits.map((h) => ({
+    turn,
+    observerFactionId: h.observerFactionId,
+    unitId: h.unitId,
+  }))
+
+  return {
+    ...world,
+    units: newUnits,
+    intel: {
+      ...world.intel,
+      reconHits: [...world.intel.reconHits, ...newReconHits],
+    },
+  }
+}

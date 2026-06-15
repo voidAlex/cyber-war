@@ -81,6 +81,19 @@ export const PREVIEW_DASH_LENGTH = 6
 /** 预演虚线间隔（像素）。 */
 export const PREVIEW_GAP_LENGTH = 4
 
+/**
+ * 侦察（recon）预演虚线颜色（蓝）。
+ * 【同源】--accent-blue #3B82F6，与移动预演青光 #06B6D4 区分：
+ * 移动/占领用青虚线，侦察用蓝虚线，玩家一眼区分命令类型。
+ */
+export const RECON_LINE_COLOR = 0x3b82f6
+
+/** 侦察预演虚线透明度（与移动预演一致，醒目）。 */
+export const RECON_LINE_ALPHA = 0.9
+
+/** 侦察预演虚线宽度（与移动预演一致）。 */
+export const RECON_LINE_WIDTH = 2
+
 /** 选中 cell 高亮描边色（青亮）。 */
 export const SELECTED_COLOR = 0x06b6d4
 

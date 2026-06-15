@@ -160,18 +160,22 @@ export function wegoReducer(
 
     case 'FINISH_RESOLUTION': {
       // resolution → briefing（写入结算结果；M1 空回合 events 为空但仍走完）
+      // 可选：resolver 注入应用了情报增量的新 world（recon 命中后让 UI 实时看到 level 提升）
       // M4-D：可选注入上下文压缩产物，更新 worldState.contextSummaries（新 L2 稳定前缀）
       const summary = action.contextSummary
+      // 起点 world：优先用 resolver 注入的 world（已含 detection/reconHits 增量），
+      // 否则沿用 ctx 原 world。
+      const baseWorld = action.world ?? ctx.game.world
       const world =
         summary !== undefined
           ? {
-              ...ctx.game.world,
+              ...baseWorld,
               contextSummaries: {
-                ...ctx.game.world.contextSummaries,
+                ...baseWorld.contextSummaries,
                 [summary.turn]: summary.text,
               },
             }
-          : ctx.game.world
+          : baseWorld
       const next: StateMachineContext = {
         ...ctx,
         game: { ...ctx.game, phase: 'briefing', world },

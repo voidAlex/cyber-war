@@ -92,6 +92,12 @@ export type StateMachineAction =
   | {
       type: 'FINISH_RESOLUTION'
       resolution: ResolutionSummary
+      /**
+       * 可选：结算后应用了情报增量（detection/reconHits）的新 world。
+       * resolver 在结算 recon 命中后注入，让 briefing 阶段 UI 立即看到
+       * 被侦察区域的敌方 level 提升（无需 reload）。缺失时沿用原 world。
+       */
+      world?: WorldState
       // M4-D 上下文压缩（每 5 回合）：可选的压缩产物，更新 worldState.contextSummaries。
       // 仅当 shouldCompressContext(turn) 时由编排器注入；缺失时不改 contextSummaries。
       contextSummary?: { turn: number; text: string }

@@ -27,6 +27,7 @@ import type {
   MapCell,
   DriftWarning,
   RestoreResult,
+  IntelObservation,
 } from '@/types'
 import type { ResolutionEvent, ResolutionEventKind, CombatStateChanges } from '@/layers/domain/combat'
 import { DeterministicRandom } from '@/layers/domain/deterministic-random'
@@ -232,8 +233,9 @@ function recomputeAndVerify(
         Number(evt.data.fatigueGain), seed,
       )
     }
-    // capture / casualty / resupply / blockade：无独立确定性随机扰动或为衍生，
-    // 不单独重算（其数值已由前置 engagement/movement 校验覆盖）。
+    // capture / casualty / resupply / blockade / recon：无独立确定性随机扰动或为衍生，
+    // 不单独重算（其数值已由前置 engagement/movement 校验覆盖；
+    // recon 的情报级别升级采信 log 记录值，成功率随机虽用 rng 但回放不重算 discovered 集合）。
   } catch (err) {
     warnings.push({
       eventId: evt.id,
@@ -364,6 +366,30 @@ function applyResolutionEvent(
       const factionId = String(evt.data.factionId ?? '')
       if (nodeId && factionId) {
         stateChanges.objectiveChanges.push({ nodeId, toFactionId: factionId })
+      }
+      break
+    }
+    case 'recon': {
+      // 主动侦察命中：从 event.data.detectionDelta 重建 detection 增量 + reconHits 流。
+      // detectionDelta 结构：{ [unitId]: { [observerFactionId]: IntelObservation } }。
+      // 采信 log 记录值（记录即真相），不重算（成功率虽用 rng，但回放采信 discovered 集合）。
+      const observer = String(evt.data.observer ?? '')
+      const detectionDelta = evt.data.detectionDelta as
+        | Record<string, Record<string, IntelObservation>>
+        | undefined
+      if (detectionDelta && observer) {
+        for (const [unitId, obsMap] of Object.entries(detectionDelta)) {
+          const obs = obsMap[observer]
+          if (!obs) continue
+          const existing = stateChanges.unitUpdates[unitId] ?? {}
+          const existingDet = (existing.detection as Record<string, IntelObservation>) ?? {}
+          stateChanges.unitUpdates[unitId] = {
+            ...existing,
+            detection: { ...existingDet, [observer]: obs },
+          }
+          if (!stateChanges.intelReconHits) stateChanges.intelReconHits = []
+          stateChanges.intelReconHits.push({ observerFactionId: observer, unitId })
+        }
       }
       break
     }
@@ -499,16 +525,37 @@ function commitStateChanges(world: WorldState, stateChanges: CombatStateChanges)
     if (upd.morale !== undefined) unit.morale = upd.morale
     if (upd.fatigue !== undefined) unit.fatigue = upd.fatigue
     if (upd.status) unit.status = upd.status
+    // detection 增量（recon 命中）：合并 observer → IntelObservation（覆盖该观测记录）
+    if (upd.detection) {
+      const detDelta = upd.detection as Record<string, unknown>
+      for (const [observerFactionId, observation] of Object.entries(detDelta)) {
+        unit.detection[observerFactionId] = observation as IntelObservation
+      }
+    }
   }
   // 2. 歼灭单位移除
   if (stateChanges.annihilated.length > 0) {
     const dead = new Set(stateChanges.annihilated)
     world.units = world.units.filter((u) => !dead.has(u.id))
   }
-  // 3. 重置增量（下一回合从 world 当前态起）
+  // 3. reconHits 流追加到 world.intel.reconHits（turn 由调用方回合上下文隐含——
+  //    回放按回合分组，本回合事件 turn 即 world 当前结算回合）
+  if (stateChanges.intelReconHits && stateChanges.intelReconHits.length > 0) {
+    for (const hit of stateChanges.intelReconHits) {
+      // 从本回合事件取 turn（commitStateChanges 不直接知 turn，用 reconHits 的隐含回合：
+      // 实际 turn 由 applyResolutionEvent 调用时的 evt.turn 决定，此处用 world.turnIndex 近似）
+      world.intel.reconHits.push({
+        turn: world.turnIndex,
+        observerFactionId: hit.observerFactionId,
+        unitId: hit.unitId,
+      })
+    }
+  }
+  // 4. 重置增量（下一回合从 world 当前态起）
   stateChanges.unitUpdates = {}
   stateChanges.annihilated = []
   stateChanges.objectiveChanges = []
+  stateChanges.intelReconHits = []
 }
 
 // =============================================================================

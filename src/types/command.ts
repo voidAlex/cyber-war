@@ -26,8 +26,10 @@ import type { GridCoord } from './unit'
  * - attack：攻击指定敌方单位
  * - capture_node：占领高价值节点
  * - hold：原地固守（不结算移动/交战）
+ * - recon：主动侦察/间谍——对目标坐标或目标单位执行侦察，
+ *   命中后刷新该方对其的情报等级（调 intelligence.refreshOnRecon）。
  */
-export type CommandIntent = 'move' | 'attack' | 'capture_node' | 'hold'
+export type CommandIntent = 'move' | 'attack' | 'capture_node' | 'hold' | 'recon'
 
 /**
  * 参谋长解析成功的结构化命令。
