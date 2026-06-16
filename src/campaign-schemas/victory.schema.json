@@ -16,12 +16,19 @@
           "factionId": { "type": "string", "minLength": 1 },
           "type": {
             "type": "string",
-            "enum": ["objective", "casualty", "turn_limit"]
+            "enum": ["objective", "casualty", "turn_limit", "score", "cumulative"]
           },
           "description": { "type": "string", "minLength": 1 },
           "nodeId": { "type": "string", "minLength": 1 },
           "casualtyThreshold": { "type": "number", "minimum": 0, "maximum": 1 },
-          "targetFactionId": { "type": "string", "minLength": 1 }
+          "targetFactionId": { "type": "string", "minLength": 1 },
+          "scoreThreshold": { "type": "number", "minimum": 0, "description": "第 5 批 score 类型：积分阈值" },
+          "cumulativeTarget": { "type": "number", "minimum": 0, "description": "第 5 批 cumulative 类型：累计目标阈值" },
+          "cumulativeMetric": {
+            "type": "string",
+            "enum": ["casualties_inflicted", "objectives_held_turns", "score"],
+            "description": "第 5 批 cumulative 类型：度量字段（缺省 casualties_inflicted）"
+          }
         },
         "required": ["id", "factionId", "type", "description"],
         "additionalProperties": false

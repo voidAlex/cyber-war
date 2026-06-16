@@ -16,6 +16,9 @@ export const UNIT_TYPE_NAMES: Record<UnitType, string> = {
   recon: '侦察',
   fortress: '要塞',
   support: '后勤',
+  air: '空军',
+  naval: '海军',
+  missile: '导弹',
 }
 
 /** 单位类型单字标识（沙盘军标旁标 + 列表 glyph 圆徽共用）。 */
@@ -26,4 +29,7 @@ export const UNIT_TYPE_GLYPH: Record<UnitType, string> = {
   recon: '侦',
   fortress: '塞',
   support: '勤',
+  air: '空',
+  naval: '海',
+  missile: '导',
 }

@@ -256,7 +256,15 @@ export function useCommandDialogue(): {
     if (cur === null) return
     const world = cur.game.world
     const playerFaction = world.factions.find((f) => f.side === 'player')
-    const allyFaction = world.factions.find((f) => f.side === 'ally')
+    // 第 5 批多阵营支撑：优先用 faction.relations[playerFactionId]==='allied' 找盟友；
+    // 缺失 relations 时回退 side==='ally'（旧存档兼容）。
+    const allyFaction = playerFaction
+      ? world.factions.find(
+          (f) =>
+            f.id !== playerFaction.id &&
+            (f.relations?.[playerFaction.id] === 'allied' || f.side === 'ally'),
+        )
+      : undefined
     if (playerFaction === undefined || allyFaction === undefined) {
       useGameStore.setState({ userError: '未找到玩家或盟友阵营，无法发起外交请求' })
       return

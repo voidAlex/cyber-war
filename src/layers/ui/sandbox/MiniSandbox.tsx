@@ -40,10 +40,37 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
     for (const f of factions) m[f.id] = f.color
     return m
   }, [factions])
-  // 阵营 id → side 查表（实心/半透明/描边区分）
+  // 阵营 id → 相对玩家阵营的关系分类（第 5 批多阵营支撑）。
+  // 优先用 faction.relations[玩家阵营] 定性关系；缺失时回退 faction.side。
+  // 分类：own（玩家阵营）/ enemy（交战/敌对）/ ally（结盟）/ neutral（中立/其他）。
   const factionSide = useMemo(() => {
-    const m: Record<string, string> = {}
-    for (const f of factions) m[f.id] = f.side
+    const playerFactionId = factions.find((f) => f.side === 'player')?.id ?? ''
+    const m: Record<string, 'own' | 'enemy' | 'ally' | 'neutral'> = {}
+    for (const f of factions) {
+      if (f.id === playerFactionId) {
+        m[f.id] = 'own'
+        continue
+      }
+      // 优先用定性关系
+      const rel = f.relations?.[playerFactionId]
+      if (rel === 'at_war' || rel === 'hostile') {
+        m[f.id] = 'enemy'
+      } else if (rel === 'allied') {
+        m[f.id] = 'ally'
+      } else if (rel === 'neutral') {
+        m[f.id] = 'neutral'
+      } else {
+        // 回退 side（旧存档/无 relations 字段）
+        m[f.id] =
+          f.side === 'enemy'
+            ? 'enemy'
+            : f.side === 'ally'
+              ? 'ally'
+              : f.side === 'player'
+                ? 'own'
+                : 'neutral'
+      }
+    }
     return m
   }, [factions])
 

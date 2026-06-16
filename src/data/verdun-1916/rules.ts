@@ -286,4 +286,38 @@ export const verdunRules: CampaignRules = {
       ],
     },
   ],
+  // 第 5 批：自定义 AI 角色定义（rules.aiRoles）。
+  //
+  // 凡尔登为 2 方战役（法/德），无第三方外交方；故 diplomat 角色不在此声明
+  // （缺省时 orchestrator 按既有逻辑兜底，玩家阵营角色由玩家操作不进 aiRoles）。
+  //
+  // - chief：参谋长（德军侧=法金汉，战役策划者与总参谋长）。
+  // - commander：战区司令（德军侧=皇太子第五集团军，东岸主攻实际指挥）。
+  // 人格数值与 commanders.json 对齐（commanders.ts 是数值基底，aiRoles 是角色绑定）。
+  aiRoles: [
+    // === 德军参谋长：法金汉（消耗战略策划者） ===
+    {
+      id: 'ai-falkenhayn-chief',
+      type: 'chief',
+      factionId: 'germany',
+      personality:
+        '德军总参谋长，凡尔登消耗战略的核心策划者。冷静精算，以重炮制造法军无法承受的伤亡交换比，' +
+        '坚信消耗战能拖垮法国意志。methodical 不冒进。',
+      aggression: 0.5,
+      obedience: 0.55,
+    },
+    // === 德军战区司令：皇太子（第五集团军，东岸主攻） ===
+    {
+      id: 'ai-crown-prince-commander',
+      type: 'commander',
+      factionId: 'germany',
+      personality:
+        '德国第五集团军司令，实际指挥东岸主攻。年轻尚武，较法金汉更激进，屡屡请求加大进攻力度。' +
+        '服从消耗战略大框架，但战术层面主张扩大战果。',
+      aggression: 0.7,
+      obedience: 0.75,
+      // 负责德军东岸主攻单位
+      responsibleUnits: ['de-infantry-21', 'de-infantry-7', 'de-infantry-12', 'de-artillery-heavy'],
+    },
+  ],
 }

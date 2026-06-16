@@ -40,6 +40,39 @@ const STATUS_LABELS: Record<string, string> = {
   decoy: '诱饵',
 }
 
+/**
+ * 装备类型中文短名（第 5 批；UnitDetailPanel 装备槽显示）。
+ *
+ * 自由字符串 type 的常见值给出中文名；未知类型原样回显（LLM 生成包可能用任意 type）。
+ */
+const EQUIPMENT_TYPE_NAMES: Record<string, string> = {
+  rifle: '步枪',
+  'machine-gun': '机枪',
+  howitzer: '榴弹炮',
+  'field-gun': '野炮',
+  mortar: '迫击炮',
+  'siege-mortar': '攻城臼炮',
+  'anti-tank': '反坦克',
+  'anti-air': '防空',
+  tank: '坦克炮',
+  bomb: '航空炸弹',
+  'naval-gun': '舰炮',
+  torpedo: '鱼雷',
+  missile: '导弹',
+  'aa-missile': '防空导弹',
+  truck: '运输车',
+  radio: '通讯设备',
+}
+
+/**
+ * 品质分级（0..1 → high/mid/low，决定配色）。
+ */
+function qualityTier(quality: number): 'high' | 'mid' | 'low' {
+  if (quality >= 0.75) return 'high'
+  if (quality >= 0.4) return 'mid'
+  return 'low'
+}
+
 /** 单条数据条配置（label + 当前值 + 最大值 + 颜色策略）。 */
 interface MetricRow {
   /** 字段 key（用于 data-key）。 */
@@ -301,6 +334,37 @@ export default function UnitDetailPanel(): JSX.Element | null {
               </span>
             ))
           )}
+        </div>
+      )}
+
+      {/* 第 5 批：装备槽列表（仅 full/own 且单位有装备时显示） */}
+      {isFull && unit.equipment && unit.equipment.length > 0 && (
+        <div className="unit-detail-panel__equipment">
+          <div className="unit-detail-panel__orders-head">装备</div>
+          <ul className="unit-detail-panel__equipment-list">
+            {unit.equipment.map((slot, i) => (
+              <li
+                key={`${slot.type}-${i}`}
+                className="unit-detail-panel__equipment-item"
+              >
+                <span className="unit-detail-panel__equipment-type">
+                  {EQUIPMENT_TYPE_NAMES[slot.type] ?? slot.type}
+                </span>
+                <span className="unit-detail-panel__equipment-count">
+                  ×{slot.count}
+                </span>
+                <span
+                  className={
+                    'unit-detail-panel__equipment-quality unit-detail-panel__equipment-quality--' +
+                    qualityTier(slot.quality)
+                  }
+                  title={`品质 ${Math.round(slot.quality * 100)}%`}
+                >
+                  {Math.round(slot.quality * 100)}%
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

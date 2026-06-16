@@ -12,6 +12,7 @@
 
 import type {
   FactionSide,
+  FactionRelation,
   CommanderTempo,
   UnitType,
   UnitStatusFlag,
@@ -124,6 +125,14 @@ export interface CampaignFaction {
   supply: CampaignFactionSupply
   /** 对外信任度：key=对方 factionId，value=0..100 */
   trust?: Record<string, number>
+  /**
+   * 对外定性关系（第 5 批多阵营支撑）：key=对方 factionId，
+   * value=FactionRelation（hostile/at_war/allied/neutral）。
+   *
+   * 与 trust 并行——trust 是连续数值，relations 是离散定性（结算/着色/参战判定）。
+   * 缺省 neutral；多阵营战役用此表达 A-B 敌对 / A-C 中立等细粒度关系。
+   */
+  relations?: Record<string, FactionRelation>
   doctrineTags: string[]
   description?: string
 }
@@ -136,6 +145,16 @@ export interface CampaignFaction {
 export interface CampaignUnitCoord {
   col: number
   row: number
+}
+
+/** 战役包装备槽（与 runtime EquipmentSlot 同构，第 5 批） */
+export interface CampaignEquipmentSlot {
+  /** 装备类型标识（如 'rifle'/'howitzer'/'missile'） */
+  type: string
+  /** 数量 */
+  count: number
+  /** 品质 0..1 */
+  quality: number
 }
 
 /** 战役包单位（units.json，初始部署，不含 detection 等 runtime 字段） */
@@ -152,6 +171,8 @@ export interface CampaignUnit {
   morale: number
   fatigue: number
   status?: UnitStatusFlag[]
+  /** 装备槽列表（第 5 批，可选；影响火力加成） */
+  equipment?: CampaignEquipmentSlot[]
 }
 
 // =============================================================================
@@ -475,6 +496,36 @@ export interface TacticalDecision {
   options: TacticalDecisionOption[]
 }
 
+/**
+ * 自定义 AI 角色定义（第 5 批，rules.json.aiRoles[]）。
+ *
+ * 把既有「角色固定为 chief/diplomat/commander/director」松绑为可由战役包声明：
+ * 每个角色绑定到具体 factionId，定义人格数值与负责单位子集。
+ * runtime 时 orchestrator 据此为每个 AI 阵营实例化对应角色；
+ * 玩家阵营的角色仍由玩家直接操作（不进 aiRoles）。
+ */
+export interface AIRoleDef {
+  /** 角色 id（唯一，如 'petain-chief'/'falkenhayn-director'） */
+  id: string
+  /** 角色类型：参谋长/外交官/战区司令/导演部 */
+  type: 'chief' | 'diplomat' | 'commander' | 'director'
+  /** 所属阵营 id（引用 factions.json） */
+  factionId: string
+  /** 自然语言人格描述（喂给对应角色的 system prompt） */
+  personality: string
+  /** 进攻性 0..1（影响决策倾向） */
+  aggression: number
+  /** 服从度 0..1（低时 director 按概率判抗命） */
+  obedience: number
+  /**
+   * 该角色负责的单位 id 列表（可选）。
+   *
+   * commander/diplomat 用：限定其决策范围到指定单位子集（如某集团军群）。
+   * 缺省=该阵营全部单位。
+   */
+  responsibleUnits?: string[]
+}
+
 /** 战役包数值规则（rules.json） */
 export interface CampaignRules {
   intelDecay: CampaignIntelDecay
@@ -492,14 +543,32 @@ export interface CampaignRules {
    * 触发后产出 TacticalDecision → 玩家选择 → 后果 DirectorOverride 应用。
    */
   decisions?: TacticalDecisionTemplate[]
+  /**
+   * 自定义 AI 角色定义列表（第 5 批，可选）。
+   *
+   * orchestrator 据此为每个 AI 阵营实例化角色；玩家阵营角色由玩家操作不进此列表。
+   * 缺省时 orchestrator 按既有固定逻辑（每个 AI 阵营一套 chief/commander）兜底。
+   */
+  aiRoles?: AIRoleDef[]
 }
 
 // =============================================================================
 // victory.json
 // =============================================================================
 
-/** 胜负条件类型（占节点/战损阈值/回合上限） */
-export type CampaignVictoryType = 'objective' | 'casualty' | 'turn_limit'
+/**
+ * 胜负条件类型（占节点/战损阈值/回合上限/积分/累计目标）。
+ *
+ * 第 5 批扩展：
+ * - score：积分制——某阵营累计积分达 scoreThreshold 即胜（积分来自占点/歼敌/外交等）。
+ * - cumulative：累计目标——某阵营累计达成某计数（如累计歼敌 personnel 数）达 cumulativeTarget 即胜。
+ */
+export type CampaignVictoryType =
+  | 'objective'
+  | 'casualty'
+  | 'turn_limit'
+  | 'score' // 积分制（第 5 批）
+  | 'cumulative' // 累计目标（第 5 批，如累计歼敌 5000）
 
 /** 单条胜负条件 */
 export interface CampaignVictoryCondition {
@@ -513,6 +582,24 @@ export interface CampaignVictoryCondition {
   casualtyThreshold?: number
   /** 被战损针对的阵营 id（casualty 类型） */
   targetFactionId?: string
+  /** 积分阈值（score 类型，累计积分达此值即胜） */
+  scoreThreshold?: number
+  /**
+   * 累计目标阈值（cumulative 类型）。
+   *
+   * 配合 cumulativeMetric 语义：达到/超过此值即胜。
+   * 如累计歼敌 personnel 数、累计占领节点回合数等。
+   */
+  cumulativeTarget?: number
+  /**
+   * 累计目标度量字段（cumulative 类型，可选）。
+   *
+   * - 'casualties_inflicted'：该阵营累计造成的敌方 personnel 损失（默认）。
+   * - 'objectives_held_turns'：该阵营累计占领高价值节点的回合数。
+   * - 'score'：该阵营累计积分。
+   * 缺省 'casualties_inflicted'。
+   */
+  cumulativeMetric?: 'casualties_inflicted' | 'objectives_held_turns' | 'score'
 }
 
 /** 战役包胜负条件（victory.json） */

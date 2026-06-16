@@ -28,6 +28,9 @@ export const verdunManifest: CampaignManifest = {
     '10月反攻收复杜奥蒙堡。双方共约71万伤亡，一战西线最长最惨烈之役。',
   // 开局：1916年2月21日（德军发动攻势之日）
   startInGameDate: '1916-02-21',
+  // 第 5 批：每回合对应局内天数（默认 1）。Header 显示「D+{turn}」按 1 天/回合推进；
+  // 凡尔登剧本战役实际跨 10 个月，但 UI 时间推进粒度按 1 天/回合（与 maxTurns=30 缩放解耦）。
+  daysPerTurn: 1,
   // 战役跨10个月，按剧本缩放为 30 回合（每回合≈10天）
   maxTurns: 30,
 }

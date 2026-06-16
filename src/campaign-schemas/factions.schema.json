@@ -35,6 +35,17 @@
         },
         "additionalProperties": false
       },
+      "relations": {
+        "type": "object",
+        "description": "第 5 批：对外定性关系（多阵营支撑）。key=对方 factionId，value=关系类别。",
+        "patternProperties": {
+          "^[A-Za-z0-9_-]+$": {
+            "type": "string",
+            "enum": ["hostile", "at_war", "allied", "neutral"]
+          }
+        },
+        "additionalProperties": false
+      },
       "doctrineTags": {
         "type": "array",
         "items": { "type": "string", "minLength": 1 },

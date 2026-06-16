@@ -124,7 +124,7 @@
                 "factionId": { "type": "string", "minLength": 1 },
                 "type": {
                   "type": "string",
-                  "enum": ["infantry", "armor", "artillery", "recon", "fortress", "support"]
+                  "enum": ["infantry", "armor", "artillery", "recon", "fortress", "support", "air", "naval", "missile"]
                 },
                 "coord": {
                   "type": "object",
@@ -145,6 +145,20 @@
                 "status": {
                   "type": "array",
                   "items": { "type": "string" }
+                },
+                "equipment": {
+                  "type": "array",
+                  "description": "第 5 批：援军单位装备槽（同 units.schema equipment）。",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": { "type": "string", "minLength": 1 },
+                      "count": { "type": "integer", "minimum": 0 },
+                      "quality": { "type": "number", "minimum": 0, "maximum": 1 }
+                    },
+                    "required": ["type", "count", "quality"],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": ["id", "factionId", "type", "coord", "strength", "personnel", "maxPersonnel", "fuel", "ammo", "morale", "fatigue"],
@@ -153,6 +167,31 @@
           }
         },
         "required": ["id", "kind", "weight", "label", "description", "effects"],
+        "additionalProperties": false
+      }
+    },
+    "aiRoles": {
+      "type": "array",
+      "description": "第 5 批：自定义 AI 角色定义列表。orchestrator 据此为每个 AI 阵营实例化角色。",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "type": {
+            "type": "string",
+            "enum": ["chief", "diplomat", "commander", "director"]
+          },
+          "factionId": { "type": "string", "minLength": 1 },
+          "personality": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "aggression": { "type": "number", "minimum": 0, "maximum": 1 },
+          "obedience": { "type": "number", "minimum": 0, "maximum": 1 },
+          "responsibleUnits": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          }
+        },
+        "required": ["id", "type", "factionId", "personality", "aggression", "obedience"],
         "additionalProperties": false
       }
     },

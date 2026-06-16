@@ -46,6 +46,11 @@ export const verdunUnits: CampaignUnit[] = [
     morale: 70,
     fatigue: 25,
     status: [],
+    // 第 5 批装备：沃堡守备——哈奇开斯机枪 + 75mm 野炮
+    equipment: [
+      { type: 'machine-gun', count: 8, quality: 0.7 },
+      { type: 'field-gun', count: 6, quality: 0.75 },
+    ],
   },
   {
     id: 'fr-fortress-souville',
@@ -76,6 +81,11 @@ export const verdunUnits: CampaignUnit[] = [
     morale: 65,
     fatigue: 35,
     status: [],
+    // 第 5 批装备：法军步兵师——勒贝尔步枪 + 马克沁机枪
+    equipment: [
+      { type: 'rifle', count: 6000, quality: 0.6 },
+      { type: 'machine-gun', count: 12, quality: 0.7 },
+    ],
   },
   {
     id: 'fr-infantry-2',
@@ -106,6 +116,8 @@ export const verdunUnits: CampaignUnit[] = [
     morale: 70,
     fatigue: 25,
     status: [],
+    // 第 5 批装备：法军炮兵——法制 75mm 野炮（"75 小姐"，射速快精度高）
+    equipment: [{ type: 'field-gun', count: 36, quality: 0.85 }],
   },
   {
     id: 'fr-recon-1',
@@ -137,6 +149,11 @@ export const verdunUnits: CampaignUnit[] = [
     morale: 75,
     fatigue: 25,
     status: [],
+    // 第 5 批装备：德军主攻步兵——毛瑟 98 步枪 + MG08 马克沁机枪
+    equipment: [
+      { type: 'rifle', count: 9000, quality: 0.7 },
+      { type: 'machine-gun', count: 12, quality: 0.75 },
+    ],
   },
   {
     id: 'de-infantry-7',
@@ -182,6 +199,11 @@ export const verdunUnits: CampaignUnit[] = [
     morale: 78,
     fatigue: 20,
     status: [],
+    // 第 5 批装备：德军重炮——210mm 榴弹炮 + 420mm"大贝尔莎"攻城臼炮（压要塞）
+    equipment: [
+      { type: 'howitzer', count: 12, quality: 0.85 },
+      { type: 'siege-mortar', count: 2, quality: 0.95 },
+    ],
   },
   {
     id: 'de-recon-1',

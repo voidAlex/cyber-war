@@ -29,6 +29,8 @@ export const verdunFactions: CampaignFaction[] = [
     },
     // 法国对外信任度：仅对德国敌对（5），无盟友
     trust: { germany: 5 },
+    // 第 5 批：法-德定性关系——交战状态（凡尔登战役双方正在作战）
+    relations: { germany: 'at_war' },
     doctrineTags: ['防御战', '要塞据守', '消耗持久', '后勤轮换'],
     description:
       '法军依托凡尔登要塞群与默兹河西岸组织纵深防御，贝当以"神圣之路"（Bar-le-Duc 公路）' +
@@ -48,6 +50,8 @@ export const verdunFactions: CampaignFaction[] = [
       fuel: 50,
     },
     trust: { france: 5 },
+    // 第 5 批：德-法定性关系——交战状态
+    relations: { france: 'at_war' },
     doctrineTags: ['消耗战略', '重炮压制', '消耗战', '要塞攻坚'],
     description:
       '德军在法金汉消耗战略下，以空前规模重炮轰击默兹河东岸法军阵地，' +

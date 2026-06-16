@@ -42,6 +42,7 @@ import {
   DecisionPanel,
 } from '@/layers/ui'
 import TitleScreen from '@/layers/ui/title/TitleScreen'
+import CampaignCreatorPage from '@/layers/ui/campaign-creator/CampaignCreatorPage'
 import DialogueStream from '@/layers/ui/terminal/DialogueStream'
 import MiniSandbox from '@/layers/ui/sandbox/MiniSandbox'
 import SandboxOverlay from '@/layers/ui/sandbox/SandboxOverlay'
@@ -71,6 +72,9 @@ export default function App(): JSX.Element {
   const loadConfig = useGameStore((s) => s.loadConfig)
   const refreshSaves = useGameStore((s) => s.refreshSaves)
   const pendingConfig = useGameStore((s) => s.pendingConfig)
+  // 第 5 批：创建战役独立页路由态（第四态 creatorPage）
+  const creatorPageActive = useGameStore((s) => s.creatorPageActive)
+  const setCreatorPageActive = useGameStore((s) => s.setCreatorPageActive)
 
   const phase = context?.game.phase ?? 'idle'
   const turnIndex = context?.game.world.turnIndex ?? null
@@ -131,6 +135,18 @@ export default function App(): JSX.Element {
   }
 
   if (context === null) {
+    // 第 5 批：creatorPage 第四态（标题屏 → LLM 生成战役 → 独立创建页）。
+    // creatorPageActive=true 时渲染 CampaignCreatorPage，退出/确认开局回 false。
+    if (creatorPageActive) {
+      return (
+        <div className="app-shell app-shell--creator">
+          <GlobalBanner />
+          <CampaignCreatorPage
+            onExit={() => setCreatorPageActive(false)}
+          />
+        </div>
+      )
+    }
     return (
       <div className="app-shell app-shell--title">
         <GlobalBanner />
@@ -139,6 +155,10 @@ export default function App(): JSX.Element {
     )
   }
 
+  // 进入游戏后（context !== null）创建页 flag 不影响渲染；退出游戏回标题屏时
+  // creatorPageActive 仍可能为 true，由 TitleScreen 重新进入创建页或用户点返回处理。
+  // GameScreen 内退出 handleExit 已重置 context=null 但不清 creatorPageActive，
+  // 故此处置 false 避免退出后仍停在创建页。
   return <GameScreen context={context} phase={phase} turnIndex={turnIndex} />
 }
 
@@ -195,7 +215,13 @@ function GameScreen({
       turn: context.game.world.turnIndex,
     })
     // Bug3 修复：退出时清空对话记忆（store reset），下次进游戏从空白开始
-    useGameStore.setState({ context: null, saveId: null, selectedUnitId: null })
+    // 第 5 批：同时关闭创建页 flag，确保退出回标题屏（非创建页）
+    useGameStore.setState({
+      context: null,
+      saveId: null,
+      selectedUnitId: null,
+      creatorPageActive: false,
+    })
     useGameStore.getState().clearDialogues()
     setConfirmExit(false)
   }

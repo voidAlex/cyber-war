@@ -27,6 +27,8 @@ export type {
   CommanderProfile,
   CommanderTempo,
   FactionSupply,
+  // 第 5 批：多阵营定性关系
+  FactionRelation,
 } from './faction'
 export type {
   Unit,
@@ -34,6 +36,8 @@ export type {
   UnitStatusFlag,
   GridCoord,
   UnitIntelSnapshot,
+  // 第 5 批：装备槽
+  EquipmentSlot,
 } from './unit'
 export type {
   GameMap,
@@ -103,6 +107,7 @@ export type {
   CampaignFactionSupply,
   CampaignUnit,
   CampaignUnitCoord,
+  CampaignEquipmentSlot,
   CampaignCommander,
   CampaignRules,
   CampaignIntelDecay,
@@ -125,6 +130,8 @@ export type {
   TacticalDecisionTemplate,
   TacticalDecisionOption,
   TacticalDecision,
+  // 第 5 批：自定义 AI 角色
+  AIRoleDef,
 } from './campaign'
 export { CAMPAIGN_ZIP_FILES, CAMPAIGN_SCHEMA_VERSION } from './campaign'
 

@@ -175,6 +175,8 @@ export function buildInitialWorldState(
       supply: { ...f.supply },
       trust: trustNums,
       trustRecords,
+      // 第 5 批：定性关系（多阵营支撑）映射到 runtime Faction.relations
+      relations: f.relations ? { ...f.relations } : undefined,
       doctrineTags: [...f.doctrineTags],
       description: f.description,
     }
@@ -208,6 +210,15 @@ export function buildInitialWorldState(
       detection,
       orders: [],
       status: [...(u.status ?? [])],
+      // 第 5 批：装备槽映射（无装备=undefined，保持旧存档兼容）
+      equipment:
+        u.equipment && u.equipment.length > 0
+          ? u.equipment.map((e) => ({
+              type: e.type,
+              count: e.count,
+              quality: e.quality,
+            }))
+          : undefined,
     }
   })
 

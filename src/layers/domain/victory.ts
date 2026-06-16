@@ -29,19 +29,34 @@ export interface VictoryResult {
 
 /**
  * 单条胜负条件（由战役包 victory.json 提供或 domain 默认）。
+ *
+ * 第 5 批扩展：
+ * - score：积分制——某阵营累计积分达 scoreThreshold 即胜。
+ * - cumulative：累计目标——某阵营累计达成某度量（歼敌人数/占点回合数/积分）达 cumulativeTarget 即胜。
  */
 export interface VictoryCondition {
   /** 满足此条件即获胜的阵营 id */
   factionId: string
   /** 条件类型 */
-  kind: 'objective' | 'casualty' | 'turnLimit'
+  kind: 'objective' | 'casualty' | 'turnLimit' | 'score' | 'cumulative'
   /**
    * 目标参数：
    * - objective：需占领的高价值节点 id 列表
    * - casualty：需达到的敌方累计战损阈值（strength 总损失）
    * - turnLimit：回合上限（到达后此阵营按达成度裁定）
+   * - score：积分阈值（累计积分达此值即胜）
+   * - cumulative：累计目标阈值（配合 cumulativeMetric 语义）
    */
   target: string[] | number
+  /**
+   * cumulative 类型的度量字段（第 5 批）。
+   *
+   * - 'casualties_inflicted'：该阵营累计造成的敌方 personnel 损失（默认）。
+   * - 'objectives_held_turns'：该阵营累计占领高价值节点的回合数。
+   * - 'score'：该阵营累计积分。
+   * 缺省 'casualties_inflicted'（仅 cumulative 类型用）。
+   */
+  cumulativeMetric?: 'casualties_inflicted' | 'objectives_held_turns' | 'score'
 }
 
 /**
@@ -56,6 +71,22 @@ export interface VictoryCheckInput {
   accumulatedCasualties: Record<string, number>
   /** 胜负条件列表（来自 victory.json） */
   conditions: VictoryCondition[]
+  /**
+   * 各阵营累计积分（第 5 批 score 类型用，key=factionId）。
+   * 由调用方按「占节点+100/歼敌+10/回合-5」等规则累计；缺省 0。
+   */
+  scores?: Record<string, number>
+  /**
+   * 各阵营累计造成的敌方 personnel 伤亡（第 5 批 cumulative casualties_inflicted 用，
+   * key=施加方 factionId）。与 accumulatedCasualties（承受方视角）互补。
+   * 缺省时回退用 accumulatedCasualties 反推。
+   */
+  casualtiesInflicted?: Record<string, number>
+  /**
+   * 各阵营累计占领高价值节点的回合数（第 5 批 cumulative objectives_held_turns 用，
+   * key=factionId）。缺省 0。
+   */
+  objectivesHeldTurns?: Record<string, number>
 }
 
 /**
@@ -136,5 +167,58 @@ export function checkVictory(input?: VictoryCheckInput): VictoryResult {
     }
   }
 
+  // 4. score 条件（第 5 批）：某阵营累计积分达阈值即胜。
+  // 积分由调用方累计（占节点+100/歼敌+10/回合-5 等规则），存于 input.scores。
+  for (const cond of conditions) {
+    if (cond.kind !== 'score') continue
+    const threshold = cond.target as number
+    const score = input.scores?.[cond.factionId] ?? 0
+    if (score >= threshold) {
+      return {
+        decided: true,
+        winnerFactionId: cond.factionId,
+        reason: `积分 ${score} 达阈值 ${threshold}`,
+      }
+    }
+  }
+
+  // 5. cumulative 条件（第 5 批）：某阵营累计度量达阈值即胜。
+  // 度量由 cumulativeMetric 决定（casualties_inflicted/objectives_held_turns/score）。
+  for (const cond of conditions) {
+    if (cond.kind !== 'cumulative') continue
+    const threshold = cond.target as number
+    const metric = cond.cumulativeMetric ?? 'casualties_inflicted'
+    let value: number
+    if (metric === 'objectives_held_turns') {
+      value = input.objectivesHeldTurns?.[cond.factionId] ?? 0
+    } else if (metric === 'score') {
+      value = input.scores?.[cond.factionId] ?? 0
+    } else {
+      // casualties_inflicted：优先用显式统计；缺失时回退用敌方累计承受战损总和
+      value = input.casualtiesInflicted?.[cond.factionId] ?? sumEnemyLoss(accumulatedCasualties, cond.factionId)
+    }
+    if (value >= threshold) {
+      return {
+        decided: true,
+        winnerFactionId: cond.factionId,
+        reason: `累计 ${metric} ${value} 达阈值 ${threshold}`,
+      }
+    }
+  }
+
   return { decided: false, winnerFactionId: null, reason: null }
+}
+
+/**
+ * 汇总除指定阵营外所有阵营累计承受的战损（cumulative casualties_inflicted 回退用）。
+ */
+function sumEnemyLoss(
+  accumulatedCasualties: Record<string, number>,
+  factionId: string,
+): number {
+  let sum = 0
+  for (const [fid, loss] of Object.entries(accumulatedCasualties)) {
+    if (fid !== factionId) sum += loss
+  }
+  return sum
 }

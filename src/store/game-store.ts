@@ -243,6 +243,16 @@ export interface GameStoreState {
    */
   selectedUnitId: string | null
 
+  // —— 第 5 批：创建战役独立页路由态 ——
+  // App.tsx 第四态 creatorPage（configLock → titleScreen → creatorPage → inGame）。
+  // 标题屏点「LLM 生成战役」→ setCreatorPageActive(true)；创建页退出/确认开局 → false。
+  // 瞬态 UI 路由态，不进 reducer/context（不持久化）。
+  /**
+   * 是否显示创建战役独立页（App.tsx 第四态 creatorPage）。
+   * true 时 App 渲染 CampaignCreatorPage；false 时回 titleScreen 态。
+   */
+  creatorPageActive: boolean
+
   // —— 第 3 批：沙盘 cell 悬浮 tooltip ——
   // 鼠标在沙盘上移动时，SandboxRenderer.handleStagePointer(move) 通过 onCellHover
   // 把当前 cellId 写入此处（null=鼠标移出网格）；CellTooltip 订阅此字段渲染悬浮信息。
@@ -384,6 +394,10 @@ export interface GameStoreState {
   /** 清除选中单位（关闭 UnitDetailPanel）。 */
   clearSelectedUnit: () => void
 
+  // —— 第 5 批：创建战役独立页路由态 ——
+  /** 切换创建战役独立页激活态（App.tsx 第四态 creatorPage）。 */
+  setCreatorPageActive: (active: boolean) => void
+
   // —— 第 4 批：自动保存 UI 反馈（瞬态，不进 reducer/context）——
   // advance/resolveDecision persist 落盘成功后置位，Header 角标闪现"✓ 已保存"。
   // 3 秒后自动清除（由 markSaved 内 setTimeout 触发 clearSavedIndicator）。
@@ -437,6 +451,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   degraded: false,
 
   selectedUnitId: null,
+
+  // 第 5 批：创建战役独立页默认关闭（标题屏态）
+  creatorPageActive: false,
 
   // 第 3 批：沙盘悬浮 cellId 初始无（鼠标未进入网格）
   hoveredCellId: null,
@@ -827,6 +844,11 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   clearSelectedUnit() {
     set({ selectedUnitId: null })
+  },
+
+  // 第 5 批：创建战役独立页路由态切换
+  setCreatorPageActive(active) {
+    set({ creatorPageActive: active })
   },
 
   // 第 4 批：自动保存 UI 反馈。advance/resolveDecision 落盘成功后调 markSaved，

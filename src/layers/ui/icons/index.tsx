@@ -34,6 +34,7 @@ import {
   CheckCircle2,
   XCircle,
   FolderOpen,
+  Sparkles,
   type LucideProps,
 } from 'lucide-react'
 import { type JSX } from 'react'
@@ -61,6 +62,7 @@ export {
   CheckCircle2,
   XCircle,
   FolderOpen,
+  Sparkles,
 }
 
 /**

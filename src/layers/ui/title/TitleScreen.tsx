@@ -28,7 +28,7 @@
 import { useState, type JSX } from 'react'
 import { useGameStore } from '@/store/game-store'
 import { CampaignPanel, SaveListPanel, LLMConfigPanel } from '@/layers/ui'
-import { Play, FolderOpen, Settings } from '@/layers/ui/icons'
+import { Play, FolderOpen, Settings, Sparkles } from '@/layers/ui/icons'
 
 /** 当前展开的面板（null = 仅显示主菜单，无展开区） */
 type ActivePanel = 'campaign' | 'saves' | 'settings' | null
@@ -51,6 +51,8 @@ export default function TitleScreen(): JSX.Element {
   const hasConfig = useGameStore((s) => s.hasConfig)
   const savesCount = useGameStore((s) => s.saves.length)
   const busy = useGameStore((s) => s.busy)
+  // 第 5 批：直达创建战役独立页（App 第四态 creatorPage）
+  const setCreatorPageActive = useGameStore((s) => s.setCreatorPageActive)
 
   // LLM 状态文案：已配置显示 model，未配置显示「未配置（mock 模式）」
   const llmStatusText = config ? config.model : '未配置（mock 模式）'
@@ -79,6 +81,18 @@ export default function TitleScreen(): JSX.Element {
 
         {/* —— 主菜单按钮 —— */}
         <nav className="title-screen__menu" aria-label="主菜单">
+          {/* 第 5 批：LLM 生成战役 —— 直达创建战役独立页（App 第四态 creatorPage） */}
+          <button
+            type="button"
+            className="title-screen__menu-btn title-screen__menu-btn--primary"
+            onClick={() => setCreatorPageActive(true)}
+            disabled={busy}
+          >
+            <Sparkles className="title-screen__menu-icon" />
+            <span className="title-screen__menu-label">LLM 生成战役</span>
+            <span className="title-screen__menu-sub">自然语言需求 → 七文件 → 开局</span>
+          </button>
+
           <button
             type="button"
             className={
@@ -90,8 +104,8 @@ export default function TitleScreen(): JSX.Element {
             aria-expanded={activePanel === 'campaign'}
           >
             <Play className="title-screen__menu-icon" />
-            <span className="title-screen__menu-label">新战役</span>
-            <span className="title-screen__menu-sub">凡尔登 / 导入 ZIP / LLM 生成</span>
+            <span className="title-screen__menu-label">内置/导入战役</span>
+            <span className="title-screen__menu-sub">凡尔登默认包 / 导入 ZIP</span>
           </button>
 
           <button

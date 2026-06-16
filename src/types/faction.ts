@@ -17,8 +17,26 @@ import type { DiplomacyTrust } from './diplomacy'
  * - enemy：敌方阵营（AI 控制，敌对）
  * - ally：盟友阵营（AI 控制，但与玩家友好）
  * - neutral：中立阵营（AI 控制，不参战）
+ *
+ * 第 5 批：FactionSide 保持 4 值（粗粒度立场，决定控制权），
+ * 细粒度的两两关系（A 对 B 敌对 / 对 C 中立）改由 `faction.relations` 表达，
+ * 多阵营战役包无需塞进 4 值分类。
  */
 export type FactionSide = 'player' | 'enemy' | 'ally' | 'neutral'
+
+/**
+ * 两阵营间关系（第 5 批多阵营支撑）。
+ *
+ * - hostile：敌对（敌意明确，可能随时开战，但当前未正式交战）
+ * - at_war：交战（正在作战，受规则引擎当作敌方结算）
+ * - allied：结盟（友好同盟，互不攻击，可协同）
+ * - neutral：中立（无特殊关系，互不干涉）
+ *
+ * 与 `trust` 数值并行：trust 是 0..100 的连续信任度（用于外交趋势推断），
+ * relations 是离散定性关系（用于结算/着色/参战判定）。
+ * 缺省关系为 'neutral'；player-enemy 阵营默认应为 'at_war'。
+ */
+export type FactionRelation = 'hostile' | 'at_war' | 'allied' | 'neutral'
 
 /**
  * 指挥官人格数值基底（重写计划修订点 C）。
@@ -84,6 +102,15 @@ export interface Faction {
    * 详细记录见 DiplomacyTrust，此处仅存数值用于快速渲染。
    */
   trust: Record<string, number>
+  /**
+   * 对外定性关系（第 5 批多阵营支撑）：key=对方 factionId，
+   * value=FactionRelation（hostile/at_war/allied/neutral）。
+   *
+   * 与 `trust` 并行——`trust` 是连续数值（外交趋势），`relations` 是离散定性
+   * （结算/着色/参战判定）。缺失某 key 时由 domain 兜底为 'neutral'。
+   * 可选字段：旧存档/无多阵营关系的战役可省略。
+   */
+  relations?: Record<string, FactionRelation>
   /**
    * 对外信任度富语义记录（M4-D 外交趋势持久化）：key=对方 factionId。
    *

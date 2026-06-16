@@ -19,6 +19,7 @@ import {
   computeTrustTrend,
   trustRecordFromValue,
 } from '@/layers/domain/diplomacy'
+import { getPlayerFactionId } from '@/layers/ui/sandbox/intel-visibility'
 import type { Faction, DiplomacyTrust } from '@/types'
 import type { TrustTrend } from '@/layers/domain/diplomacy'
 
@@ -60,9 +61,10 @@ function trendName(trend: TrustTrend): string {
 export default function DiplomacyPanel(): JSX.Element {
   const context = useGameStore((s) => s.context)
   const playerFactionId = useMemo(() => {
-    return context
-      ? context.game.world.factions.find((f) => f.side === 'player')?.id ?? ''
-      : ''
+    // 第 5 批：复用 intel-visibility 的 getPlayerFactionId helper（动态取玩家阵营，
+    // 避免散落的 side==='player' 写死；helper 内部仍是 find(side==='player')，
+    // 但集中一处便于未来改用 manifest.playerFactionId 注入）。
+    return context ? getPlayerFactionId(context.game.world.factions) : ''
   }, [context])
 
   if (context === null) {

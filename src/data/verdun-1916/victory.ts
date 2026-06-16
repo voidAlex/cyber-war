@@ -68,5 +68,33 @@ export const verdunVictory: CampaignVictory = {
       targetFactionId: 'germany',
       casualtyThreshold: 0.45,
     },
+    // === 第 5 批：积分制胜利（占节点+100/歼敌+10/回合-5，试算阈值 800） ===
+    {
+      id: 'france-score-victory',
+      factionId: 'france',
+      type: 'score',
+      description:
+        '法军累计积分达 800（占节点 +100/歼敌 +10/回合 -5），标志战役主导权确立',
+      scoreThreshold: 800,
+    },
+    // === 第 5 批：累计歼敌目标（法军累计造成德军 6000 人伤亡即胜） ===
+    {
+      id: 'france-cumulative-casualties',
+      factionId: 'france',
+      type: 'cumulative',
+      description:
+        '法军累计造成德军 6000 人伤亡（消耗战略反制：让德国人流尽鲜血）',
+      cumulativeTarget: 6000,
+      cumulativeMetric: 'casualties_inflicted',
+    },
+    // === 第 5 批：德军积分制胜利（同等积分体系，阈值 1000 体现进攻方需更大战果） ===
+    {
+      id: 'germany-score-victory',
+      factionId: 'germany',
+      type: 'score',
+      description:
+        '德军累计积分达 1000（占节点 +100/歼敌 +10/回合 -5），标志消耗战略达成',
+      scoreThreshold: 1000,
+    },
   ],
 }

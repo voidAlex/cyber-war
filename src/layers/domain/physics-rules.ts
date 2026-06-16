@@ -23,7 +23,7 @@
  * @module layers/domain/physics-rules
  */
 
-import type { Unit, MapCell, UnitType } from '@/types'
+import type { Unit, MapCell, UnitType, EquipmentSlot } from '@/types'
 import type { DeterministicRandom } from './deterministic-random'
 
 // ============================================================================
@@ -44,6 +44,10 @@ export const FIREPOWER_MULT_BY_TYPE: Record<UnitType, number> = {
   recon: 0.6,
   fortress: 1.2,
   support: 0.3,
+  // 第 5 批陆海空导弹四域基础参数（精确调参后续 M5+）：
+  air: 1.6, // 空军火力强（跨格打击，不受地形），但弹药/燃料消耗大
+  naval: 1.5, // 海军舰炮火力强，仅水域可发挥
+  missile: 2.5, // 导弹超远程一回合打击，单发火力极高（但弹药消耗巨大）
 }
 
 /** 单位类型对防御的乘数（要塞/装甲更抗打） */
@@ -54,10 +58,51 @@ export const DEFENSE_MULT_BY_TYPE: Record<UnitType, number> = {
   recon: 0.6,
   fortress: 2.0,
   support: 0.8,
+  // 第 5 批陆海空导弹四域基础参数：
+  air: 0.4, // 空军防御弱（易被防空/拦截，靠机动规避而非装甲）
+  naval: 1.1, // 海军装甲中等（舰体抗打但不如陆地要塞）
+  missile: 0.3, // 导弹部队防御极弱（发射车无防护，靠射程免受反击）
 }
 
 /** 要塞类型单位额外防御加成（杜奥蒙堡等堡垒） */
 export const FORTRESS_UNIT_DEFENSE_BONUS = 1.0
+
+// ============================================================================
+// 第 5 批：装备配置 + 陆海空导弹特殊结算常量
+// ============================================================================
+
+/**
+ * 装备火力加成基准（第 5 批）。
+ *
+ * computeEquipmentFirepowerBonus 把装备折算为火力加成倍率（叠加在类型乘数之后）：
+ *   bonus = 1 + (Σ count_i * quality_i) / EQUIPMENT_FIREPOWER_DIVISOR * EQUIPMENT_FIREPOWER_GAIN
+ * 即装备越多、品质越高，加成越大，但受 DIVISOR 抑制避免无限放大。
+ */
+export const EQUIPMENT_FIREPOWER_DIVISOR = 5000
+
+/** 装备火力加成增益系数（满基准装备约 +0.5 火力倍率） */
+export const EQUIPMENT_FIREPOWER_GAIN = 0.5
+
+/**
+ * 空军攻击是否忽略目标格地形防御加成（跨格打击，不受 movementCost/defenseBonus 影响）。
+ *
+ * resolveDamage 中 attacker.type==='air' 时跳过 defenderCell.defenseBonus 折算。
+ */
+export const AIR_IGNORES_TERRAIN_DEFENSE = true
+
+/**
+ * 海军是否仅能在水域发挥完整火力（非水域 firepower 折半）。
+ *
+ * 由调用方据 cell.terrain 判定后传入 navalPenalty；此处仅暴露阈值语义。
+ */
+export const NAVAL_OFFWATER_FIREPOWER_MULT = 0.5
+
+/**
+ * 导弹单次攻击弹药消耗（超远程一回合打击的代价）。
+ *
+ * 交战时 attacker.type==='missile' 额外扣此弹药（替代 AMMO_PER_ENGAGEMENT）。
+ */
+export const MISSILE_AMMO_PER_ENGAGEMENT = 40
 
 /** 士气低于此阈值降低火力 */
 export const LOW_MORALE_THRESHOLD = 30
@@ -300,9 +345,34 @@ export interface DamageResult {
 }
 
 /**
+ * 装备折算火力加成倍率（第 5 批）。
+ *
+ * 无装备返回 1（保持旧存档兼容）。有装备时按 Σ(count * quality) 累积，
+ * 受 EQUIPMENT_FIREPOWER_DIVISOR 抑制 + EQUIPMENT_FIREPOWER_GAIN 增益。
+ *
+ * @param equipment 装备槽列表（缺省/null 视为无装备）
+ * @returns 火力倍率（>=1）
+ */
+export function computeEquipmentFirepowerBonus(
+  equipment?: ReadonlyArray<EquipmentSlot> | null,
+): number {
+  if (!equipment || equipment.length === 0) return 1
+  let weighted = 0
+  for (const slot of equipment) {
+    const count = Math.max(0, slot.count)
+    const quality = Math.min(1, Math.max(0, slot.quality))
+    weighted += count * quality
+  }
+  const bonus = 1 + (weighted / EQUIPMENT_FIREPOWER_DIVISOR) * EQUIPMENT_FIREPOWER_GAIN
+  return bonus
+}
+
+/**
  * 计算单个单位的「有效火力」。
  *
- * = strength * (ammo/100) * 类型乘数 * 火力系数 * 士气调制
+ * = strength * (ammo/100) * 类型乘数 * 装备加成 * 火力系数 * 士气调制
+ *
+ * 第 5 批：装备槽（unit.equipment）通过 computeEquipmentFirepowerBonus 叠加加成。
  *
  * @param unit 单位
  */
@@ -310,6 +380,8 @@ export function computeEffectiveFirepower(unit: Unit): number {
   let fp = unit.strength
   fp *= unit.ammo / 100 // 弹药不足削弱火力
   fp *= FIREPOWER_MULT_BY_TYPE[unit.type] ?? 1
+  // 第 5 批：装备加成（无装备为 1，不影响旧存档）
+  fp *= computeEquipmentFirepowerBonus(unit.equipment)
   fp *= FIREPOWER_RATIO
   // 士气低落削弱
   if (unit.morale < LOW_MORALE_THRESHOLD) {
@@ -323,13 +395,24 @@ export function computeEffectiveFirepower(unit: Unit): number {
  *
  * = strength * 类型乘数 * (1 + cell.defenseBonus) * (1 + 要塞单位加成) * 疲劳调制
  *
+ * 第 5 批：attackerType 参数——当攻方为 air（空军跨格打击）时，
+ * 守方地形防御加成（cell.defenseBonus）被忽略（野战工事挡不住空袭）。
+ *
  * @param unit 守方单位
  * @param cell 守方所在单元
+ * @param attackerType 攻方单位类型（可选；air 时忽略地形防御）
  */
-export function computeEffectiveDefense(unit: Unit, cell: MapCell): number {
+export function computeEffectiveDefense(
+  unit: Unit,
+  cell: MapCell,
+  attackerType?: UnitType,
+): number {
   let def = unit.strength
   def *= DEFENSE_MULT_BY_TYPE[unit.type] ?? 1
-  def *= 1 + (cell.defenseBonus ?? 0)
+  // 第 5 批：空军跨格打击忽略守方地形防御加成
+  const ignoreTerrain =
+    AIR_IGNORES_TERRAIN_DEFENSE && attackerType === 'air'
+  def *= 1 + (ignoreTerrain ? 0 : (cell.defenseBonus ?? 0))
   // 要塞类型单位额外加成
   if (unit.type === 'fortress') {
     def *= 1 + FORTRESS_UNIT_DEFENSE_BONUS
@@ -355,7 +438,8 @@ export function resolveDamage(input: DamageInput): DamageResult {
   const { attacker, defender, defenderCell, rng } = input
 
   const attackerFp = computeEffectiveFirepower(attacker)
-  const defenderDef = computeEffectiveDefense(defender, defenderCell)
+  // 第 5 批：空军跨格打击忽略守方地形防御（attacker.type 传入）
+  const defenderDef = computeEffectiveDefense(defender, defenderCell, attacker.type)
 
   // 攻方净伤害（火力 - 防御，负则 0）
   const attackerNet = Math.max(0, attackerFp - defenderDef)

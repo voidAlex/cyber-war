@@ -4821,3 +4821,542 @@ th {
   0% { opacity: 0; transform: translateY(-2px); }
   100% { opacity: 1; transform: translateY(0); }
 }
+
+/* =============================================================================
+   第 5 批：UnitDetailPanel 装备槽（.unit-detail-panel__equipment*）
+   ============================================================================= */
+.unit-detail-panel__equipment {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, rgba(34, 211, 238, 0.18));
+}
+
+.unit-detail-panel__equipment-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.unit-detail-panel__equipment-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 6px;
+  background: rgba(34, 211, 238, 0.06);
+  border-left: 2px solid var(--accent, #22d3ee);
+}
+
+.unit-detail-panel__equipment-type {
+  flex: 1;
+  color: var(--text, #e5e7eb);
+}
+
+.unit-detail-panel__equipment-count {
+  color: var(--text-muted, #9ca3af);
+}
+
+.unit-detail-panel__equipment-quality {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+}
+
+.unit-detail-panel__equipment-quality--high {
+  color: var(--success, #10b981);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.unit-detail-panel__equipment-quality--mid {
+  color: var(--warn, #f59e0b);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.unit-detail-panel__equipment-quality--low {
+  color: var(--danger, #ef4444);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* =============================================================================
+   第 5 批：标题屏「LLM 生成战役」主按钮高亮（.title-screen__menu-btn--primary）
+   ============================================================================= */
+.title-screen__menu-btn--primary {
+  border-color: var(--accent, #22d3ee);
+  background: linear-gradient(
+    135deg,
+    rgba(34, 211, 238, 0.15),
+    rgba(34, 211, 238, 0.04)
+  );
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.25), inset 0 0 8px rgba(34, 211, 238, 0.08);
+}
+
+.title-screen__menu-btn--primary:hover:not(:disabled) {
+  background: linear-gradient(
+    135deg,
+    rgba(34, 211, 238, 0.28),
+    rgba(34, 211, 238, 0.1)
+  );
+  box-shadow: 0 0 24px rgba(34, 211, 238, 0.45), inset 0 0 12px rgba(34, 211, 238, 0.15);
+}
+
+/* =============================================================================
+   第 5 批：创建战役独立页（.creator-page*）— App 第四态 creatorPage
+   ============================================================================= */
+.app-shell--creator {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.creator-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+  color: var(--text, #e5e7eb);
+}
+
+.creator-page__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border, rgba(34, 211, 238, 0.18));
+}
+
+.creator-page__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: var(--accent, #22d3ee);
+  letter-spacing: 1px;
+}
+
+.creator-page__subtitle {
+  margin: 0;
+  flex: 1;
+  min-width: 200px;
+  font-size: 12px;
+  color: var(--text-muted, #9ca3af);
+}
+
+.creator-page__exit {
+  background: transparent;
+  border: 1px solid var(--border, rgba(156, 163, 175, 0.3));
+  color: var(--text-muted, #9ca3af);
+  padding: 5px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.creator-page__exit:hover:not(:disabled) {
+  color: var(--accent, #22d3ee);
+  border-color: var(--accent, #22d3ee);
+}
+
+/* 步骤指示器 */
+.creator-page__steps {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.creator-page__step {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border, rgba(156, 163, 175, 0.2));
+  color: var(--text-muted, #9ca3af);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.creator-page__step:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.creator-page__step--active {
+  border-color: var(--accent, #22d3ee);
+  background: rgba(34, 211, 238, 0.1);
+  color: var(--accent, #22d3ee);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.2);
+}
+
+.creator-page__step--done {
+  border-color: var(--success, #10b981);
+  color: var(--success, #10b981);
+}
+
+.creator-page__step-num {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.creator-page__step-label {
+  font-size: 11px;
+}
+
+/* 步骤内容区 */
+.creator-page__body {
+  flex: 1;
+}
+
+.creator-step {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border, rgba(34, 211, 238, 0.15));
+  padding: 20px;
+}
+
+.creator-step__title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--accent, #22d3ee);
+}
+
+.creator-step__hint {
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: var(--text-muted, #9ca3af);
+  line-height: 1.6;
+}
+
+.creator-step__warn {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--warn, #f59e0b);
+}
+
+.creator-step__textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border, rgba(156, 163, 175, 0.3));
+  color: var(--text, #e5e7eb);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.creator-step__textarea:focus {
+  outline: none;
+  border-color: var(--accent, #22d3ee);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.3);
+}
+
+.creator-step__examples {
+  margin: 12px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.creator-step__examples-label {
+  font-size: 12px;
+  color: var(--text-muted, #9ca3af);
+}
+
+.creator-step__example-chip {
+  background: rgba(34, 211, 238, 0.06);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  color: var(--accent, #22d3ee);
+  padding: 3px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.creator-step__example-chip:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.16);
+}
+
+.creator-step__actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 10px;
+}
+
+.creator-step__primary-btn {
+  background: var(--accent, #22d3ee);
+  color: #001216;
+  border: none;
+  padding: 8px 20px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+.creator-step__primary-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.creator-step__secondary-btn {
+  background: transparent;
+  border: 1px solid var(--border, rgba(156, 163, 175, 0.4));
+  color: var(--text-muted, #9ca3af);
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.creator-step__message {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--accent, #22d3ee);
+  font-family: var(--font-mono);
+}
+
+.creator-step__message--error {
+  color: var(--danger, #ef4444);
+}
+
+/* 生成中：流式进度 */
+.creator-progress {
+  display: flex;
+  gap: 16px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+
+.creator-progress__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted, #9ca3af);
+}
+
+.creator-progress__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted, #9ca3af);
+  opacity: 0.4;
+}
+
+.creator-progress__item--active {
+  color: var(--accent, #22d3ee);
+}
+
+.creator-progress__item--active .creator-progress__dot {
+  background: var(--accent, #22d3ee);
+  opacity: 1;
+  box-shadow: 0 0 8px var(--accent, #22d3ee);
+  animation: creator-pulse 1s ease-in-out infinite;
+}
+
+.creator-progress__item--done {
+  color: var(--success, #10b981);
+}
+
+.creator-progress__item--done .creator-progress__dot {
+  background: var(--success, #10b981);
+  opacity: 1;
+}
+
+.creator-step__stage-detail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 10px 12px;
+  background: rgba(34, 211, 238, 0.05);
+  border-left: 2px solid var(--accent, #22d3ee);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.creator-step__spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(34, 211, 238, 0.3);
+  border-top-color: var(--accent, #22d3ee);
+  border-radius: 50%;
+  animation: creator-spin 0.8s linear infinite;
+}
+
+.creator-step__stage-text {
+  color: var(--accent, #22d3ee);
+}
+
+@keyframes creator-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes creator-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 预览：研究员产出 + 七文件摘要 */
+.creator-preview__block {
+  margin-bottom: 18px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border, rgba(34, 211, 238, 0.12));
+}
+
+.creator-preview__block-title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--accent, #22d3ee);
+}
+
+.creator-preview__research {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.creator-preview__research > div {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 8px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.creator-preview__research dt {
+  color: var(--text-muted, #9ca3af);
+}
+
+.creator-preview__research dd {
+  margin: 0;
+  color: var(--text, #e5e7eb);
+}
+
+.creator-preview__summary {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.creator-preview__summary > strong {
+  font-family: var(--font-display);
+  font-size: 14px;
+  color: var(--accent, #22d3ee);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.creator-preview__badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid var(--warn, #f59e0b);
+  color: var(--warn, #f59e0b);
+  font-size: 10px;
+}
+
+.creator-preview__factions {
+  margin: 6px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.creator-preview__faction {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid;
+  font-size: 11px;
+}
+
+.creator-preview__faction-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.creator-preview__stats {
+  color: var(--text-muted, #9ca3af);
+  font-size: 11px;
+}
+
+.creator-preview__desc {
+  margin: 8px 0 0;
+  color: var(--text, #e5e7eb);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.creator-preview__warnings {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--warn, #f59e0b);
+  font-family: var(--font-mono);
+}
+
+.creator-preview__confirm {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border, rgba(34, 211, 238, 0.18));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.creator-preview__faction-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted, #9ca3af);
+  font-family: var(--font-mono);
+}
+
+.creator-preview__faction-label select {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border, rgba(156, 163, 175, 0.3));
+  color: var(--text, #e5e7eb);
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.creator-preview__actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+@media (max-width: 720px) {
+  .creator-preview__actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .creator-page__step {
+    min-width: 100px;
+  }
+}

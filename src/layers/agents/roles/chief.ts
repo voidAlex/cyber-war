@@ -946,6 +946,10 @@ const UNIT_TYPE_CN: Record<Unit['type'], string> = {
   recon: '侦察',
   fortress: '要塞',
   support: '后勤',
+  // 第 5 批：陆海空导弹四域
+  air: '空军',
+  naval: '海军',
+  missile: '导弹',
 }
 
 /**
