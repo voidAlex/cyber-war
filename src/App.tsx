@@ -166,6 +166,10 @@ function GameScreen({
   const showBriefing = phase === 'briefing'
   const showDecision = phase === 'decision'
 
+  // 第 4 批：自动保存角标（advance/resolveDecision 落盘成功后 3s 内 true）
+  const showSavedIndicator = useGameStore((s) => s.showSavedIndicator)
+  const lastSavedAt = useGameStore((s) => s.lastSavedAt)
+
   // 推算 Header 时间显示（manifest.startInGameDate + turnIndex × daysPerTurn）
   const scenarioId = context.game.world.scenarioId
   const manifest = MANIFESTS_BY_SCENARIO[scenarioId]
@@ -205,6 +209,8 @@ function GameScreen({
         configUnlocked={true}
         hasConfig={useGameStore.getState().config !== null}
         headerDate={headerDate}
+        showSavedIndicator={showSavedIndicator}
+        lastSavedAt={lastSavedAt}
       />
 
       <main className="app-shell__main app-shell__main--dialogue">
@@ -346,8 +352,10 @@ function AppHeader(props: {
   configUnlocked: boolean
   hasConfig: boolean
   headerDate?: string | null
+  showSavedIndicator?: boolean
+  lastSavedAt?: number | null
 }): JSX.Element {
-  const { phase, turnIndex, configUnlocked, hasConfig, headerDate } = props
+  const { phase, turnIndex, configUnlocked, hasConfig, headerDate, showSavedIndicator, lastSavedAt } = props
   const isLockedScreen = !configUnlocked
 
   return (
@@ -390,6 +398,25 @@ function AppHeader(props: {
               <span className="app-shell__status-dot app-shell__status-dot--on" />
               {headerDate ?? `TURN ${turnIndex ?? 0}`}
               <span className="app-shell__status-phase">· {phase.toUpperCase()}</span>
+            </span>
+          )}
+
+          {/* 第 4 批：自动保存角标（advance 落盘成功后 3s 内闪现"✓ 已保存"） */}
+          {!isLockedScreen && showSavedIndicator && (
+            <span
+              className="app-shell__status-item app-shell__saved-indicator"
+              role="status"
+              aria-label={
+                lastSavedAt != null
+                  ? `第 ${lastSavedAt + 1} 天已保存`
+                  : '已保存'
+              }
+            >
+              <span className="app-shell__status-dot app-shell__status-dot--on" />
+              ✓ 已保存
+              {lastSavedAt != null && (
+                <span className="app-shell__saved-turn">第 {lastSavedAt + 1} 天</span>
+              )}
             </span>
           )}
 

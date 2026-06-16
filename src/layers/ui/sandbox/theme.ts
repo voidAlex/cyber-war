@@ -143,6 +143,47 @@ export const STRENGTH_BAR_BG = 0x0a0e1a
 export const STRENGTH_COLOR_HIGH = 0x10b981
 export const STRENGTH_COLOR_LOW = 0xef4444
 
+// ===== 补给线可视化配色（第 4 批）=====
+// 三个阵营级常量 + 切断标记色。supplyNetwork.lines 按 factionId 区分阵营染色。
+// 与阵营色（数据驱动）解耦：法军线恒青（与赛博底同源 accent-cyan），德军线恒灰，
+// 避免与单位军标阵营色撞色（法军单位是蓝 #2563EB，补给线用青 0x06B6D4 区分）。
+
+/**
+ * 法军补给线颜色（青色实线）。
+ * 【同源】--accent-cyan #06B6D4，与赛博底青光一致，呼应"凡尔登神圣之路"。
+ */
+export const SUPPLY_LINE_FRANCE_COLOR = 0x06b6d4
+
+/** 法军补给线透明度（低 alpha，不抢单位/网格视线）。 */
+export const SUPPLY_LINE_FRANCE_ALPHA = 0.4
+
+/**
+ * 德军补给线颜色（灰色实线）。
+ * 与德军单位灰 #6B7280 同色族，但用更暗的灰线避免与军标重叠混淆。
+ */
+export const SUPPLY_LINE_GERMANY_COLOR = 0x6b7280
+
+/** 德军补给线透明度（与法军线一致，统一观感）。 */
+export const SUPPLY_LINE_GERMANY_ALPHA = 0.4
+
+/** 补给线宽度（像素，比网格线略粗以可辨，但不抢预演虚线）。 */
+export const SUPPLY_LINE_WIDTH = 2
+
+/** 补给线切断段颜色（红色虚线，敌方占据该段路径格）。 */
+export const SUPPLY_SEVERED_COLOR = 0xef4444
+
+/** 补给线切断段透明度（略高 alpha，警示突出）。 */
+export const SUPPLY_SEVERED_ALPHA = 0.6
+
+/** 切断标记文字 "✕" 颜色（红，画在被切断段中心）。 */
+export const SUPPLY_SEVERED_MARK_COLOR = 0xef4444
+
+/** 切断虚线段长（像素）。 */
+export const SUPPLY_SEVERED_DASH = 5
+
+/** 切断虚线间隔（像素）。 */
+export const SUPPLY_SEVERED_GAP = 3
+
 /**
  * 阵营色解析：faction.color 为 hex 字符串（如 "#3B82F6"），
  * 转 PIXI 用的 number（0x3b82f6）。非法/缺失返回青灰兜底（与赛博底协调）。

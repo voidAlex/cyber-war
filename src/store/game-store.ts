@@ -46,6 +46,10 @@ import type { LlmErrorBanner } from '@/layers/application/services/llm-service'
 import type { ActionEnvelope, AgentRole, ParseCommandResult } from '@/types'
 import type { LlmCallConfig } from '@/layers/agents/roles'
 import { logger } from '@/utils/logger'
+import {
+  createTurnSnapshot,
+  writeSnapshot,
+} from '@/layers/persistence/snapshot'
 
 /**
  * 物理引擎 Worker 客户端（单例，主线程持有 Worker 句柄）。
@@ -379,6 +383,18 @@ export interface GameStoreState {
   setSelectedUnitId: (unitId: string | null) => void
   /** 清除选中单位（关闭 UnitDetailPanel）。 */
   clearSelectedUnit: () => void
+
+  // —— 第 4 批：自动保存 UI 反馈（瞬态，不进 reducer/context）——
+  // advance/resolveDecision persist 落盘成功后置位，Header 角标闪现"✓ 已保存"。
+  // 3 秒后自动清除（由 markSaved 内 setTimeout 触发 clearSavedIndicator）。
+  /** 最近一次落盘成功的回合索引（用于角标副信息；0 起）。 */
+  lastSavedAt: number | null
+  /** 是否显示"已保存"角标（advance/resolveDecision 落盘成功后 true，3s 后 false）。 */
+  showSavedIndicator: boolean
+  /** 标记本次落盘成功（置 showSavedIndicator=true + lastSavedAt，3s 后自动清除）。 */
+  markSaved: (turnIndex: number) => void
+  /** 清除"已保存"角标（markSaved 的 setTimeout 回调用）。 */
+  clearSavedIndicator: () => void
 }
 
 // 存档过滤谓词（纯函数，从 save-filter 导入；拆分以避免测试 import store 时触发 Worker）
@@ -585,6 +601,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         degraded: result.context.lastResolution?.degraded ?? false,
         pendingDecisionHandle: null,
       })
+      // 第 4 批：advanceTurn persist-gate 已落盘 world-state，触发"已保存"角标。
+      // 不阻塞主流程（markSaved 内 setTimeout 自清除）。
+      const completedWorld = result.context.game.world
+      get().markSaved(completedWorld.turnIndex)
+      // 第 4 批：每 5 回合额外写 snapshot 副本（额外保险，加速崩溃回放）。
+      // 已有 persist 落盘，snapshot 作为冗余锚点；best-effort，失败只 warn。
+      void writePeriodicSnapshot(completedWorld)
     } catch (err) {
       set({ streamingReport: false })
       // 四分类 LLM 错误：映射为横幅（绝不把 ApiKey 误报为网络）
@@ -636,6 +659,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         busy: false,
         pendingDecisionHandle: null,
       })
+      // 第 4 批：决策解决后落盘完成，触发"已保存"角标 + 每 5 回合 snapshot。
+      const decidedWorld = result.context.game.world
+      get().markSaved(decidedWorld.turnIndex)
+      void writePeriodicSnapshot(decidedWorld)
     } catch (err) {
       // 落盘失败等：上下文可能已被部分推进，从 error.context 恢复（若存在）
       const banner = errorToBanner(err)
@@ -802,6 +829,23 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set({ selectedUnitId: null })
   },
 
+  // 第 4 批：自动保存 UI 反馈。advance/resolveDecision 落盘成功后调 markSaved，
+  // 置 showSavedIndicator=true（Header 角标"✓ 已保存"闪现），3s 后自动清除。
+  lastSavedAt: null,
+  showSavedIndicator: false,
+  markSaved(turnIndex) {
+    set({ showSavedIndicator: true, lastSavedAt: turnIndex })
+    // 3 秒后自动清除角标（不阻塞主流程，setTimeout 失败只 console.warn）。
+    // 多次连击 advance 会重叠多个 timer，但每次 set 都重置 showSavedIndicator=true，
+    // 最晚的 timer 把它清掉即可，无累积副作用。
+    window.setTimeout(() => {
+      set({ showSavedIndicator: false })
+    }, 3000)
+  },
+  clearSavedIndicator() {
+    set({ showSavedIndicator: false })
+  },
+
   // 第 3 批：沙盘 cell 悬浮 tooltip（SandboxRenderer move 模式回调驱动）
   setHoveredCellId(cellId) {
     // 性能：仅当值变化时 set（pointermove 高频，避免无谓 zustand 通知触发 CellTooltip 重渲染）
@@ -885,5 +929,34 @@ export function buildLlmCallConfig(): LlmCallConfig | null {
     endpoint: cfg.endpoint,
     model: cfg.model,
     apiKey: cfg.apiKey,
+  }
+}
+
+/**
+ * 第 4 批：每 5 回合写一次 snapshot 副本（额外保险，加速崩溃回放锚点）。
+ *
+ * 触发条件：turnIndex % 5 === 0（第 0/5/10... 回合）。已有 advanceTurn persist-gate
+ * 落盘 world-state.json，snapshot 作为冗余副本（snapshot.json），失败只 warn 不阻塞。
+ * best-effort：异常吞掉记日志，绝不影响主推进流程。
+ *
+ * @param world 当前世界状态（已落盘后的）
+ */
+async function writePeriodicSnapshot(world: WorldState): Promise<void> {
+  if (world.turnIndex % 5 !== 0) return
+  try {
+    const snap = createTurnSnapshot(world, 'persist')
+    await writeSnapshot(world.saveId, snap)
+    logger.info('store/snapshot/periodic', `第 ${world.turnIndex} 回合快照已写入`, {
+      scope: 'save',
+      saveId: world.saveId,
+      turn: world.turnIndex,
+    })
+  } catch (err) {
+    // 快照失败不阻断主流程（world-state.json 已是真相源兜底）
+    logger.warn('store/snapshot/periodic_failed', `周期快照写入失败: ${String(err)}`, {
+      scope: 'save',
+      saveId: world.saveId,
+      turn: world.turnIndex,
+    })
   }
 }

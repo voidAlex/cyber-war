@@ -1502,6 +1502,12 @@ a {
   color: var(--success, #10b981);
 }
 
+/* 第 4 批：补给线行的阵营副标签（暗一档，与类型主标签区分） */
+.cell-tooltip__supply-faction {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
 /* 该格单位列表 */
 .cell-tooltip__units {
   display: flex;
@@ -3757,6 +3763,44 @@ th {
   border-color: var(--text-dim);
 }
 
+/* 第 4 批：补给状态行 */
+.unit-detail-panel__supply-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  border-top: 1px solid rgba(6, 182, 212, 0.15);
+}
+
+.unit-detail-panel__supply-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.unit-detail-panel__supply-text--ok {
+  color: var(--accent-cyan);
+}
+
+.unit-detail-panel__supply-text--cut {
+  color: var(--danger);
+}
+
+.unit-detail-panel__supply-blocked {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.unit-detail-panel__supply-flag {
+  margin-left: auto;
+  font-size: 9px;
+  padding: 1px 6px;
+  border: 1px solid var(--danger);
+  border-radius: 3px;
+  color: var(--danger);
+  letter-spacing: 0.06em;
+}
+
 /* 命令队列区 */
 .unit-detail-panel__orders {
   padding-top: var(--space-2);
@@ -4309,6 +4353,18 @@ th {
   box-shadow: 0 0 4px currentColor;
 }
 
+/* 第 4 批：补给线小横条（法=青/德=灰，置于 cell 底部，与单位圆点错位不遮挡） */
+.mini-sandbox__supply {
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  bottom: 1px;
+  height: 2px;
+  border-radius: 1px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 /* 选中单位：青光描边高亮 */
 .mini-sandbox__dot--selected {
   box-shadow: 0 0 0 2px var(--accent-cyan), 0 0 8px var(--accent-cyan);
@@ -4740,4 +4796,28 @@ th {
 .app-shell__status-phase {
   color: var(--text-muted);
   margin-left: 2px;
+}
+
+/* 第 4 批：自动保存角标（advance 落盘成功后闪现，青光 + 轻微脉冲） */
+.app-shell__saved-indicator {
+  border-color: var(--success, #10b981);
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--success, #10b981);
+  font-family: var(--font-mono);
+  animation: saved-pulse 0.5s ease-out;
+}
+
+.app-shell__saved-indicator .app-shell__status-dot {
+  background: var(--success, #10b981);
+}
+
+.app-shell__saved-turn {
+  color: var(--text-muted);
+  margin-left: 2px;
+  font-size: 10px;
+}
+
+@keyframes saved-pulse {
+  0% { opacity: 0; transform: translateY(-2px); }
+  100% { opacity: 1; transform: translateY(0); }
 }

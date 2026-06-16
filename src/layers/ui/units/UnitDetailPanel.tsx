@@ -27,6 +27,7 @@ import {
 } from '@/layers/ui/sandbox/intel-visibility'
 import { cellIdFromCoord } from '@/layers/ui/sandbox/coords'
 import { UNIT_TYPE_NAMES } from '@/layers/ui/units/unit-glyph'
+import { computeSupplyConnectivity } from '@/layers/domain/supply'
 import type { Faction, Unit } from '@/types'
 
 /** 状态 flag 中文标签（chip 显示）。 */
@@ -84,6 +85,8 @@ export default function UnitDetailPanel(): JSX.Element | null {
     faction: Faction
     decision: IntelRenderDecision
     visible: ReadonlyArray<string>
+    supplyConnected: boolean
+    supplyBlockedAt?: string
   } | null => {
     if (context === null || selectedUnitId === null) return null
     const world = context.game.world
@@ -108,11 +111,21 @@ export default function UnitDetailPanel(): JSX.Element | null {
           }
         : computeIntelRender(unit, playerFactionId, currentTurn, halfLifeTurns)
     const visible = visibleFieldsFor(decision)
-    return { unit, faction, decision, visible }
+
+    // 第 4 批：补给连通性（纯函数 computeSupplyConnectivity，单位数少每帧算 OK）。
+    // 仅对该单位所在阵营计算一次取其结果。连通用青色"补给充足"，
+    // 切断用红色"补给被切（blockedAt: {cellId}）"。
+    const connectivity = computeSupplyConnectivity(world.map, world.units, unit.factionId)
+    const conn = connectivity.get(unit.id)
+    // 缺省（无补给网络/单位不在线上）：computeSupplyConnectivity 返回 connected=true 兼容。
+    const supplyConnected = conn?.connected ?? true
+    const supplyBlockedAt = conn?.blockedAt
+
+    return { unit, faction, decision, visible, supplyConnected, supplyBlockedAt }
   }, [context, selectedUnitId])
 
   if (resolved === null) return null
-  const { unit, faction, decision, visible } = resolved
+  const { unit, faction, decision, visible, supplyConnected, supplyBlockedAt } = resolved
 
   // visibleFields 集合（O(1) 查询某字段是否可见）
   const vis = new Set(visible)
@@ -244,6 +257,31 @@ export default function UnitDetailPanel(): JSX.Element | null {
               ? '仅探测到热力信号，无法辨识属性。'
               : '该单位情报不足，无可展示属性。'}
         </p>
+      )}
+
+      {/* 第 4 批：补给状态（仅 full/own；连通=青色"补给充足"，切断=红色"补给被切"） */}
+      {isFull && (
+        <div className="unit-detail-panel__supply-row">
+          <span className="unit-detail-panel__meta-label">补给</span>
+          {supplyConnected ? (
+            <span className="unit-detail-panel__supply-text unit-detail-panel__supply-text--ok">
+              补给充足
+            </span>
+          ) : (
+            <span className="unit-detail-panel__supply-text unit-detail-panel__supply-text--cut">
+              补给被切
+              {supplyBlockedAt !== undefined && (
+                <span className="unit-detail-panel__supply-blocked">
+                  （阻断: {supplyBlockedAt}）
+                </span>
+              )}
+            </span>
+          )}
+          {/* low_supply 状态 flag 同步提示（worker 切断时已加该标记） */}
+          {!supplyConnected && unit.status.includes('low_supply') && (
+            <span className="unit-detail-panel__supply-flag">低补给</span>
+          )}
+        </div>
       )}
 
       {/* 状态 flag chip（仅 full/own） */}

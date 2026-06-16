@@ -91,6 +91,24 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
     )
   }
 
+  // 第 4 批：补给线简化版（缩略图仅画色线段，不画切断标记 ✕）。
+  // 把 supplyNetwork.lines 的每个 cellId 归一为 "col,row"，记录阵营色：
+  // 法军=青 #06B6D4，德军=灰 #6B7280。同 cell 多线时取首条（确定性）。
+  // 渲染时在该 cell 画一条阵营色小横条（与单位圆点错位，不遮挡）。
+  const supplyCellColor: Record<string, string> = {}
+  const network = map?.supplyNetwork
+  if (network) {
+    for (const line of network.lines) {
+      const color = line.factionId === 'france' ? '#06b6d4' : '#6b7280'
+      for (const rawCellId of line.cellIds) {
+        const c = miniParseCellId(rawCellId)
+        if (c === null) continue
+        const key = `${c.col},${c.row}`
+        if (supplyCellColor[key] === undefined) supplyCellColor[key] = color
+      }
+    }
+  }
+
   // 单位按 cell 聚合（同格多单位取首个代表点；缩略图不展开堆叠）
   const cellUnits: Record<string, Unit> = {}
   for (const u of units) {
@@ -132,6 +150,7 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
             const row = Math.floor(i / cols)
             const u = cellUnits[`${col},${row}`]
             const meta = cellMetaByCoord[`${col},${row}`]
+            const supplyColor = supplyCellColor[`${col},${row}`]
             // 简化 tooltip：坐标 + 地形 + 节点名 + 单位 id（原生 title）
             const tipParts = [`${letter(col)}${row + 1}`]
             if (meta) {
@@ -141,13 +160,31 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
             if (u) tipParts.push(u.id)
             const tip = tipParts.join(' · ')
             if (u === undefined) {
-              return <span key={i} className="mini-sandbox__cell" title={tip} />
+              // 第 4 批：补给线上的空 cell 画阵营色小横条（简化版，不画切断标记）
+              return (
+                <span key={i} className="mini-sandbox__cell" title={tip}>
+                  {supplyColor !== undefined && (
+                    <span
+                      className="mini-sandbox__supply"
+                      style={{ background: supplyColor }}
+                      aria-hidden
+                    />
+                  )}
+                </span>
+              )
             }
             const color = factionColor[u.factionId] ?? '#06b6d4'
             const side = factionSide[u.factionId] ?? 'neutral'
             const selected = u.id === selectedUnitId
             return (
               <span key={i} className="mini-sandbox__cell" title={tip}>
+                {supplyColor !== undefined && (
+                  <span
+                    className="mini-sandbox__supply"
+                    style={{ background: supplyColor }}
+                    aria-hidden
+                  />
+                )}
                 <span
                   className={
                     'mini-sandbox__dot' +

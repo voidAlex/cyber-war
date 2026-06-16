@@ -39,6 +39,19 @@ const TERRAIN_NAMES: Record<string, string> = {
   marsh: '沼泽',
 }
 
+/** 第 4 批：补给线类型中文名（SupplyLineType 中文展示）。 */
+const SUPPLY_LINE_TYPE_LABELS: Record<string, string> = {
+  road: '公路',
+  rail: '铁路',
+  river: '水运',
+}
+
+/** 第 4 批：阵营 id 中文名（与数据 factionId 对应；未知 id 原样显示）。 */
+const SUPPLY_FACTION_LABELS: Record<string, string> = {
+  france: '法军',
+  germany: '德军',
+}
+
 /**
  * 解析 cellId（如 "C3"）为 {col,row}，失败返回 null。
  *
@@ -54,21 +67,30 @@ function safeParseCellId(cellId: string): { col: number; row: number } | null {
 }
 
 /**
- * 判断 cellId 是否在补给线网络上（沿 map.supplyNetwork.lines 的 cellIds 命中）。
+ * 查找某 cell 命中的补给线（沿 map.supplyNetwork.lines 的 cellIds 匹配）。
  *
  * cellIds 元素格式可能为 cell-{col}-{row} 或 col:row；统一归一为坐标比较。
- * 无 supplyNetwork 时返回 false（无补给网络概念）。
+ * 无 supplyNetwork / 未命中时返回 null。
+ *
+ * 第 4 批：返回完整 SupplyLine（含 factionId + type），供 tooltip 显示
+ * "补给线：{factionId} {type}"。同 cell 多线时取首条（确定性）。
  */
-function isOnSupplyLine(map: GameMap, col: number, row: number): boolean {
+function findSupplyLineAt(
+  map: GameMap,
+  col: number,
+  row: number,
+): { factionId: string; type: string } | null {
   const lines = map.supplyNetwork?.lines
-  if (!lines || lines.length === 0) return false
+  if (!lines || lines.length === 0) return null
   for (const line of lines) {
     for (const rawCellId of line.cellIds) {
       const c = safeParseNormalizedCellId(rawCellId)
-      if (c !== null && c.col === col && c.row === row) return true
+      if (c !== null && c.col === col && c.row === row) {
+        return { factionId: line.factionId, type: line.type }
+      }
     }
   }
-  return false
+  return null
 }
 
 /**
@@ -111,6 +133,8 @@ export default function CellTooltip(): JSX.Element | null {
     nodeName: string | null
     isSupplySource: boolean
     onSupplyLine: boolean
+    supplyLineFaction: string | null
+    supplyLineType: string | null
     units: Array<{ unit: Unit; faction: Faction; typeName: string }>
   } | null => {
     if (context === null || hoveredCellId === null) return null
@@ -145,6 +169,9 @@ export default function CellTooltip(): JSX.Element | null {
       }
     }
 
+    // 第 4 批：补给线命中（带 factionId + type，供 tooltip 显示）
+    const supplyLine = findSupplyLineAt(map, coord.col, coord.row)
+
     return {
       cellId: hoveredCellId,
       col: coord.col,
@@ -154,7 +181,9 @@ export default function CellTooltip(): JSX.Element | null {
       isObjective: cell.isObjective || node !== undefined,
       nodeName: node ? node.name : null,
       isSupplySource: cell.isSupplySource === true,
-      onSupplyLine: isOnSupplyLine(map, coord.col, coord.row),
+      onSupplyLine: supplyLine !== null,
+      supplyLineFaction: supplyLine?.factionId ?? null,
+      supplyLineType: supplyLine?.type ?? null,
       units: unitsOnCell,
     }
   }, [context, hoveredCellId])
@@ -191,7 +220,15 @@ export default function CellTooltip(): JSX.Element | null {
         {info.onSupplyLine && (
           <div className="cell-tooltip__row cell-tooltip__row--supply">
             <dt>补给线</dt>
-            <dd>在线上</dd>
+            <dd>
+              {SUPPLY_LINE_TYPE_LABELS[info.supplyLineType ?? ''] ?? info.supplyLineType ?? ''}
+              {info.supplyLineFaction !== null && (
+                <span className="cell-tooltip__supply-faction">
+                  {' '}
+                  · {SUPPLY_FACTION_LABELS[info.supplyLineFaction] ?? info.supplyLineFaction}
+                </span>
+              )}
+            </dd>
           </div>
         )}
       </dl>
