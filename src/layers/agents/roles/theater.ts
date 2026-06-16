@@ -69,6 +69,13 @@ export interface TheaterResolveParams {
   turn: number
   /** 场景种子（构造 seed 留痕用） */
   scenarioSeed: string
+  /**
+   * 流式 partial 回调（第 2 批，可选）：LLM 每产出一段文本片段时回调，
+   * 编排层据此把 partial 写入 store agentLiveOutputs，AgentInspector 显示实时输出。
+   * 仅 UI 副作用，**不影响 prompt 结构/缓存前缀/确定性产物**。
+   * mock 实现一次性全量回调（模拟"瞬时完成"）。
+   */
+  onDelta?: (partial: string) => void
 }
 
 /** 战区司令拆解产物：单位级动作信封（sequence 已由编排层预分配，此处写入） */
@@ -146,6 +153,14 @@ async function theaterMockResolve(
       })
     }
   }
+  // 第 2 批：mock 模拟"瞬时完成"，一次性全量回调产出的动作摘要（让 AgentInspector
+  // 在 mock 路径下也有实时 partial 显示，统一 UI 逻辑路径）。
+  if (params.onDelta && actions.length > 0) {
+    const summary = actions
+      .map((a) => `${a.intent}:${a.unitId}`)
+      .join(', ')
+    params.onDelta(`[mock 拆解] ${summary}`)
+  }
   return { actions }
 }
 
@@ -221,7 +236,12 @@ async function theaterLlmResolve(
   const task = `回合 ${params.turn}。请把以下候选命令拆解为单位级可执行动作（每个单位一条 action）。\n${personality}\n候选命令：\n${candidateJson}`
 
   const opts = buildLlmOptions(config, 'theater', params.world, task)
-  const { data } = await llmService.streamChatStructured<TheaterAgentOutput>(opts, validate)
+  const { data } = await llmService.streamChatStructured<TheaterAgentOutput>(
+    opts,
+    validate,
+    // 第 2 批：onDelta 透传 partial 给编排层（store agentLiveOutputs → AgentInspector）。
+    params.onDelta,
+  )
 
   // 真实性校验
   const ownUnitIds = new Set(

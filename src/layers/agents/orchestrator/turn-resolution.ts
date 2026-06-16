@@ -99,6 +99,15 @@ export interface OrchestrateTurnResolutionParams {
    */
   onReportChunk?: (chunk: string) => void
   /**
+   * Agent 实时 partial 回调（第 2 批，可选）：theater/commander resolve 流式产出时，
+   * 每段文本片段以 (agentId, partial) 回调。partial 为截至当前已累积的完整文本
+   * （role 内部把 chunk 累加后回调，编排层据此 setAgentLiveOutput）。
+   *
+   * 仅 UI 副作用（AgentInspector 显示实时输出），**不影响编排产物与确定性**。
+   * 不传时无副作用（默认值），已有测试不受影响。
+   */
+  onAgentDelta?: (agentId: string, partial: string) => void
+  /**
    * 战役规则（第 2 批，可选）：用于 rollRandomEvents 判定随机事件。
    * rules.randomEvents 为空或未注入时，本回合无随机事件（默认行为，测试不受影响）。
    */
@@ -311,6 +320,10 @@ export async function orchestrateTurnResolution(
     }
   }
 
+  // 第 2 批：theater/commander resolve 流式 partial 累积缓冲（onDelta 回调的是 chunk 增量，
+  // 编排层累加成 partial 后回调 onAgentDelta，供 store setAgentLiveOutput → AgentInspector）。
+  const theaterAgentId = `theater-${playerFactionId}`
+  let theaterPartial = ''
   const theaterTask = theaterRole
     .resolve({
       world: worldState,
@@ -318,6 +331,12 @@ export async function orchestrateTurnResolution(
       candidates: theaterCandidates,
       turn,
       scenarioSeed,
+      onDelta: params.onAgentDelta
+        ? (chunk: string) => {
+            theaterPartial += chunk
+            params.onAgentDelta!(theaterAgentId, theaterPartial)
+          }
+        : undefined,
     })
     .then((res) => {
       // 用预分配 sequence 覆盖 mock/LM 产出的占位 sequence
@@ -332,18 +351,26 @@ export async function orchestrateTurnResolution(
         )
       })
       if (onProgress) {
-        onProgress({ agentId: `theater-${playerFactionId}`, role: 'theater', status: 'done' })
+        onProgress({ agentId: theaterAgentId, role: 'theater', status: 'done' })
       }
       return { segment: 'theater' as const, envelopes }
     })
 
-  const commanderTasks = nonPlayerFactions.map((f, i) =>
-    commanderRole
+  const commanderTasks = nonPlayerFactions.map((f, i) => {
+    const agentId = `commander-${f.id}`
+    let partial = ''
+    return commanderRole
       .resolve({
         world: worldState,
         factionId: f.id,
         turn,
         scenarioSeed,
+        onDelta: params.onAgentDelta
+          ? (chunk: string) => {
+              partial += chunk
+              params.onAgentDelta!(agentId, partial)
+            }
+          : undefined,
       })
       .then((res) => {
         const sequenceBase = commanderAlloc.sequences[i] ?? SEQUENCE_BASE.commander
@@ -353,16 +380,16 @@ export async function orchestrateTurnResolution(
           return commanderDecisionToEnvelope(
             { ...dec, sequence, seed },
             f.id,
-            `commander-${f.id}`,
+            agentId,
             turn,
           )
         })
         if (onProgress) {
-          onProgress({ agentId: `commander-${f.id}`, role: 'commander', status: 'done' })
+          onProgress({ agentId, role: 'commander', status: 'done' })
         }
         return { segment: 'commander' as const, envelopes }
-      }),
-  )
+      })
+  })
 
   // 真并行（Promise.all）；sequence 预分配保证回放一致
   const [theaterOut, ...commanderOuts] = await Promise.all([theaterTask, ...commanderTasks])

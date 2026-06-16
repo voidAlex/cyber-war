@@ -98,6 +98,10 @@ export function useCommandDialogue(): {
   // 命令候选从 store 读写（中栏解析 → 右栏确认，跨组件共享；原 useState 导致右栏永远 null）。
   const candidate = useGameStore((s) => s.candidate)
   const setCandidate = useGameStore((s) => s.setCandidate)
+  // 第 2 批：流式对话（liveChat）—— chief.chat 逐字回写 store，DialogueStream 订阅渲染打字机。
+  const setLiveChat = useGameStore((s) => s.setLiveChat)
+  const appendLiveChatDelta = useGameStore((s) => s.appendLiveChatDelta)
+  const clearLiveChat = useGameStore((s) => s.clearLiveChat)
 
   const [draftCommand, setDraftCommand] = useState('')
   const [draftDiplomatic, setDraftDiplomatic] = useState('')
@@ -154,10 +158,12 @@ export function useCommandDialogue(): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context, dispatch])
 
-  /** 参谋长对话（询问态势/问候/闲聊） */
+  /** 参谋长对话（询问态势/问候/闲聊；第 2 批：流式打字机） */
   const handleChat = useCallback(async (input: string): Promise<void> => {
     if (context === null) return
     setParsing(true)
+    // 第 2 批：开始流式对话，DialogueStream 据此渲染「正在输入」气泡（逐字）。
+    setLiveChat('chief')
     try {
       const cur = useGameStore.getState().context
       if (cur === null) return
@@ -176,15 +182,22 @@ export function useCommandDialogue(): {
         { world: cur.game.world, playerFactionId: getPlayerFactionId(cur.game.world) },
         // Bug3 修复：history 从 store.dialogues 取（跨回合持久，不再因组件重挂载断裂）
         dialoguesToHistory(dialogues, CHIEF_HISTORY_TURNS),
+        // 第 2 批：onDelta 把每段 partial 累加到 store liveChat.text（打字机）。
+        // 仅 UI 副作用，不影响 prompt 结构/缓存前缀。
+        (partial) => appendLiveChatDelta(partial),
       )
+      // 流式完成：先清 liveChat（「正在输入」气泡消失），再把完整回复入历史（转正常气泡）。
+      clearLiveChat()
       // Bug3 修复：追加到 store（带上限 50 条，store 内裁剪），跨组件共享
       appendDialogue({ input, reply })
       setDraftCommand('')
     } finally {
+      // 防御：异常路径也清 liveChat，避免「正在输入」气泡卡住。
+      clearLiveChat()
       setParsing(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context, dialogues, appendDialogue])
+  }, [context, dialogues, appendDialogue, setLiveChat, appendLiveChatDelta, clearLiveChat])
 
   /** 玩家确认候选命令 → 入 pendingOrders */
   const handleConfirm = useCallback((): void => {

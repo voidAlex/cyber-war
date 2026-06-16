@@ -126,6 +126,10 @@ function buildMultiAgentResolver(
     onReportChunk: (chunk) => {
       get().appendLiveReport(chunk)
     },
+    // 第 2 批：theater/commander resolve 流式 partial → store agentLiveOutputs（AgentInspector 实时）。
+    onAgentDelta: (agentId, partial) => {
+      get().setAgentLiveOutput(agentId, partial)
+    },
   })
 }
 
@@ -251,6 +255,37 @@ export interface GameStoreState {
   appendDialogue: (entry: DialogueEntry) => void
   /** 清空对话历史（退出游戏时调用） */
   clearDialogues: () => void
+
+  // —— 第 2 批：chief 对话打字机流式（liveChat）——
+  // chief.chat 产出回复时，onDelta 把每段 partial 累加到 liveChat.text；
+  // DialogueStream 订阅 liveChat 渲染「正在输入」气泡（青光闪烁 + 逐字）。
+  // 完成后 clearLiveChat + appendDialogue（完整文本入历史，转正常气泡）。
+  // 瞬态运行时数据，不进 reducer/context（纯 UI 可观测副作用）。
+  /**
+   * 当前正在流式的对话回复（null=无进行中的流式）。
+   * role 为发声角色（当前仅 'chief'，预留多角色流式）。
+   */
+  liveChat: { text: string; role: string } | null
+  /** 开始一次流式对话（chief.chat 开始时调用，重置 liveChat）。 */
+  setLiveChat: (role: string) => void
+  /** 累加 liveChat.text（onDelta 每段回调时调用）。 */
+  appendLiveChatDelta: (delta: string) => void
+  /** 结束流式对话（完成后调用；完整回复由调用方 appendDialogue 入历史）。 */
+  clearLiveChat: () => void
+
+  // —— 第 2 批：theater/commander resolve 流式（agentLiveOutputs）——
+  // 结算编排时 theater/commander 的 onDelta 把 partial 写入 agentLiveOutputs[agentId]；
+  // AgentInspector 据此显示各 Agent 实时输出（partial text）。
+  // 瞬态运行时数据，不进 reducer/context；resetTurnProgress 时清空。
+  /**
+   * 各 Agent 当前流式输出的实时 partial（agentId → 已累积文本）。
+   * key 存在且 value 非空表示该 Agent 正在流式产出。
+   */
+  agentLiveOutputs: Record<string, string>
+  /** 设置某 Agent 的实时 partial（onDelta 回调；partial 为空时删除该 key）。 */
+  setAgentLiveOutput: (agentId: string, partial: string) => void
+  /** 清空所有 Agent 实时 partial（resetTurnProgress 调用）。 */
+  clearAgentLiveOutputs: () => void
 
   // —— 命令候选共享（与 dialogues 同类问题：candidate 须跨中右两栏共享）——
   // 中栏 DialogueStream 输入并解析命令 → setCandidate；右栏 CommandTerminal 读
@@ -378,6 +413,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   // Bug3 修复：对话记忆初始为空（store 持有，跨组件重挂载持久）
   dialogues: [],
 
+  // 第 2 批：流式对话/Agent 实时输出初始为空
+  liveChat: null,
+  agentLiveOutputs: {},
+
   // 命令候选初始无（store 持有，中右两栏共享）
   candidate: null,
 
@@ -498,6 +537,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       liveEnvelopes: [],
       degraded: false,
       llmError: null,
+      agentLiveOutputs: {},
     })
     // 流式战报开始（编排期间 director 增量写入 liveReport）
     set({ streamingReport: true })
@@ -735,6 +775,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       streamingReport: false,
       liveEnvelopes: [],
       degraded: false,
+      agentLiveOutputs: {},
     })
   },
 
@@ -759,6 +800,41 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   clearDialogues() {
     set({ dialogues: [] })
+  },
+
+  // —— 第 2 批：流式对话/Agent 实时输出 actions ——
+  setLiveChat(role) {
+    set({ liveChat: { text: '', role } })
+  },
+
+  appendLiveChatDelta(delta) {
+    set((s) => {
+      if (s.liveChat === null) {
+        // 防御：onDelta 在 setLiveChat 之前到达（不应发生），自动初始化为 chief。
+        return { liveChat: { text: delta, role: 'chief' } }
+      }
+      return { liveChat: { text: s.liveChat.text + delta, role: s.liveChat.role } }
+    })
+  },
+
+  clearLiveChat() {
+    set({ liveChat: null })
+  },
+
+  setAgentLiveOutput(agentId, partial) {
+    set((s) => {
+      const next = { ...s.agentLiveOutputs }
+      if (partial.length === 0) {
+        delete next[agentId]
+      } else {
+        next[agentId] = partial
+      }
+      return { agentLiveOutputs: next }
+    })
+  },
+
+  clearAgentLiveOutputs() {
+    set({ agentLiveOutputs: {} })
   },
 
   // 命令候选 actions（store 持有，中右两栏共享，打通命令确认流程）

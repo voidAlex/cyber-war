@@ -20,6 +20,7 @@
  */
 
 import { useEffect, useRef, type JSX } from 'react'
+import { useGameStore } from '@/store/game-store'
 import { useCommandDialogue } from './useCommandDialogue'
 import type { ChiefChatResult } from '@/layers/agents/roles/chief'
 
@@ -44,14 +45,17 @@ export default function DialogueStream(): JSX.Element {
     canSubmit,
   } = useCommandDialogue()
 
-  // 对话流容器 ref：新消息时自动滚到底（玩家始终看到最新回复）。
+  // 第 2 批：订阅 store liveChat（chief.chat 流式 partial），渲染「正在输入」打字机气泡。
+  const liveChat = useGameStore((s) => s.liveChat)
+
+  // 对话流容器 ref：新消息/liveChat 增量时自动滚到底（玩家始终看到最新回复）。
   const streamRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     const el = streamRef.current
     if (el !== null) {
       el.scrollTop = el.scrollHeight
     }
-  }, [dialogues])
+  }, [dialogues, liveChat])
 
   // 未加载存档：占位
   if (context === null) {
@@ -78,6 +82,11 @@ export default function DialogueStream(): JSX.Element {
         {dialogues.map((d, i) => (
           <DialogueBubble key={i} input={d.input} reply={d.reply} />
         ))}
+
+        {/* 第 2 批：chief.chat 流式进行中 → 渲染「正在输入」打字机气泡（青光闪烁 + 逐字）。 */}
+        {liveChat !== null && (
+          <TypingBubble text={liveChat.text} role={liveChat.role} />
+        )}
       </div>
 
       {/* 输入框：固定底部，单框 + 发送按钮 */}
@@ -157,6 +166,31 @@ function DialogueBubble({
         <span className="dialogue-stream__source">
           {reply.source === 'llm' ? 'LLM' : '离线模板'}
         </span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 「正在输入」打字机气泡（第 2 批流式）。
+ *
+ * chief.chat 流式进行中显示：青光描边（闪烁动画）+ 已到达的 partial 文本 + 末尾光标。
+ * 流式完成后 store clearLiveChat，此气泡消失，完整回复已入 dialogues 转正常气泡。
+ *
+ * @param text 已累积的 partial 文本（liveChat.text）
+ * @param role 发声角色（当前仅 'chief'）
+ */
+function TypingBubble({ text, role }: { text: string; role: string }): JSX.Element {
+  const speaker = role === 'chief' ? '参谋长' : role
+  return (
+    <div className="dialogue-stream__turn dialogue-stream__turn--typing">
+      <div className="dialogue-stream__bubble dialogue-stream__bubble--chief dialogue-stream__bubble--typing">
+        <span className="dialogue-stream__speaker dialogue-stream__speaker--chief">{speaker}</span>
+        <p className="dialogue-stream__text">
+          {text}
+          {/* 末尾闪烁光标，模拟打字机「正在输出」 */}
+          <span className="dialogue-stream__cursor" aria-hidden="true" />
+        </p>
       </div>
     </div>
   )

@@ -293,11 +293,14 @@ export interface LlmService {
    *
    * @param opts 流式请求选项
    * @param validate ajv 校验函数（用 compileSchema 或 getAgentValidator 取得）
+   * @param onDelta 可选：每个文本片段到达时回调（实时 partial，UI 打字机/AgentInspector 用）。
+   *   仅 UI 副作用，**不影响 prompt 结构与缓存前缀**。注入 stream（测试 mock）时无 delta。
    * @param ajv 可选 ajv 实例（测试注入）
    */
   streamChatStructured<T>(
     opts: StreamChatOptions,
     validate: ValidateFunction<T>,
+    onDelta?: (chunk: string) => void,
     ajv?: Ajv,
   ): Promise<{ data: T; stats: StreamChatStats }>
 
@@ -415,11 +418,25 @@ export function createLlmService(
     async streamChatStructured<T>(
       opts: StreamChatOptions,
       validate: ValidateFunction<T>,
+      onDelta?: (chunk: string) => void,
       _ajv?: Ajv,
     ): Promise<{ data: T; stats: StreamChatStats }> {
       let result: StreamChatResult
       try {
-        result = await _stream(opts)
+        // 注入了 stream（测试 mock）时无可迭代器，回退到一次性 await（无 delta 回调）。
+        // 默认（真 gateway）路径：若调用方需要实时 partial（onDelta 非空），
+        // 消费 async iterator 透传 delta，再 await result()；否则一次性 await 节省开销。
+        if (deps.stream) {
+          result = await _stream(opts)
+        } else if (onDelta) {
+          const handle = streamChat(opts)
+          for await (const evt of handle) {
+            if (evt.type === 'delta') onDelta(evt.text)
+          }
+          result = await handle.result()
+        } else {
+          result = await _stream(opts)
+        }
       } catch (err) {
         const typed = toLlmCallError(err)
         await appendLlmDiagnostic(_diagnosticSink, typed)

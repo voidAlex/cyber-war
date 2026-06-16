@@ -653,6 +653,13 @@ export interface MultiAgentResolverDeps {
   /** 流式战报增量回调（可选）：透传给导演部 streamTextWithDeltas。 */
   onReportChunk?: (chunk: string) => void
   /**
+   * Agent 实时 partial 回调（第 2 批，可选）：透传给 orchestrateTurnResolution，
+   * theater/commander resolve 流式产出时以 (agentId, partial) 回调。
+   * store 据此 setAgentLiveOutput → AgentInspector 显示实时输出。
+   * 纯可观测副作用，不影响编排产物与确定性。
+   */
+  onAgentDelta?: (agentId: string, partial: string) => void
+  /**
    * M4-D 上下文压缩（可选，每 5 回合 TDD §3.6）。
    * 注入后，当 shouldCompressContext(turn) 时产出压缩产物。
    * 落盘（写 factions/{factionId}/context-summary.md）经 writeFactionFile 完成。
@@ -714,6 +721,7 @@ export function createMultiAgentResolver(
       llmConfig: deps.llmConfig,
       onProgress: deps.onProgress,
       onReportChunk: deps.onReportChunk,
+      onAgentDelta: deps.onAgentDelta,
       // 第 2 批：按 scenarioId 动态查 rules（优先），否则用静态 campaignRules
       campaignRules:
         deps.getCampaignRules?.(world.scenarioId) ?? deps.campaignRules,

@@ -44,6 +44,13 @@ export interface CommanderResolveParams {
   turn: number
   /** 场景种子（构造 seed 留痕用） */
   scenarioSeed: string
+  /**
+   * 流式 partial 回调（第 2 批，可选）：LLM 每产出一段文本片段时回调，
+   * 编排层据此把 partial 写入 store agentLiveOutputs，AgentInspector 显示实时输出。
+   * 仅 UI 副作用，**不影响 prompt 结构/缓存前缀/确定性产物**。
+   * mock 实现一次性全量回调（模拟"瞬时完成"）。
+   */
+  onDelta?: (partial: string) => void
 }
 
 /** 统帅决策产物：阵营决策动作列表（带预分配 sequence） */
@@ -122,9 +129,29 @@ async function commanderMockResolve(
     })
   }
 
+  // 第 2 批：mock 一次性全量回调 partial（模拟瞬时完成，统一 UI 逻辑路径）。
+  notifyCommanderMockDelta(params, decisions)
+
   return {
     decisions,
     disobeying: obedience < 0.3,
+  }
+}
+
+/**
+ * 第 2 批：mock 决策产出后一次性全量回调 onDelta（模拟"瞬时完成"）。
+ * 让 AgentInspector 在 mock 路径下也有实时 partial 显示，统一 UI 逻辑路径。
+ * 由 commanderMockResolve 在返回前调用。
+ */
+function notifyCommanderMockDelta(
+  params: CommanderResolveParams,
+  decisions: CommanderResolvedDecision[],
+): void {
+  if (params.onDelta && decisions.length > 0) {
+    const summary = decisions
+      .map((d) => `${d.intent}:${d.unitId}`)
+      .join(', ')
+    params.onDelta(`[mock 决策] ${summary}`)
   }
 }
 
@@ -269,7 +296,12 @@ async function commanderLlmResolve(
   const task = `回合 ${params.turn}。你是 ${params.factionId} 阵营统帅。${personality}\n本方单位：${JSON.stringify(ownUnits)}\n可见敌方：${JSON.stringify(visibleEnemies)}\n高价值节点：${JSON.stringify(nodes)}\n请决定本回合本方单位的行动。`
 
   const opts = buildLlmOptions(config, 'commander', params.world, task)
-  const { data } = await llmService.streamChatStructured<CommanderAgentOutput>(opts, validate)
+  const { data } = await llmService.streamChatStructured<CommanderAgentOutput>(
+    opts,
+    validate,
+    // 第 2 批：onDelta 透传 partial 给编排层（store agentLiveOutputs → AgentInspector）。
+    params.onDelta,
+  )
 
   // 真实性校验
   const ownUnitIds = new Set(

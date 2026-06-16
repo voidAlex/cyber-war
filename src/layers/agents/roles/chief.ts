@@ -111,15 +111,21 @@ export interface ChiefRole {
    * 历史注入 LLM 的 L2 之后、L3 之前（buildChatMessages），
    * 不破坏 L0/L1 缓存前缀。mock 实现简单拼接最近轮作上下文（或忽略）。
    *
+   * **流式 onDelta（第 2 批打字机）**：可选回调，LLM 每产出一段文本片段时回调，
+   * UI（store liveChat）据此逐字渲染气泡。仅 UI 副作用，**不影响 prompt 结构/缓存前缀**。
+   * mock 实现一次性全量回调（模拟"瞬时完成"，不阻塞 UI 打字机逻辑路径）。
+   *
    * @param input 玩家自然语言（如「你好 我们现在是什么状态」）
    * @param ctx 世界状态视图
    * @param history 最近 N 轮对话历史（player/chief），用作参谋长上下文记忆；可选
+   * @param onDelta 可选：每个文本片段到达时回调（实时 partial，UI 打字机用）
    * @returns 对话回复文本（mock 模板 或 LLM 参谋人格回复）
    */
   chat(
     input: string,
     ctx: ChiefParseContext,
     history?: readonly DialogueTurn[],
+    onDelta?: (partial: string) => void,
   ): Promise<ChiefChatResult>
 }
 
@@ -250,8 +256,8 @@ export function createChiefRole(): ChiefRole {
     async parseCommand(input, ctx) {
       return parseCommandMock(input, ctx)
     },
-    async chat(input, ctx, history) {
-      return chatMock(input, ctx, history)
+    async chat(input, ctx, history, onDelta) {
+      return chatMock(input, ctx, history, onDelta)
     },
   }
 }
@@ -311,9 +317,9 @@ export function createLlmChiefRole(
         throw err
       }
     },
-    async chat(input, ctx, history) {
+    async chat(input, ctx, history, onDelta) {
       try {
-        return await chatWithLlm(input, ctx, llmService, config, history)
+        return await chatWithLlm(input, ctx, llmService, config, history, onDelta)
       } catch (err) {
         // LLM 失败：回退 mock 模板回复（绝不伪造命令，绝不卡死对话）。
         // eslint-disable-next-line no-console
@@ -445,10 +451,13 @@ async function parseCommandWithLlm(
  * - history（DialogueTurn[] → AgentMessage[]，append-only，天然命中缓存）。
  * - L3 本轮玩家问话（含回合号，回合号属 L3 安全）。
  *
- * 用 llmService.streamText（非结构化）拿纯文本回复。
+ * 用 llmService.streamTextWithDeltas（非结构化，带 onDelta 增量回调）拿纯文本回复，
+ * 边出边显示（第 2 批打字机效果，TTFT<200ms 目标）。
  * 失败抛 LlmCallError，由 createLlmChiefRole 上层回退 mock 模板。
  *
  * @param history 最近 N 轮对话历史（player/chief），注入 L2 之后让参谋有记忆
+ * @param onDelta 可选：每个文本片段到达时回调（实时 partial，UI 打字机用）。
+ *   仅 UI 副作用，不影响 prompt 结构/缓存前缀（onDelta 不改 messages）。
  * @throws LlmCallError（四分类/degraded）由上层回退 mock
  */
 async function chatWithLlm(
@@ -457,11 +466,12 @@ async function chatWithLlm(
   llmService: LlmService,
   config: LlmCallConfig,
   history?: readonly DialogueTurn[],
+  onDelta?: (partial: string) => void,
 ): Promise<ChiefChatResult> {
   const trimmed = input.trim()
   if (trimmed.length === 0) {
     // 空输入直接走 mock（不浪费 LLM 调用）
-    return chatMock(input, ctx, history)
+    return chatMock(input, ctx, history, onDelta)
   }
 
   // buildChatMessages 负责 L0-L3 分层 + history 转换（集中维护，避免重复）
@@ -472,20 +482,25 @@ async function chatWithLlm(
     history: history,
   })
 
-  const result = await llmService.streamText({
-    provider: config.provider,
-    endpoint: config.endpoint,
-    apiKey: config.apiKey,
-    model: config.model,
-    messages,
-    // 对话用稍高温度增加自然度（命令解析用默认）；若 config 已设 extraParams 则合并
-    extraParams: { temperature: 0.7, ...(config.extraParams ?? {}) },
-  })
+  // streamTextWithDeltas：消费 gateway async iterator，onDelta 在每个 text 片段到达时回调。
+  // 真流式（默认 gateway）路径才触发 delta；注入 stream（测试 mock）时无 delta（一次性）。
+  const result = await llmService.streamTextWithDeltas(
+    {
+      provider: config.provider,
+      endpoint: config.endpoint,
+      apiKey: config.apiKey,
+      model: config.model,
+      messages,
+      // 对话用稍高温度增加自然度（命令解析用默认）；若 config 已设 extraParams 则合并
+      extraParams: { temperature: 0.7, ...(config.extraParams ?? {}) },
+    },
+    onDelta,
+  )
 
   const text = result.text.trim()
   if (text.length === 0) {
     // LLM 返回空：回退 mock（不伪造，用模板）
-    return chatMock(input, ctx, history)
+    return chatMock(input, ctx, history, onDelta)
   }
   return { text, source: 'llm' }
 }
@@ -518,6 +533,26 @@ function lastPlayerTurn(history: readonly DialogueTurn[] | undefined): string | 
  * @param history 最近 N 轮对话历史（player/chief），用于上下文记忆提示
  */
 function chatMock(
+  input: string,
+  ctx: ChiefParseContext,
+  history?: readonly DialogueTurn[],
+  onDelta?: (partial: string) => void,
+): ChiefChatResult {
+  const result = chatMockImpl(input, ctx, history)
+  // mock 模拟"瞬时完成"：一次性全量回调（与 LLM 真流式的多段 delta 不同，
+  // 但让 UI 打字机逻辑路径统一：store liveChat 始终走 set→append→clear 三态）。
+  if (onDelta && result.text.length > 0) {
+    onDelta(result.text)
+  }
+  return result
+}
+
+/**
+ * mock 参谋长对话实现本体（纯函数模板，离线/降级/LLM 失败时兜底）。
+ *
+ * 由 {@link chatMock} 包装后对外暴露（chatMock 额外负责 onDelta 一次性回调）。
+ */
+function chatMockImpl(
   input: string,
   ctx: ChiefParseContext,
   history?: readonly DialogueTurn[],

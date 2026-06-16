@@ -40,6 +40,8 @@ export default function AgentInspector(): JSX.Element | null {
   const liveEnvelopes = useGameStore((s) => s.liveEnvelopes)
   const cacheStats = useGameStore((s) => s.cacheStats)
   const degraded = useGameStore((s) => s.degraded)
+  // 第 2 批：theater/commander resolve 流式 partial（实时，比 entry.partial 更早出现）。
+  const agentLiveOutputs = useGameStore((s) => s.agentLiveOutputs)
 
   // 开关：生产模式隐藏；DEV 模式可被 ?inspector=0 关闭
   const enabled = IS_DEV && new URLSearchParams(globalThis.location?.search ?? '').get('inspector') !== '0'
@@ -61,7 +63,11 @@ export default function AgentInspector(): JSX.Element | null {
         <div className="agent-inspector__agents">
           <h3>各 Agent 实时</h3>
           {entries.map((e) => (
-            <AgentEntry key={e.agentId} entry={e} />
+            <AgentEntry
+              key={e.agentId}
+              entry={e}
+              livePartial={agentLiveOutputs[e.agentId]}
+            />
           ))}
         </div>
       )}
@@ -91,14 +97,32 @@ export default function AgentInspector(): JSX.Element | null {
   )
 }
 
-/** 单个 Agent 条目 */
-function AgentEntry({ entry }: { entry: AgentProgressEntry }): JSX.Element {
+/**
+ * 单个 Agent 条目。
+ *
+ * @param entry 进度条目（agentProgressById）
+ * @param livePartial 第 2 批流式实时 partial（agentLiveOutputs[agentId]）。
+ *   流式进行中优先显示 livePartial（比 entry.partial 更早出现，逐字增长）；
+ *   流式结束后 entry.partial 填充，livePartial 已被清空。
+ */
+function AgentEntry({
+  entry,
+  livePartial,
+}: {
+  entry: AgentProgressEntry
+  livePartial?: string
+}): JSX.Element {
+  // 流式 partial 优先（实时）；否则回退 entry.partial（已完成时填充）。
+  const partialText = livePartial ?? entry.partial
+  const streaming = livePartial !== undefined && livePartial.length > 0
   return (
     <div className={`agent-inspector__entry agent-inspector__entry--${entry.status}`}>
       <div className="agent-inspector__entry-head">
         <strong>{ROLE_LABELS[entry.role] ?? entry.role}</strong>
         <span className="agent-inspector__entry-id">{entry.agentId}</span>
-        <span className="agent-inspector__entry-status">{entry.status}</span>
+        <span className="agent-inspector__entry-status">
+          {streaming ? '流式中' : entry.status}
+        </span>
       </div>
       {entry.layers && (
         <div className="agent-inspector__layers">
@@ -113,10 +137,12 @@ function AgentEntry({ entry }: { entry: AgentProgressEntry }): JSX.Element {
       {entry.confidence !== undefined && (
         <div className="agent-inspector__confidence">置信度：{entry.confidence}</div>
       )}
-      {entry.partial && (
-        <details className="agent-inspector__raw">
-          <summary>原始输出（{entry.partial.length} 字符）</summary>
-          <pre>{entry.partial}</pre>
+      {partialText && (
+        <details className="agent-inspector__raw" open={streaming}>
+          <summary>
+            {streaming ? '流式输出（' : '原始输出（'}{partialText.length} 字符）
+          </summary>
+          <pre>{partialText}</pre>
         </details>
       )}
       {entry.parsedEnvelope && (
