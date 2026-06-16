@@ -93,6 +93,12 @@ import { UNIT_TYPE_GLYPH } from '@/layers/ui/units/unit-glyph'
 export interface SandboxCallbacks {
   /** 点击某 cell（cellId 如 "C3"）。 */
   onCellClick?: (cellId: string) => void
+  /**
+   * 鼠标悬浮到某 cell（cellId 如 "C3"）；null=移出网格边界（清除悬浮）。
+   * 第 3 批：用于 CellTooltip 显示该格坐标/地形/单位简报。
+   * 由 handleStagePointer 的 move 模式触发（pointermove 高频，调用方应做去重）。
+   */
+  onCellHover?: (cellId: string | null) => void
 }
 
 /** updateWorld 入参：worldState 的渲染相关子集。 */
@@ -283,6 +289,10 @@ export class SandboxRenderer {
     const cell = pixelToCell(x, y, cols, rows)
     if (mode === 'move') {
       this.setHover(cell)
+      // 第 3 批：通知上层当前悬浮 cellId（null=移出网格），驱动 CellTooltip。
+      // cellId 用「列字母+1起步行号」格式（与 onCellClick 一致），便于上层按 cellId 反查 map.cells。
+      const hoverCellId = cell === null ? null : `${colToLetter(cell.col)}${cell.row + 1}`
+      this.callbacks.onCellHover?.(hoverCellId)
       return
     }
     // click

@@ -456,3 +456,134 @@ describe('chiefRole.parseCommand — recon 意图（主动侦察）', () => {
     expect(r.kind).toBe('clarify')
   })
 })
+
+// ============================================================================
+// 第 3 批：reinforce 意图 + cellId 多格式 + 单位数字提取
+// ============================================================================
+
+/**
+ * 构造带数字 id 单位 + cell-{col}-{row} 格式节点的测试世界。
+ * 用于验证「第37师」「fr-infantry-37」类输入与凡尔登 cellId 格式兼容。
+ */
+function makeWorldBatch3(): WorldState {
+  const base = makeWorld()
+  // 替换单位：加一个 id 含数字段 37 的步兵单位
+  base.units = [
+    makeUnit({ id: 'fr-infantry-37', factionId: 'blue', type: 'infantry', coord: { col: 0, row: 0 } }),
+    makeUnit({ id: 'first-armor', factionId: 'blue', type: 'armor', coord: { col: 1, row: 1 } }),
+    makeUnit({ id: 'enemy-infantry', factionId: 'red', type: 'infantry', coord: { col: 7, row: 2 } }),
+  ]
+  // 替换节点：用凡尔登 map.ts 的 cell-{col}-{row} 格式 cellId
+  base.map.highValueNodes = [
+    { id: 'fort-douaumont', name: '杜奥蒙堡 (Fort Douaumont)', cellId: 'cell-7-2', controlThreshold: 2 },
+  ]
+  // cells 的 id 用 cell-{col}-{row} 格式（与凡尔登 map.ts 一致），cols/rows 扩到 8x8
+  base.map.cols = 8
+  base.map.rows = 8
+  const cells: MapCell[] = []
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      cells.push({
+        id: `cell-${col}-${row}`,
+        col,
+        row,
+        terrain: 'plain',
+        movementCost: 1,
+        defenseBonus: 0.1,
+        isObjective: false,
+      })
+    }
+  }
+  base.map.cells = cells
+  return base
+}
+
+function makeCtxBatch3(): ChiefParseContext {
+  return { world: makeWorldBatch3(), playerFactionId: 'blue' }
+}
+
+describe('第 3 批 — reinforce 意图（增援/支援 → move）', () => {
+  it('"增援" 关键词识别为 command', () => {
+    expect(classifyInput('fr-infantry-37 增援到 C3')).toBe('command')
+    expect(classifyInput('支援杜奥蒙堡')).toBe('command')
+  })
+
+  it('"fr-infantry-37 增援到杜奥蒙堡" → move + 节点坐标（reinforce 归一 move）', async () => {
+    const r = await chiefRole.parseCommand('fr-infantry-37 增援到杜奥蒙堡', makeCtxBatch3())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    // reinforce 归一为 move（解析阶段转 move，不新增 CommandIntent）
+    expect(r.intent).toBe('move')
+    expect(r.targetUnitIds).toContain('fr-infantry-37')
+    // 杜奥蒙堡 cellId 'cell-7-2' → 坐标 (7,2)
+    expect(r.targetCoord).toEqual({ col: 7, row: 2 })
+    expect(r.nodeId).toBe('fort-douaumont')
+  })
+
+  it('"支援" 含坐标 → move 到该坐标', async () => {
+    const r = await chiefRole.parseCommand('fr-infantry-37 支援 C3', makeCtxBatch3())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.intent).toBe('move')
+    expect(r.targetCoord).toEqual({ col: 2, row: 2 })
+  })
+})
+
+describe('第 3 批 — cellId 多格式 parseCellId（cell-{col}-{row} / col:row / C3）', () => {
+  it('节点 cellId 为 cell-7-2 格式时，move 兜底正确解析为 (7,2)', async () => {
+    // matchCoord("杜奥蒙堡") 失败 → matchNode 命中 → parseCellId("cell-7-2") → (7,2)
+    const r = await chiefRole.parseCommand('fr-infantry-37 移动到杜奥蒙堡', makeCtxBatch3())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.targetCoord).toEqual({ col: 7, row: 2 })
+  })
+
+  it('节点 cellId 为 col:row 格式（2:2）仍兼容', async () => {
+    // makeWorld 默认节点 cellId '2:2'
+    const ctx = makeCtx()
+    const r = await chiefRole.parseCommand('inf-regiment 移动到杜奥蒙堡', ctx)
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.targetCoord).toEqual({ col: 2, row: 2 })
+  })
+
+  it('capture_node 用 cell-7-2 格式节点 → targetCoord (7,2)', async () => {
+    const r = await chiefRole.parseCommand('fr-infantry-37 占领杜奥蒙堡', makeCtxBatch3())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.intent).toBe('capture_node')
+    expect(r.nodeId).toBe('fort-douaumont')
+    expect(r.targetCoord).toEqual({ col: 7, row: 2 })
+  })
+})
+
+describe('第 3 批 — matchUnits 数字提取（"第37师" → id 含 37 段）', () => {
+  it('"第37师 移动到 C3" → 匹配 id 含 37 段的 fr-infantry-37', async () => {
+    const r = await chiefRole.parseCommand('第37师 移动到 C3', makeCtxBatch3())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.targetUnitIds).toContain('fr-infantry-37')
+  })
+
+  it('"37师 增援到杜奥蒙堡" → 数字提取 + reinforce + 节点坐标', async () => {
+    const r = await chiefRole.parseCommand('37师 增援到杜奥蒙堡', makeCtxBatch3())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.targetUnitIds).toContain('fr-infantry-37')
+    expect(r.intent).toBe('move')
+    expect(r.targetCoord).toEqual({ col: 7, row: 2 })
+  })
+
+  it('"fr-infantry-37 攻击 enemy-infantry" → id 直接匹配（不依赖数字提取）', async () => {
+    const r = await chiefRole.parseCommand('fr-infantry-37 攻击 enemy-infantry', makeCtxBatch3())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.targetUnitIds).toContain('fr-infantry-37')
+    expect(r.targetUnitId).toBe('enemy-infantry')
+  })
+
+  it('"第99师" 不匹配任何真实单位 → clarify（数字提取不伪造）', async () => {
+    const r = await chiefRole.parseCommand('第99师 移动到 C3', makeCtxBatch3())
+    expect(r.kind).toBe('clarify')
+  })
+})

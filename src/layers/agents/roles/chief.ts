@@ -148,7 +148,15 @@ const INTENT_KEYWORDS: ReadonlyArray<{ intent: CommandIntent; words: readonly st
   },
   {
     intent: 'move',
-    words: ['移动', '机动', '前进', '推进', '行军', '开进', '转移到', '前往', 'move', 'march', 'advance', 'go to'],
+    // 第 3 批：增援/支援语义等同于「移动到目标位置」——解析阶段直接归一为 move，
+    // 不新增 CommandIntent 联合类型 / 不动 physics worker（worker normalizeIntent 已把
+    // move 类别名归到 move 物理结算）。增援/支援到某节点=移动到该节点格。
+    words: [
+      '移动', '机动', '前进', '推进', '行军', '开进', '转移到', '前往',
+      '增援', '支援到', '支援', '驰援',
+      'move', 'march', 'advance', 'go to',
+      'reinforce', 'support', 'relief',
+    ],
   },
   {
     intent: 'hold',
@@ -844,30 +852,87 @@ function matchIntent(text: string): CommandIntent | null {
 }
 
 /**
- * 匹配单位：按单位 id / type 中文名 / 关键词片段匹配。
+ * 从输入中提取所有数字 token（用于「第N师」「N师」「unit-37」「第37步兵」等
+ * 自然语言的数字兜底匹配）。
+ *
+ * 例如「第37师 移动」→ ['37']；「fr-infantry-37」→ ['37']。
+ * 仅返回纯数字字符串（去「第」「师」等中文/连字符前缀）。
+ */
+function extractNumberTokens(text: string): string[] {
+  const tokens = new Set<string>()
+  // 「第N师」「第N装甲」等中文格式：第 + 数字 + 类型词
+  for (const m of text.matchAll(/第\s*(\d+)/g)) {
+    if (m[1] !== undefined) tokens.add(m[1])
+  }
+  // 「N师」「N装甲」（无「第」前缀的纯数字+类型）
+  for (const m of text.matchAll(/(\d+)\s*师/g)) {
+    if (m[1] !== undefined) tokens.add(m[1])
+  }
+  // 「unit-37」「fr-infantry-37」等连字符分隔的纯数字段
+  for (const m of text.matchAll(/[-_\s](\d+)\b/g)) {
+    if (m[1] !== undefined) tokens.add(m[1])
+  }
+  return Array.from(tokens)
+}
+
+/**
+ * 单位 id 是否包含给定数字 token（作为独立段，避免「unit-1」误匹配数字「11」）。
+ *
+ * 匹配规则：把 unitId 按非字母数字拆段，若任一段严格等于 numToken 则命中。
+ * 例如 unitId='fr-infantry-37' 段含 '37' → 命中 '37'；
+ *      unitId='37th-armor' 段含 '37' → 命中 '37'；
+ *      unitId='infantry-1' 段为 ['infantry','1'] → 不命中 '37'（避免「1」≠「37」）。
+ */
+function unitIdContainsNumber(unitId: string, numToken: string): boolean {
+  if (numToken.length === 0) return false
+  const segments = unitId.toLowerCase().split(/[^a-z0-9]+/).filter((s) => s.length > 0)
+  return segments.includes(numToken.toLowerCase())
+}
+
+/**
+ * 匹配单位：按单位 id / type 中文名 / 关键词片段 / 数字 token 匹配。
  * 返回所有命中的单位（玩家可下指令给多个单位）。
+ *
+ * 匹配顺序（任一命中即纳入，去重）：
+ * 1. 单位 id 直接 includes（如输入含 `first-armor`）。
+ * 2. 单位类型中文名 includes（如「装甲」「步兵」）。
+ * 3. 单位类型英文名 includes（如 `infantry`）。
+ * 4. 第 3 批新增：数字 token 兜底——输入含「第37师」「37师」「unit-37」等数字，
+ *    单位 id 含该数字（作为独立段，见 {@link unitIdContainsNumber}）则命中。
+ *    这样「第37师」可匹配 id 含「37」段的真实单位（如 `fr-infantry-37`）。
  *
  * 禁止伪造：仅在传入的 units 中匹配，不虚构 id。
  */
 function matchUnits(text: string, units: readonly Unit[]): Unit[] {
   const lower = text.toLowerCase()
   const matched: Unit[] = []
+  // 预提取数字 token（仅在有中文「师」/「第」或连字符数字时才有，避免无谓扫描）
+  const numTokens = extractNumberTokens(text)
   for (const u of units) {
-    // 单位 id 直接包含
-    if (u.id.length > 0 && lower.includes(u.id.toLowerCase())) {
-      matched.push(u)
-      continue
+    let hit = false
+    // 1) 单位 id 直接包含
+    if (!hit && u.id.length > 0 && lower.includes(u.id.toLowerCase())) {
+      hit = true
     }
-    // 单位类型中文名
-    const typeName = UNIT_TYPE_CN[u.type]
-    if (typeName !== undefined && lower.includes(typeName)) {
-      matched.push(u)
-      continue
+    // 2) 单位类型中文名
+    if (!hit) {
+      const typeName = UNIT_TYPE_CN[u.type]
+      if (typeName !== undefined && lower.includes(typeName)) hit = true
     }
-    // 单位类型英文名
-    if (lower.includes(u.type)) {
-      matched.push(u)
+    // 3) 单位类型英文名
+    if (!hit && lower.includes(u.type)) {
+      hit = true
     }
+    // 4) 第 3 批：数字 token 兜底（「第37师」→ id 含 '37' 段）
+    if (!hit && numTokens.length > 0) {
+      for (const tok of numTokens) {
+        if (unitIdContainsNumber(u.id, tok)) {
+          hit = true
+          break
+        }
+      }
+    }
+    if (hit) matched.push(u)
   }
   // 去重（同一单位可能被多个关键词命中）
   return Array.from(new Set(matched))
@@ -921,29 +986,52 @@ function isInBounds(coord: GridCoord, cols: number, rows: number): boolean {
  * 匹配高价值节点（按节点 name 或 id 包含匹配）。
  * 找不到返回 null（绝不伪造节点）。
  *
- * 容错（Bug1）：节点名常含英文括注（如「杜奥蒙堡 (Fort Douaumont)」），
- * 但玩家/LLM 输入通常只写中文片段（「杜奥蒙堡」），反之亦然。
- * 故除全名直接 includes 外，额外做「去括号中文片段」双向 includes：
- * input 含节点中文片段，或节点中文片段含 input 关键词。
+ * 第 3 批：复用 {@link matchNodeByName} 公用匹配逻辑。本函数为旧名兼容包装
+ * （签名/返回值不变），供 chief.ts 内 capture_node / recon 等分支调用。
  */
 function matchNode(
   text: string,
   nodes: ReadonlyArray<{ id: string; name: string; cellId: string }>,
 ): { id: string; name: string; cellId: string } | null {
-  const lower = text.toLowerCase()
-  // 先精确 name 包含，再 id 包含
+  return matchNodeByName(text, nodes)
+}
+
+/**
+ * 公用：按节点名/id 在节点列表中匹配（第 3 批提取，供 parseCommandMock 各分支复用）。
+ *
+ * 匹配优先级（任一命中即返回该节点）：
+ * 1. 全名直接 includes（如输入含完整「杜奥蒙堡 (Fort Douaumont)」）。
+ * 2. 中文片段双向 includes（容错「英文括注」）：
+ *    节点名常含英文括注（如「杜奥蒙堡 (Fort Douaumont)」），但玩家/LLM 输入
+ *    通常只写中文片段（「杜奥蒙堡」），反之亦然。取节点名去括号后的中文片段
+ *    （{@link nodeNameCn}），做双向 includes 容错。
+ * 3. 节点 id 子串（如输入含 `fort-douaumont`）。
+ *
+ * 找不到返回 null（绝不伪造节点）。
+ *
+ * @param input 玩家/LLM 输入文本（任意大小写）
+ * @param nodes 高价值节点列表（含 id/name/cellId）
+ * @returns 命中的节点或 null
+ */
+export function matchNodeByName(
+  input: string,
+  nodes: ReadonlyArray<{ id: string; name: string; cellId: string }>,
+): { id: string; name: string; cellId: string } | null {
+  const lower = input.toLowerCase()
+  // 1) 全名直接 includes
   for (const n of nodes) {
     if (n.name.length > 0 && lower.includes(n.name.toLowerCase())) {
       return n
     }
   }
-  // 中文片段双向容错：取节点名去英文括注后的中文片段
+  // 2) 中文片段双向 includes（容错英文括注）
   for (const n of nodes) {
     const cn = nodeNameCn(n.name)
     if (cn.length > 0 && (lower.includes(cn.toLowerCase()) || cn.toLowerCase().includes(lower))) {
       return n
     }
   }
+  // 3) 节点 id 子串
   for (const n of nodes) {
     if (n.id.length > 0 && lower.includes(n.id.toLowerCase())) {
       return n
@@ -993,14 +1081,73 @@ function fallbackMoveCoord(
   return null
 }
 
-/** 解析 cellId（约定格式 col:row）为坐标；非法返回 null。 */
-function parseCellId(cellId: string): GridCoord | null {
-  const parts = cellId.split(':')
-  if (parts.length !== 2) return null
-  const col = Number.parseInt(parts[0], 10)
-  const row = Number.parseInt(parts[1], 10)
-  if (Number.isNaN(col) || Number.isNaN(row)) return null
-  return { col, row }
+/**
+ * 解析 cellId 为坐标；非法返回 null（第 3 批完善容错）。
+ *
+ * 支持三种 cellId 格式（运行时同时存在，互不统一）：
+ * 1. `"col:row"`（如 `"2:3"`）—— supply.ts 运行时由 unit.coord 派生，
+ *    测试与部分内部逻辑用此格式。
+ * 2. `"cell-{col}-{row}"`（如 `"cell-7-2"`）—— 凡尔登等战役包 map.ts 的
+ *    `cell.id` / `highValueNodes[].cellId` 风格。
+ * 3. `"C3"` / `"c3"`（字母列+1 起步行号）—— 沙盘渲染层 SandboxRenderer 与
+ *    玩家可见坐标标签风格（colToLetter + row+1）。
+ *
+ * 任一格式解析失败（如负数、非数字、列字母非法）返回 null。负值被拒绝
+ * （不构成合法网格坐标）。
+ *
+ * 与 {@link coordFromCellId}（coords.ts）的差异：后者只支持「字母+数字」格式
+ * 且解析失败抛错；本函数为 chief 内部兜底，需兼容三种格式且返回 null（不抛）。
+ *
+ * @param cellId 待解析的 cellId 字符串
+ * @returns 坐标 {col,row}（0 起步）或 null（非法格式）
+ */
+export function parseCellId(cellId: string): GridCoord | null {
+  if (typeof cellId !== 'string' || cellId.length === 0) return null
+  const trimmed = cellId.trim()
+
+  // 1) "col:row" 数字冒号格式（如 "2:3"）
+  const colonMatch = /^(-?\d+)\s*:\s*(-?\d+)$/.exec(trimmed)
+  if (colonMatch !== null) {
+    const col = Number.parseInt(colonMatch[1], 10)
+    const row = Number.parseInt(colonMatch[2], 10)
+    if (Number.isNaN(col) || Number.isNaN(row) || col < 0 || row < 0) return null
+    return { col, row }
+  }
+
+  // 2) "cell-{col}-{row}" 凡尔登 map.ts 风格（如 "cell-7-2"）
+  const cellPrefixMatch = /^cell-(\d+)-(\d+)$/i.exec(trimmed)
+  if (cellPrefixMatch !== null) {
+    const col = Number.parseInt(cellPrefixMatch[1], 10)
+    const row = Number.parseInt(cellPrefixMatch[2], 10)
+    if (Number.isNaN(col) || Number.isNaN(row) || col < 0 || row < 0) return null
+    return { col, row }
+  }
+
+  // 3) "C3" 字母列+1起步行号（如 "C3" → col=2, row=2）
+  //    与 coords.coordFromCellId 同语义（A=0，行号 1 起 → row-1）。
+  const letterMatch = /^([A-Za-z]+)\s*(\d+)$/.exec(trimmed)
+  if (letterMatch !== null && letterMatch[1] !== undefined && letterMatch[2] !== undefined) {
+    const col = letterToCol0(letterMatch[1])
+    const row = Number.parseInt(letterMatch[2], 10) - 1
+    if (Number.isNaN(col) || Number.isNaN(row) || col < 0 || row < 0) return null
+    return { col, row }
+  }
+
+  return null
+}
+
+/**
+ * 列字母转 0 起步列号（A=0, Z=25, AA=26...），非法返回 NaN。
+ * 与 coords.letterToCol 同语义，但本文件避免反向 import 渲染层，内联一份。
+ */
+function letterToCol0(letter: string): number {
+  const upper = letter.toUpperCase()
+  if (!/^[A-Z]+$/.test(upper)) return Number.NaN
+  let col = 0
+  for (let i = 0; i < upper.length; i++) {
+    col = col * 26 + (upper.charCodeAt(i) - 'A'.charCodeAt(0)) + 1
+  }
+  return col - 1
 }
 
 // ============================================================================

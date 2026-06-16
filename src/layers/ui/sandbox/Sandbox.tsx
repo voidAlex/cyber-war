@@ -37,6 +37,7 @@ import {
 } from './SandboxRenderer'
 import { CELL_SIZE, gridPixelSize, cellIdFromCoord } from './coords'
 import { getPlayerFactionId } from './intel-visibility'
+import CellTooltip from './CellTooltip'
 import { logger } from '@/utils/logger'
 
 /** 容器最小尺寸（避免 0×0 时 PixiJS 报错）。 */
@@ -101,6 +102,12 @@ export default function Sandbox(): JSX.Element {
           return id === cellId
         })
         useGameStore.getState().setSelectedUnitId(hit?.id ?? null)
+      },
+      // 第 3 批：悬浮 cell → 写 store.hoveredCellId，驱动 CellTooltip 渲染。
+      // null=鼠标移出网格边界（清除悬浮）。setHoveredCellId 内部已做值去重，
+      // 避免 pointermove 高频触发无谓 zustand 通知。
+      onCellHover: (cellId) => {
+        useGameStore.getState().setHoveredCellId(cellId)
       },
     })
 
@@ -501,6 +508,9 @@ export default function Sandbox(): JSX.Element {
         尺寸由 styles.css 的 .sandbox__canvas-host 提供（flex:1 + min-height:280）。
       */}
       <div ref={containerRef} className="sandbox__canvas-host" />
+      {/* 第 3 批：cell 悬浮 tooltip 浮层（绝对定位右上角，pointer-events:none 不挡交互）。
+          订阅 store.hoveredCellId，鼠标移出网格时 hoveredCellId=null 自动消失。 */}
+      <CellTooltip />
     </section>
   )
 }

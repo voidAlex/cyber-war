@@ -239,6 +239,18 @@ export interface GameStoreState {
    */
   selectedUnitId: string | null
 
+  // —— 第 3 批：沙盘 cell 悬浮 tooltip ——
+  // 鼠标在沙盘上移动时，SandboxRenderer.handleStagePointer(move) 通过 onCellHover
+  // 把当前 cellId 写入此处（null=鼠标移出网格）；CellTooltip 订阅此字段渲染悬浮信息。
+  // 瞬态运行时数据，不进 reducer/context（纯 UI 可观测副作用）。
+  /**
+   * 当前悬浮的 cellId（如 "C3"，字母列+1起步行号）；null=未悬浮任何格。
+   * 由 SandboxRenderer move 模式回调驱动，CellTooltip 读取渲染。
+   */
+  hoveredCellId: string | null
+  /** 设置当前悬浮 cellId（沙盘 move 回调；null 清除）。 */
+  setHoveredCellId: (cellId: string | null) => void
+
   // —— Bug3 修复：参谋长对话记忆持久化（store 持有，避免组件重挂载丢失）——
   // 原根因：dialogues 存在 useCommandDialogue 的 useState，组件因 context 变化/
   // 重挂载（DialogueStream/CommandTerminal 分别 useCommandDialogue 各自一份 state）
@@ -409,6 +421,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   degraded: false,
 
   selectedUnitId: null,
+
+  // 第 3 批：沙盘悬浮 cellId 初始无（鼠标未进入网格）
+  hoveredCellId: null,
 
   // Bug3 修复：对话记忆初始为空（store 持有，跨组件重挂载持久）
   dialogues: [],
@@ -785,6 +800,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   clearSelectedUnit() {
     set({ selectedUnitId: null })
+  },
+
+  // 第 3 批：沙盘 cell 悬浮 tooltip（SandboxRenderer move 模式回调驱动）
+  setHoveredCellId(cellId) {
+    // 性能：仅当值变化时 set（pointermove 高频，避免无谓 zustand 通知触发 CellTooltip 重渲染）
+    if (get().hoveredCellId === cellId) return
+    set({ hoveredCellId: cellId })
   },
 
   // Bug3 修复：对话记忆 actions（store 持有，避免组件重挂载丢失）

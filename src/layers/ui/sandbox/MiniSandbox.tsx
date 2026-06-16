@@ -50,6 +50,30 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
   const cols = map?.cols ?? 0
   const rows = map?.rows ?? 0
 
+  // 第 3 批：cell 简化 tooltip 数据（坐标+地形+节点名）。
+  // 缩略图非交互（点击弹全屏），故用原生 title 属性即可，无需 DOM 浮层。
+  // 用 col,row 反查 map.cells（id 格式可能是 cell-{col}-{row} 或 col:row，col/row 比较更稳）。
+  // 注意：useMemo 必须在 early return 之前调用（react-hooks/rules-of-hooks）。
+  const cellMetaByCoord = useMemo(() => {
+    const m: Record<string, { terrain: string; nodeName: string | null }> = {}
+    if (!map) return m
+    for (const c of map.cells) {
+      m[`${c.col},${c.row}`] = {
+        terrain: MINI_TERRAIN_NAMES[c.terrain] ?? c.terrain,
+        nodeName: null,
+      }
+    }
+    // 高价值节点名填入对应 cell
+    for (const n of map.highValueNodes) {
+      const nc = miniParseCellId(n.cellId)
+      if (nc) {
+        const key = `${nc.col},${nc.row}`
+        if (m[key]) m[key].nodeName = n.name
+      }
+    }
+    return m
+  }, [map])
+
   // 无地图：占位提示（仍可点击弹全屏）
   if (cols === 0 || rows === 0) {
     return (
@@ -74,6 +98,17 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
     if (cellUnits[key] === undefined) cellUnits[key] = u
   }
 
+  // 列字母（0→A），缩略图坐标标签用
+  const letter = (col: number): string => {
+    let s = ''
+    let n = col
+    do {
+      s = String.fromCharCode(65 + (n % 26)) + s
+      n = Math.floor(n / 26) - 1
+    } while (n >= 0)
+    return s
+  }
+
   return (
     <section className="panel mini-sandbox" aria-label="战场沙盘缩略图">
       <h2 className="panel__title">沙盘</h2>
@@ -96,14 +131,23 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
             const col = i % cols
             const row = Math.floor(i / cols)
             const u = cellUnits[`${col},${row}`]
+            const meta = cellMetaByCoord[`${col},${row}`]
+            // 简化 tooltip：坐标 + 地形 + 节点名 + 单位 id（原生 title）
+            const tipParts = [`${letter(col)}${row + 1}`]
+            if (meta) {
+              tipParts.push(meta.terrain)
+              if (meta.nodeName) tipParts.push(meta.nodeName)
+            }
+            if (u) tipParts.push(u.id)
+            const tip = tipParts.join(' · ')
             if (u === undefined) {
-              return <span key={i} className="mini-sandbox__cell" />
+              return <span key={i} className="mini-sandbox__cell" title={tip} />
             }
             const color = factionColor[u.factionId] ?? '#06b6d4'
             const side = factionSide[u.factionId] ?? 'neutral'
             const selected = u.id === selectedUnitId
             return (
-              <span key={i} className="mini-sandbox__cell">
+              <span key={i} className="mini-sandbox__cell" title={tip}>
                 <span
                   className={
                     'mini-sandbox__dot' +
@@ -112,7 +156,7 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
                     (side === 'ally' ? ' mini-sandbox__dot--ally' : '')
                   }
                   style={{ background: color, borderColor: color }}
-                  title={u.id}
+                  title={tip}
                 />
               </span>
             )
@@ -122,4 +166,38 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
       </button>
     </section>
   )
+}
+
+/** 缩略图地形中文名（与 CellTooltip 的 TERRAIN_NAMES 同源，缩略图独立一份避免反向 import）。 */
+const MINI_TERRAIN_NAMES: Record<string, string> = {
+  plain: '平原',
+  forest: '森林',
+  mountain: '山地',
+  water: '水域',
+  urban: '城镇',
+  fortress: '要塞',
+  marsh: '沼泽',
+}
+
+/**
+ * 解析节点 cellId（支持 cell-{col}-{row} / col:row / 字母+数字）为坐标，缩略图用。
+ * 失败返回 null（不阻塞渲染，仅该格无节点名）。
+ */
+function miniParseCellId(cellId: string): { col: number; row: number } | null {
+  const t = cellId.trim()
+  const m1 = /^cell-(\d+)-(\d+)$/i.exec(t)
+  if (m1) return { col: Number(m1[1]), row: Number(m1[2]) }
+  const m2 = /^(\d+):(\d+)$/.exec(t)
+  if (m2) return { col: Number(m2[1]), row: Number(m2[2]) }
+  // 字母+数字（C3）
+  const m3 = /^([A-Za-z]+)(\d+)$/.exec(t)
+  if (m3) {
+    const upper = m3[1].toUpperCase()
+    let col = 0
+    for (let i = 0; i < upper.length; i++) {
+      col = col * 26 + (upper.charCodeAt(i) - 65) + 1
+    }
+    return { col: col - 1, row: Number(m3[2]) - 1 }
+  }
+  return null
 }
