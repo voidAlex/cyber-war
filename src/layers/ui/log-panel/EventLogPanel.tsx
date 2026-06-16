@@ -1,6 +1,7 @@
 /**
- * 事件日志台（EventLogPanel.tsx）— M2 日志 UI。
+ * 导演部日志台（EventLogPanel.tsx）— M2 日志 UI（UI 重构第 1 批改名「导演部」）。
  *
+ * UI 标题由「事件日志台」改为「导演部」（导演终裁 + 事件流），底层逻辑不变。
  * 对应 PRD §4 / TDD「底部：引擎日志台（细颗粒事件时间线）」。
  *
  * 数据来源（双轨）：
@@ -137,7 +138,7 @@ export default function EventLogPanel(): JSX.Element {
   return (
     <section className="panel event-log-panel">
       <h2 className="panel__title">
-        事件日志台 <span className="event-log-panel__count">({total})</span>
+        导演部 <span className="event-log-panel__count">({total})</span>
         <button
           type="button"
           className="event-log-panel__refresh"

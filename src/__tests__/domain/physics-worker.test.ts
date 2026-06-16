@@ -505,3 +505,113 @@ describe('simulateTurn recon（主动侦察）', () => {
     expect(reconEvt?.data.targetUnitId).toBe('target')
   })
 })
+
+// =============================================================================
+// Bug1/Bug2 回归测试：move 缺坐标兜底 + hold 物理结算
+// =============================================================================
+
+describe('simulateTurn Bug1：move 缺 targetCoord 时用 targetUnitId 兜底', () => {
+  it('payload.target 缺失但 targetUnitId 存在 → 用目标单位坐标移动（追击/靠拢语义）', () => {
+    // fr-recon-1 在 (0,0)，敌方 target 在 (1,1)；move 命令漏了 target 但带了 targetUnitId
+    const world = makeWorld([
+      makeUnit({ id: 'fr-recon-1', factionId: 'blue', coord: { col: 0, row: 0 }, fuel: 100 }),
+      makeUnit({ id: 'target', factionId: 'red', coord: { col: 1, row: 1 } }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        intent: 'move',
+        payload: { unitId: 'fr-recon-1', targetUnitId: 'target' }, // 故意无 target 坐标
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+
+    // 不应产出 blockade（原 Bug1 根因：缺目标坐标）
+    const blockade = result.events.find(
+      (e) => e.kind === 'blockade' && (e.data as { unitId?: string }).unitId === 'fr-recon-1',
+    )
+    expect(blockade).toBeUndefined()
+
+    // 应产出 movement 事件，目标坐标 = target 单位坐标 (1,1)
+    const moveEvt = result.events.find((e) => e.kind === 'movement')
+    expect(moveEvt).toBeDefined()
+    expect((moveEvt!.data as { to: { col: number; row: number } }).to).toEqual({ col: 1, row: 1 })
+
+    // 状态变更：单位 coord 应更新到 (1,1)（兜底坐标生效）
+    const upd = result.stateChanges.unitUpdates['fr-recon-1']
+    expect(upd?.coord).toEqual({ col: 1, row: 1 })
+  })
+
+  it('payload 既无 target 也无 targetUnitId → 仍 blockade「缺少目标坐标」', () => {
+    const world = makeWorld([makeUnit({ id: 'u', factionId: 'blue', coord: { col: 0, row: 0 } })])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        intent: 'move',
+        payload: { unitId: 'u' }, // 无任何目标
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+    const blockade = result.events.find((e) => e.kind === 'blockade')
+    expect(blockade).toBeDefined()
+    expect((blockade!.data as { reason: string }).reason).toBe('缺少目标坐标')
+  })
+})
+
+describe('simulateTurn Bug2：hold 物理结算', () => {
+  it('hold 命令产出 hold 事件，单位不移动但士气恢复、疲劳下降', () => {
+    const world = makeWorld([
+      makeUnit({
+        id: 'defender',
+        factionId: 'blue',
+        coord: { col: 0, row: 0 },
+        morale: 50,
+        fatigue: 40,
+      }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        intent: 'hold',
+        payload: { unitId: 'defender' },
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+
+    // 应产出 hold 事件（不再落到 default unsupported blockade）
+    const holdEvt = result.events.find((e) => e.kind === 'hold')
+    expect(holdEvt).toBeDefined()
+    expect((holdEvt!.data as { unitId: string }).unitId).toBe('defender')
+
+    // 原 Bug2：hold 落到 default → unsupported blockade。修复后不应有 blockade
+    const blockade = result.events.find((e) => e.kind === 'blockade')
+    expect(blockade).toBeUndefined()
+
+    // 状态变更：coord 不变（固守不移动），morale +2，fatigue -3
+    const upd = result.stateChanges.unitUpdates['defender']
+    expect(upd?.coord).toBeUndefined() // 不写 coord = 不移动
+    expect(upd?.morale).toBe(52) // 50 + 2
+    expect(upd?.fatigue).toBe(37) // 40 - 3
+  })
+
+  it('hold 命令缺 unitId → blockade「缺少 unitId」', () => {
+    const world = makeWorld([])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({ sequence: 1001, intent: 'hold', payload: {} }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+    const blockade = result.events.find((e) => e.kind === 'blockade')
+    expect(blockade).toBeDefined()
+    expect((blockade!.data as { reason: string }).reason).toBe('缺少 unitId')
+  })
+
+  it('hold 事件标 source:physics（确定性两层契约）', () => {
+    const world = makeWorld([makeUnit({ id: 'u', factionId: 'blue' })])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({ sequence: 1001, intent: 'hold', payload: { unitId: 'u' } }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+    const holdEvt = result.events.find((e) => e.kind === 'hold')
+    expect(holdEvt?.source).toBe('physics')
+  })
+})

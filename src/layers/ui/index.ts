@@ -33,3 +33,9 @@ export { default as CollapsibleSection } from './CollapsibleSection'
 export { default as DecisionPanel } from './DecisionPanel'
 // A 标题屏主菜单（UI 重构第 2 批）：configUnlocked && context===null 时显示
 export { default as TitleScreen } from './title/TitleScreen'
+// 第 1 批「全对话为主」：对话气泡流 / 缩略沙盘 / 全屏沙盘弹窗 / 信息栏 tab / 战果弹窗
+export { default as DialogueStream } from './terminal/DialogueStream'
+export { default as MiniSandbox } from './sandbox/MiniSandbox'
+export { default as SandboxOverlay } from './sandbox/SandboxOverlay'
+export { default as InfoTabs } from './InfoTabs'
+export { default as BattleResultModal } from './briefing/BattleResultModal'

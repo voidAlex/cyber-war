@@ -42,6 +42,7 @@ export {
   extractCoord,
   makeEventId,
   applyResolutionToIntel,
+  applyResolutionStateChanges,
 } from './combat'
 export type {
   ResolutionEvent,

@@ -44,6 +44,13 @@ export interface CampaignManifest {
   description?: string
   /** 开局局内日期（如 1916-02-21） */
   startInGameDate?: string
+  /**
+   * 每回合对应的局内天数（默认 1）。
+   *
+   * 用于 Header 时间显示与 reducer NEXT_TURN 推进 inGameDate。
+   * 凡尔登剧本每回合≈10 天，但默认按 1 天/回合推进以匹配 Header「D+{turn}」语义。
+   */
+  daysPerTurn?: number
   /** 最大回合数（可选，与 victory.maxTurns 互为冗余校验） */
   maxTurns?: number
 }

@@ -29,6 +29,7 @@ import type {
   ReducerResult,
 } from './types'
 import { guardAction } from './guard'
+import { advanceInGameDate } from '@/utils/in-game-date'
 
 /**
  * 创建初始状态机上下文（从 WorldState 起步，phase=idle）。
@@ -237,9 +238,12 @@ export function wegoReducer(
 
     case 'NEXT_TURN': {
       // idle → idle，turnIndex+1，清空本回合运行时；persistCompleted 守卫已过
+      // 同时推进局内日期（ISO 日期 +1 天/回合；非 ISO 日期如 'D-0' 原样保留，不破坏旧存档）。
+      const prevWorld = ctx.game.world
       const world: WorldState = {
-        ...ctx.game.world,
-        turnIndex: ctx.game.world.turnIndex + 1,
+        ...prevWorld,
+        turnIndex: prevWorld.turnIndex + 1,
+        inGameDate: advanceInGameDate(prevWorld.inGameDate),
       }
       const next: StateMachineContext = {
         ...ctx,

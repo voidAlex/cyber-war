@@ -154,6 +154,41 @@ describe('chiefRole.parseCommand — move 意图', () => {
     expect(r.intent).toBe('move')
     expect(r.targetCoord).toEqual({ col: 2, row: 2 })
   })
+
+  // Bug1 回归：mock move 分支缺坐标时用节点名兜底（「移动到杜奥蒙堡」→ 节点坐标）
+  it('"inf-regiment 移动到杜奥蒙堡"（无坐标）→ 兜底用节点坐标 (2,2)', async () => {
+    const r = await chiefRole.parseCommand('inf-regiment 移动到杜奥蒙堡', makeCtx())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.intent).toBe('move')
+    expect(r.targetUnitIds).toContain('inf-regiment')
+    // 杜奥蒙堡 cellId '2:2' → 坐标 (2,2)
+    expect(r.targetCoord).toEqual({ col: 2, row: 2 })
+    expect(r.nodeId).toBe('fort-douaumont')
+  })
+
+  // Bug1 回归：节点名含英文括注时的中文片段双向容错
+  it('节点名含英文括注时，输入中文片段仍匹配（nodeNameCn 双向 includes）', async () => {
+    // 临时改 world 节点名为带英文括注的形式
+    const ctx = makeCtx()
+    ctx.world.map.highValueNodes[0].name = '杜奥蒙堡 (Fort Douaumont)'
+    const r = await chiefRole.parseCommand('inf-regiment 移动到杜奥蒙堡', ctx)
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.intent).toBe('move')
+    expect(r.targetCoord).toEqual({ col: 2, row: 2 })
+  })
+
+  // Bug1 回归：move 缺坐标但有敌方单位名 → 兜底用敌方单位坐标（靠拢语义）
+  it('"first-armor 移动到 enemy-infantry 旁"（无坐标）→ 兜底用敌方单位坐标', async () => {
+    const r = await chiefRole.parseCommand('first-armor 移动到 enemy-infantry 旁', makeCtx())
+    expect(r.kind).toBe('parsed')
+    if (r.kind !== 'parsed') return
+    expect(r.intent).toBe('move')
+    // enemy-infantry 在 (3,3)
+    expect(r.targetCoord).toEqual({ col: 3, row: 3 })
+    expect(r.targetUnitId).toBe('enemy-infantry')
+  })
 })
 
 describe('chiefRole.parseCommand — attack 意图', () => {

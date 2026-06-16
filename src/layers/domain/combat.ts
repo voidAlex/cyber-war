@@ -44,6 +44,7 @@ export type ResolutionEventKind =
   | 'casualty' // 歼灭
   | 'blockade' // 受阻/失败
   | 'recon' // 主动侦察命中（升级目标单位对该方的情报等级）
+  | 'hold' // Bug2：就地固守设防（不移动；士气+恢复、疲劳-恢复，地形防御×1.5 留痕）
   | 'random_event' // 战役随机事件（暴雨/毒气/援军/兵变/炮击，source:'director' 采信 log）
   | 'supply_cut' // 第 4 批：单位补给本回合被切断（上回合连通→本回合切断）
   | 'supply_restored' // 第 4 批：单位补给本回合恢复（上回合切断→本回合连通）
@@ -466,6 +467,136 @@ export function applyResolutionToIntel(
   return {
     ...world,
     units: newUnits,
+    intel: {
+      ...world.intel,
+      reconHits: [...world.intel.reconHits, ...newReconHits],
+    },
+  }
+}
+
+// ============================================================================
+// 纯函数：把完整结算增量（数值 + 情报 + 歼灭 + 目标）应用到 world（内存实时态）
+// ============================================================================
+
+/**
+ * Bug1/Bug2/Bug4 核心根因修复：把物理结算的**完整** stateChanges 应用到内存 world。
+ *
+ * 历史问题：内存实时路径（turn-orchestrator 调用）只 `applyResolutionToIntel`，
+ * **仅**应用 detection/reconHits 增量，数值字段（coord/strength/fuel/ammo/morale/
+ * fatigue/status）从不落地 → 单位坐标永远不变（Bug1）、hold 数值不生效（Bug2）、
+ * 侦查后敌方 level 升了但其他数值看不到（Bug4 部分）。回放路径（replay.commitStateChanges）
+ * 反而是完整的，导致"回放与实时态不一致"。
+ *
+ * 本函数补齐内存实时路径：完整 apply 所有字段，与 replay.commitStateChanges 语义对齐
+ * （但不可变产出，不改入参；replay 为性能在回放热路径用 mutable，内存路径用不可变更安全）。
+ *
+ * 处理：
+ * 1. 单位数值变更（coord/strength/personnel/fuel/ammo/morale/fatigue/status）落到对应单位。
+ * 2. detection 增量（recon 命中）：合并 observer → IntelObservation（覆盖该观测，level 不降）。
+ * 3. 歼灭单位从 world.units 移除。
+ * 4. reconHits 追加到 world.intel.reconHits（turn 填结算回合）。
+ * 5. objectiveChanges 暂存到返回值的 pendingObjectiveChanges（M4 节点控制权落地扩展点）。
+ *
+ * 不可变产出：返回新 world（深拷贝 units/intel），不修改输入。无任何变更时返回原 world。
+ *
+ * @param world 当前世界状态（只读）
+ * @param stateChanges 物理结算的完整增量
+ * @param turn 结算回合（reconHits 流的 turn 字段）
+ * @returns 应用完整增量后的新 world（无变更时返回原 world）
+ */
+export function applyResolutionStateChanges(
+  world: WorldState,
+  stateChanges: CombatStateChanges,
+  turn: number,
+): WorldState {
+  const unitIds = Object.keys(stateChanges.unitUpdates)
+  const hasNumericChanges = unitIds.length > 0
+  const hasAnnihilated = stateChanges.annihilated.length > 0
+  const reconHits = stateChanges.intelReconHits ?? []
+  const hasReconHits = reconHits.length > 0
+
+  // 无任何变更：直接返回原 world（避免无谓深拷贝）
+  if (!hasNumericChanges && !hasAnnihilated && !hasReconHits) {
+    return world
+  }
+
+  // 1+2. 应用单位数值变更 + detection 增量（一次遍历同时处理两类）
+  const updateSet = new Set(unitIds)
+  let unitsChanged = false
+  const newUnits = world.units.map((unit) => {
+    if (!updateSet.has(unit.id)) return unit
+    const upd = stateChanges.unitUpdates[unit.id]
+    if (!upd) return unit
+    const next: Unit = { ...unit }
+    let changed = false
+    if (upd.coord !== undefined) {
+      next.coord = upd.coord
+      changed = true
+    }
+    if (upd.strength !== undefined) {
+      next.strength = upd.strength
+      changed = true
+    }
+    if (upd.personnel !== undefined) {
+      next.personnel = upd.personnel
+      changed = true
+    }
+    if (upd.fuel !== undefined) {
+      next.fuel = upd.fuel
+      changed = true
+    }
+    if (upd.ammo !== undefined) {
+      next.ammo = upd.ammo
+      changed = true
+    }
+    if (upd.morale !== undefined) {
+      next.morale = upd.morale
+      changed = true
+    }
+    if (upd.fatigue !== undefined) {
+      next.fatigue = upd.fatigue
+      changed = true
+    }
+    if (upd.status !== undefined) {
+      next.status = upd.status
+      changed = true
+    }
+    // detection 增量（recon 命中）：合并 observer → IntelObservation（覆盖该观测记录）
+    if (upd.detection) {
+      const detDelta = upd.detection as Record<string, IntelObservation>
+      next.detection = { ...unit.detection }
+      for (const [observerFactionId, observation] of Object.entries(detDelta)) {
+        next.detection[observerFactionId] = observation
+      }
+      changed = true
+    }
+    if (changed) unitsChanged = true
+    return next
+  })
+
+  // 3. 歼灭单位移除
+  let finalUnits = newUnits
+  if (hasAnnihilated) {
+    const dead = new Set(stateChanges.annihilated)
+    finalUnits = newUnits.filter((u) => !dead.has(u.id))
+    unitsChanged = true
+  }
+
+  // 无实际单位变更且无 reconHits：返回原 world（数值/detection 增量可能为空对象）
+  if (!unitsChanged && !hasReconHits) {
+    return world
+  }
+
+  // 4. reconHits 追加到 world.intel.reconHits（turn 填结算回合）
+  const newReconHits = reconHits.map((h) => ({
+    turn,
+    observerFactionId: h.observerFactionId,
+    unitId: h.unitId,
+  }))
+
+  return {
+    ...world,
+    units: finalUnits,
     intel: {
       ...world.intel,
       reconHits: [...world.intel.reconHits, ...newReconHits],

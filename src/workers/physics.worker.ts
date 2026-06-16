@@ -121,6 +121,7 @@ installWorkerHandler()
  * - 'attack' / 'attack_node'：{ unitId, targetUnitId }
  * - 'capture_node'：{ unitId, targetUnitId, nodeId }
  * - 'resupply'：{ unitId }
+ * - 'hold'：{ unitId }（就地固守设防，不移动；士气+恢复、疲劳-恢复，地形防御×1.5 留痕）
  * - 'recon' / 'scout'：{ unitId, target: {col,row} | "col,row" | targetUnitId }
  *   侦察执行单位 unitId 派往 target 坐标或目标敌方单位，命中后调
  *   refreshOnRecon 升级该方对目标 cell 内敌方单位的情报等级（不伪造：无敌方单位则空发现）。
@@ -175,6 +176,9 @@ export function simulateTurn(
       case 'resupply':
         resolveResupplyOrder(worldState, envelope, rng, events, stateChanges, turn)
         break
+      case 'hold':
+        resolveHoldOrder(worldState, envelope, events, stateChanges, turn)
+        break
       case 'recon':
         resolveReconOrder(worldState, envelope, rng, events, stateChanges, turn)
         break
@@ -213,7 +217,7 @@ export function simulateTurn(
 /**
  * 归一化 intent 字符串到内部类别。
  */
-function normalizeIntent(intent: string): 'move' | 'attack' | 'capture' | 'resupply' | 'recon' | 'other' {
+function normalizeIntent(intent: string): 'move' | 'attack' | 'capture' | 'resupply' | 'recon' | 'hold' | 'other' {
   const lower = intent.toLowerCase().trim()
   if (lower === 'move' || lower === 'movement' || lower === 'march' || lower === 'advance') {
     return 'move'
@@ -230,6 +234,10 @@ function normalizeIntent(intent: string): 'move' | 'attack' | 'capture' | 'resup
   // 主动侦察/间谍：recon/scout/spy/spot 等别名归一为 recon
   if (lower === 'recon' || lower === 'reconnaissance' || lower === 'scout' || lower === 'spy' || lower === 'spot' || lower === 'probe') {
     return 'recon'
+  }
+  // Bug2 修复：hold/defend/stand/guard 等归一为 hold（原映射缺失，hold 命令落到 other → unsupported）。
+  if (lower === 'hold' || lower === 'defend' || lower === 'stand' || lower === 'guard' || lower === 'entrench' || lower === 'dig_in') {
+    return 'hold'
   }
   return 'other'
 }
@@ -260,7 +268,7 @@ function resolveMoveOrder(
   turn: number,
 ): void {
   const unitId = extractPayloadField<string>(envelope, 'unitId')
-  const targetCoord = extractCoord(envelope, 'target') ?? extractCoord(envelope, 'destination')
+  let targetCoord = extractCoord(envelope, 'target') ?? extractCoord(envelope, 'destination')
 
   if (!unitId) {
     events.push(makeBlockadeEvent(envelope, turn, '缺少 unitId', {}))
@@ -271,6 +279,22 @@ function resolveMoveOrder(
     events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
     return
   }
+
+  // Bug1 修复：payload.target 缺失时，用 targetUnitId 所在单位坐标兜底（追击/靠拢敌军语义）。
+  // 根因（真机日志）：chief LLM 解析了单位但漏解析坐标 → envelope payload.target 为空 →
+  // 直接 blockade「缺少目标坐标」，单位永远无法移动。兜底坐标取自 world 真实敌方单位，绝不伪造。
+  if (!targetCoord) {
+    const targetUnitId =
+      extractPayloadField<string>(envelope, 'targetUnitId') ??
+      extractPayloadField<string>(envelope, 'targetId')
+    if (targetUnitId) {
+      const targetUnit = worldState.units.find((u) => u.id === targetUnitId)
+      if (targetUnit) {
+        targetCoord = { ...targetUnit.coord }
+      }
+    }
+  }
+
   if (!targetCoord) {
     events.push(makeBlockadeEvent(envelope, turn, '缺少目标坐标', { unitId }))
     return
@@ -510,6 +534,94 @@ function resolveResupplyOrder(
     },
   })
 }
+
+/**
+ * Bug2 修复：结算固守命令（hold / defend）。
+ *
+ * 原根因（真机日志）：hold 命令落到 simulateTurn default 分支 → `unsupported` blockade，
+ * 单位"原地不动且无任何数值变化"，玩家下达 hold 等于空操作。
+ *
+ * 固守语义：单位就地设防，不产生位移（coord 不变），但有数值变化：
+ * - **防御提升**：基于当前所在 cell 的地形 defenseBonus ×1.5（就地设防加成）。
+ *   体现方式：通过 status 标记（'engaged'→'pinned' 链路不适用，hold 不改 status，
+ *   而是把地形加成隐含在后续交战结算的 defenderCell.defenseBonus 中，由物理层
+ *   在 attack/capture 时读取；此处 hold 仅产出事件留痕 + 数值恢复，不改 defense 字段
+ *   ——Unit 无独立 defense 字段，defenseBonus 属 cell）。
+ * - **补给基线消耗**：固守不机动但仍维持警戒，消耗基线 fuel/ammo（与 applyBaselineToAll
+ *   一致，但 baseline 已在第一遍统一扣，此处不再重复扣 fuel/ammo，避免双扣）。
+ * - **士气小幅恢复**：休整 +morale（+2，封顶 100）。体现"停止行军/作战 → 部队喘息"。
+ * - **疲劳小幅恢复**：fatigue -3（下限 0）。固守比机动省力。
+ *
+ * 产出 `action_executed` 事件（kind='hold'），记录单位 id + coord + morale/fatigue 变化。
+ * 不产生位移（coord 字段不写入 stateChanges）。
+ *
+ * 确定性：纯数值计算，无随机数（hold 不涉及概率判定）。
+ */
+function resolveHoldOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少 unitId', {}))
+    return
+  }
+  const unit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!unit) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+
+  // 取单位当前所在 cell 的地形 defenseBonus（用于事件留痕 + 后续交战隐含加成说明）。
+  // 找不到 cell 时 defenseBonus 兜底 0（平原基准），绝不阻断结算。
+  const cell = getCellAt(worldState.map, unit.coord.col, unit.coord.row)
+  const terrainDefense = cell?.defenseBonus ?? 0
+  // 就地设防加成：地形防御 ×1.5（固守工事强化）。仅事件留痕，不改 Unit 字段
+  // （Unit 无 defense 字段，defenseBonus 属 cell，attack 结算时读 cell 即可）。
+  const holdDefenseBonus = terrainDefense * 1.5
+
+  // 士气恢复 +2（休整），封顶 100。基于 baseline 后的 morale（getEffectiveUnit 已含 baseline）。
+  const moraleAfter = Math.min(100, unit.morale + HOLD_MORALE_RECOVERY)
+  // 疲劳恢复 -3（固守比机动省力），下限 0。
+  const fatigueAfter = Math.max(0, unit.fatigue - HOLD_FATIGUE_RECOVERY)
+
+  // 合并变更增量（不写 coord —— 固守不移动）。
+  const existing = stateChanges.unitUpdates[unitId] ?? {}
+  stateChanges.unitUpdates[unitId] = {
+    ...existing,
+    morale: moraleAfter,
+    fatigue: fatigueAfter,
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:hold:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'hold',
+    description: `${unitId} 在 (${unit.coord.col},${unit.coord.row}) 就地固守设防`,
+    data: {
+      unitId,
+      coord: { ...unit.coord },
+      terrain: cell?.terrain ?? 'plain',
+      terrainDefenseBonus: terrainDefense,
+      holdDefenseBonus,
+      moraleBefore: unit.morale,
+      moraleAfter,
+      fatigueBefore: unit.fatigue,
+      fatigueAfter,
+    },
+  })
+}
+
+/** 固守回合士气恢复量（休整加成）。 */
+const HOLD_MORALE_RECOVERY = 2
+/** 固守回合疲劳恢复量（比机动省力）。 */
+const HOLD_FATIGUE_RECOVERY = 3
 
 /**
  * 结算侦察命令（recon / scout）。

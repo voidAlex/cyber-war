@@ -384,11 +384,25 @@ async function parseCommandWithLlm(
     if (cand.intent === 'capture_node') {
       if (!cand.nodeId || !nodeIds.has(cand.nodeId)) continue
     }
-    // move/capture 的 targetCoord 必须在范围内
-    if (cand.targetCoord) {
-      if (!isInBounds(cand.targetCoord, ctx.world.map.cols, ctx.world.map.rows)) continue
+
+    // Bug1 修复：move 候选若 LLM 漏给 targetCoord，用真实数据兜底补全（绝不伪造）。
+    // LLM 常解析了单位/节点名但漏填坐标，导致 envelope payload.target 为空 →
+    // physics.worker resolveMoveOrder 报「缺少目标坐标」blockade，游戏完全不可移动。
+    // 兜底顺序：targetUnitId 所在单位 coord（追击/靠拢）→ nodeId 节点 cellId 坐标。
+    // 补全后的 targetCoord 仍走下方 isInBounds 校验，越界则剔除（不破坏既有约束）。
+    let validated: ChiefCandidateCommand = cand
+    if (validated.intent === 'move' && !validated.targetCoord) {
+      const fallback = fallbackMoveCoord(validated, ctx.world)
+      if (fallback !== null) {
+        validated = { ...validated, targetCoord: fallback }
+      }
     }
-    validCandidates.push(cand)
+
+    // move/capture 的 targetCoord 必须在范围内
+    if (validated.targetCoord) {
+      if (!isInBounds(validated.targetCoord, ctx.world.map.cols, ctx.world.map.rows)) continue
+    }
+    validCandidates.push(validated)
   }
 
   if (validCandidates.length === 0) {
@@ -627,10 +641,41 @@ function parseCommandMock(
   switch (intent) {
     case 'move': {
       const coord = matchCoord(trimmed, ctx.world.map.cols, ctx.world.map.rows)
+      // Bug1 修复：无坐标时用真实数据兜底（节点名 → 节点坐标；敌方单位 → 其坐标）。
+      // 绝不伪造：兜底坐标全部来自 world 真实单位/节点。
       if (coord === null) {
+        // 1) 高价值节点名（如「移动到杜奥蒙堡」→ 节点 cellId 坐标）
+        const node = matchNode(trimmed, ctx.world.map.highValueNodes)
+        if (node !== null) {
+          const nodeCoord = parseCellId(node.cellId)
+          if (nodeCoord !== null) {
+            const summary =
+              matchedUnits.map((u) => u.id).join('、') +
+              ` 移动到 ${nodeNameCn(node.name)} (${nodeCoord.col},${nodeCoord.row})`
+            return parsed('move', matchedUnits.map((u) => u.id), {
+              targetCoord: nodeCoord,
+              nodeId: node.id,
+              summary,
+            })
+          }
+        }
+        // 2) 目标敌方单位（如「移动到敌方步兵师旁」→ 其 coord，靠拢语义）
+        const enemyUnits = ctx.world.units.filter((u) => u.factionId !== ctx.playerFactionId)
+        const targetEnemy = matchUnits(trimmed, enemyUnits)[0]
+        if (targetEnemy !== undefined) {
+          const ec = { ...targetEnemy.coord }
+          const summary =
+            matchedUnits.map((u) => u.id).join('、') +
+            ` 靠拢 ${targetEnemy.id} (${ec.col},${ec.row})`
+          return parsed('move', matchedUnits.map((u) => u.id), {
+            targetCoord: ec,
+            targetUnitId: targetEnemy.id,
+            summary,
+          })
+        }
         return clarify(
           input,
-          '未解析到合法目标坐标，请指明目标格（如 C3）',
+          '未解析到合法目标坐标，请指明目标格（如 C3）或节点名（如 杜奥蒙堡）',
           [coordFormatHint(ctx.world.map.cols, ctx.world.map.rows)],
         )
       }
@@ -840,6 +885,11 @@ function isInBounds(coord: GridCoord, cols: number, rows: number): boolean {
 /**
  * 匹配高价值节点（按节点 name 或 id 包含匹配）。
  * 找不到返回 null（绝不伪造节点）。
+ *
+ * 容错（Bug1）：节点名常含英文括注（如「杜奥蒙堡 (Fort Douaumont)」），
+ * 但玩家/LLM 输入通常只写中文片段（「杜奥蒙堡」），反之亦然。
+ * 故除全名直接 includes 外，额外做「去括号中文片段」双向 includes：
+ * input 含节点中文片段，或节点中文片段含 input 关键词。
  */
 function matchNode(
   text: string,
@@ -852,9 +902,57 @@ function matchNode(
       return n
     }
   }
+  // 中文片段双向容错：取节点名去英文括注后的中文片段
+  for (const n of nodes) {
+    const cn = nodeNameCn(n.name)
+    if (cn.length > 0 && (lower.includes(cn.toLowerCase()) || cn.toLowerCase().includes(lower))) {
+      return n
+    }
+  }
   for (const n of nodes) {
     if (n.id.length > 0 && lower.includes(n.id.toLowerCase())) {
       return n
+    }
+  }
+  return null
+}
+
+/**
+ * 取节点名的中文片段（去英文括注）。
+ * 「杜奥蒙堡 (Fort Douaumont)」→「杜奥蒙堡」。
+ * 用于 matchNode 双向容错与 fallbackMoveCoord 兜底。
+ */
+function nodeNameCn(name: string): string {
+  return name.replace(/\s*[(（].*?[)）].*/g, '').trim()
+}
+
+/**
+ * Bug1 修复：move 候选缺 targetCoord 时的兜底坐标（绝不伪造，仅取真实单位/节点坐标）。
+ *
+ * 兜底顺序：
+ * 1. targetUnitId 存在且为真实单位 → 用该单位 coord（追击/靠拢敌军语义）。
+ * 2. nodeId 存在且为真实节点 → 用节点 cellId 坐标（占领/接近目标点）。
+ * 3. 都无 → 返回 null（候选将被剔除，转 clarify 让玩家补坐标）。
+ *
+ * @param cand LLM 候选命令（已通过 unitIds/attack/capture 校验）
+ * @param world 当前世界状态
+ * @returns 兜底坐标或 null
+ */
+function fallbackMoveCoord(
+  cand: ChiefCandidateCommand,
+  world: WorldState,
+): GridCoord | null {
+  // 1. targetUnitId 所在单位 coord
+  if (cand.targetUnitId) {
+    const tu = world.units.find((u) => u.id === cand.targetUnitId)
+    if (tu) return { ...tu.coord }
+  }
+  // 2. nodeId 节点 cellId 坐标
+  if (cand.nodeId) {
+    const node = world.map.highValueNodes.find((n) => n.id === cand.nodeId)
+    if (node) {
+      const c = parseCellId(node.cellId)
+      if (c !== null) return c
     }
   }
   return null

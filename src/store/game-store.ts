@@ -43,7 +43,7 @@ import { verdunRules } from '@/data/verdun-1916/rules'
 import type { WorldState, CampaignRules } from '@/types'
 import type { CacheStats } from '@/layers/application/services/llm-service'
 import type { LlmErrorBanner } from '@/layers/application/services/llm-service'
-import type { ActionEnvelope, AgentRole } from '@/types'
+import type { ActionEnvelope, AgentRole, ParseCommandResult } from '@/types'
 import type { LlmCallConfig } from '@/layers/agents/roles'
 import { logger } from '@/utils/logger'
 
@@ -128,6 +128,23 @@ function buildMultiAgentResolver(
     },
   })
 }
+
+/**
+ * Bug3 修复：参谋长对话条目（store 持久化用）。
+ *
+ * 与 useCommandDialogue 的 DialogueEntry 结构一致（input + reply），但定义在 store 层
+ * （不反向依赖 UI hook），使对话记忆可跨组件重挂载持久。reply.source 区分 mock/llm，
+ * DialogueStream 据此显示"离线模板/LLM"标签。
+ */
+export interface DialogueEntry {
+  /** 玩家原始问话/命令文本 */
+  input: string
+  /** 参谋长回复（含 source: mock/llm） */
+  reply: { text: string; source: 'mock' | 'llm' }
+}
+
+/** 对话历史上限（store 层常量；超出裁剪最早条目）。 */
+export const DIALOGUE_LIMIT = 50
 
 /**
  * 某个 Agent 在结算中的实时进度（UI 进度条/Inspector 用）。
@@ -217,6 +234,36 @@ export interface GameStoreState {
    * 切换存档/回合推进不自动清空（保持选中态便于连续操作）。
    */
   selectedUnitId: string | null
+
+  // —— Bug3 修复：参谋长对话记忆持久化（store 持有，避免组件重挂载丢失）——
+  // 原根因：dialogues 存在 useCommandDialogue 的 useState，组件因 context 变化/
+  // 重挂载（DialogueStream/CommandTerminal 分别 useCommandDialogue 各自一份 state）
+  // 导致对话历史丢失，chief.chat 的多轮上下文也随之断裂。
+  // 修复：dialogues 提升到 store，中右两栏共享同一份，跨回合/跨重挂载持久。
+  // 退出游戏（handleExit）时清空（store reset）。
+  /**
+   * 参谋长对话历史（player 问话 + chief 回复）。
+   * 由 appendDialogue 追加（带上限 50 条），clearDialogues 清空。
+   * DialogueStream/CommandTerminal 经 useCommandDialogue 共享读写。
+   */
+  dialogues: DialogueEntry[]
+  /** 追加一条对话（带上限 DIALOGUE_LIMIT，超出裁剪最早） */
+  appendDialogue: (entry: DialogueEntry) => void
+  /** 清空对话历史（退出游戏时调用） */
+  clearDialogues: () => void
+
+  // —— 命令候选共享（与 dialogues 同类问题：candidate 须跨中右两栏共享）——
+  // 中栏 DialogueStream 输入并解析命令 → setCandidate；右栏 CommandTerminal 读
+  // candidate 渲染候选卡 + 确认入队。若 candidate 是各组件 useState，右栏永远 null
+  // → 候选卡不显示 → 无法确认入队 → 命令流程彻底阻断（比 4 bug 更致命）。
+  // 提升 candidate 到 store，中右两栏共享同一份。
+  /**
+   * 当前候选命令（parseCommand 产物；null=无候选，clarify=需澄清，parsed=可确认入队）。
+   * 中栏解析写入，右栏读取渲染候选卡。跨组件共享。
+   */
+  candidate: ParseCommandResult | null
+  /** 设置候选命令（中栏解析后调用；null 清除） */
+  setCandidate: (c: ParseCommandResult | null) => void
 
   // —— 第 3 批：战术决策挂起句柄 ——
   // advanceTurn 在导演部产出 pendingDecision 时挂起，返回此句柄。
@@ -327,6 +374,12 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   degraded: false,
 
   selectedUnitId: null,
+
+  // Bug3 修复：对话记忆初始为空（store 持有，跨组件重挂载持久）
+  dialogues: [],
+
+  // 命令候选初始无（store 持有，中右两栏共享）
+  candidate: null,
 
   // 第 3 批：决策挂起句柄（初始无挂起）
   pendingDecisionHandle: null,
@@ -691,6 +744,26 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   clearSelectedUnit() {
     set({ selectedUnitId: null })
+  },
+
+  // Bug3 修复：对话记忆 actions（store 持有，避免组件重挂载丢失）
+  appendDialogue(entry) {
+    set((s) => {
+      const next = [...s.dialogues, entry]
+      // 超上限裁剪最早条目（保留最近 DIALOGUE_LIMIT 条，保证多轮上下文连贯）
+      return {
+        dialogues: next.length > DIALOGUE_LIMIT ? next.slice(next.length - DIALOGUE_LIMIT) : next,
+      }
+    })
+  },
+
+  clearDialogues() {
+    set({ dialogues: [] })
+  },
+
+  // 命令候选 actions（store 持有，中右两栏共享，打通命令确认流程）
+  setCandidate(c) {
+    set({ candidate: c })
   },
 }))
 

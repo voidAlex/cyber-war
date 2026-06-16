@@ -116,7 +116,18 @@ export default function Sandbox(): JSX.Element {
       currentTurn: number,
       halfLifeTurns: number,
     ): void => {
+      // Bug4 修复核查：observerFactionId 取玩家阵营（首个 side==='player'）。
+      // 这是战争迷雾判定的观察方——敌方单位按此方对其的 IntelLevel 渲染。
+      // 为空（无 player 阵营）时 SandboxRenderer 兜底全量渲染（不隐藏任何单位）。
       const observerFactionId = getPlayerFactionId(factions)
+      if (observerFactionId.length === 0 && factions.length > 0) {
+        // 防御日志：有阵营但无 player 标记，可能导致情报判定异常（便于诊断侦查不显示）
+        logger.warn('sandbox/sync/no_observer', '未找到 side=player 阵营，observerFactionId 为空', {
+          scope: 'app',
+          factionsCount: factions.length,
+          factionSides: factions.map((f) => `${f.id}:${f.side}`),
+        })
+      }
       const world: SandboxWorld | null =
         map === undefined ? null : { map, units, factions, observerFactionId, currentTurn, halfLifeTurns }
       // —— 诊断日志：定位真机黑屏（world 是否 null、cells/units 数量）——

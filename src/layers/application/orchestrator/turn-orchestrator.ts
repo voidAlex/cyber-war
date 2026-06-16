@@ -36,7 +36,7 @@ import { wegoReducer } from '@/layers/application/state-machine/reducer'
 import type { PersistenceService } from '@/layers/application/services/persistence-service'
 import type { PhysicsEngineClient } from '@/layers/application/services/worker-service'
 import type { ResolutionResult } from '@/layers/domain/combat'
-import { applyResolutionToIntel } from '@/layers/domain/combat'
+import { applyResolutionStateChanges } from '@/layers/domain/combat'
 import type { DirectorRole, ContextCompressor } from '@/layers/agents/roles/director'
 import { SEQUENCE_DIRECTOR_DECISION_OVERRIDE_BASE } from '@/layers/agents/roles/director'
 import { shouldCompressContext } from '@/layers/agents/roles/context-compression'
@@ -598,9 +598,11 @@ export function createDefaultResolver(
     }
 
     // 5. 返回战报摘要 + 事件（落盘 event-log，source:'physics'）+ 可选压缩产物
-    //    应用情报增量（recon 命中的 detection/reconHits）到内存 world，
-    //    让 briefing 阶段 UI 实时看到被侦察区域的敌方 level 提升。
-    const worldWithIntel = applyResolutionToIntel(
+    //    Bug1/2/4 核心修复：应用**完整**结算增量（coord/strength/morale/detection/歼灭/reconHits）
+    //    到内存 world。原仅 applyResolutionToIntel（仅 detection），导致单位坐标永不回写
+    //    （Bug1）、hold 数值不生效（Bug2）。现在用 applyResolutionStateChanges 完整 apply，
+    //    与回放路径 replay.commitStateChanges 语义对齐（实时态=回放态）。
+    const worldResolved = applyResolutionStateChanges(
       world,
       directorResult.finalResult.stateChanges,
       turn,
@@ -608,7 +610,7 @@ export function createDefaultResolver(
     return {
       resolution: directorResult.resolutionSummary,
       events,
-      world: worldWithIntel,
+      world: worldResolved,
       contextSummary,
       // 第 3 批：战术决策（导演部按模板产出，undefined=无决策）
       pendingDecision: directorResult.pendingDecision,
@@ -744,9 +746,8 @@ export function createMultiAgentResolver(
       contextSummary = { turn: world.turnIndex, text: summary }
     }
 
-    // 应用情报增量（recon 命中的 detection/reconHits）到内存 world，
-    // 让 briefing 阶段 UI 实时看到被侦察区域的敌方 level 提升。
-    const worldWithIntel = applyResolutionToIntel(
+    // Bug1/2/4 核心修复：应用**完整**结算增量到内存 world（见上方 M2 路径同名注释）。
+    const worldResolved = applyResolutionStateChanges(
       worldWithRandomEvents,
       result.result.stateChanges,
       world.turnIndex,
@@ -755,7 +756,7 @@ export function createMultiAgentResolver(
     return {
       resolution,
       events,
-      world: worldWithIntel,
+      world: worldResolved,
       contextSummary,
       // 第 3 批：战术决策（编排器按 rules.decisions 模板产出，undefined=无决策）
       pendingDecision: result.pendingDecision,
