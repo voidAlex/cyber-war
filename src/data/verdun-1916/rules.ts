@@ -387,5 +387,64 @@ export const verdunRules: CampaignRules = {
       obedience: 0.8,
       responsibleUnits: ['de-artillery-heavy'],
     },
+    // ============================================================
+    // 第 2 批新增：后勤官（logistics）纯对话角色
+    // ============================================================
+    // === 法军后勤官：「神圣之路」运输指挥 ===
+    // 史实：贝当首创的"神圣之路"（Voie Sacrée，Bar-le-Duc→凡尔登公路），
+    // 每周 6000 辆卡车 + 4000 辆马车轮换前线部队/物资，是法军苦撑的生命线。
+    {
+      id: 'ai-france-logistics',
+      type: 'logistics',
+      factionId: 'france',
+      displayName: '神圣之路指挥',
+      personality:
+        '法军「神圣之路」（Voie Sacrée）运输指挥，统筹 Bar-le-Duc→凡尔登公路的后勤轮换。' +
+        '每周 6000 辆卡车 + 4000 辆马车轮换前线部队/弹药/物资，是法军苦撑的生命线。' +
+        '在角色 tab 中解读补给线态势、卡车运力、弹药储备与轮换节奏。',
+      aggression: 0.2,
+      obedience: 0.8,
+    },
+    // === 德军后勤官：弹药补给线指挥 ===
+    // 史实：德军重炮（大贝尔莎 420mm）弹药消耗巨大，需从后方铁路枢纽持续前运至东岸炮兵阵地。
+    {
+      id: 'ai-germany-logistics',
+      type: 'logistics',
+      factionId: 'germany',
+      displayName: '德军弹药补给',
+      personality:
+        '德军弹药补给线指挥，统筹后方铁路枢纽→东岸炮兵阵地的弹药前运。' +
+        '重炮（大贝尔莎 420mm）弹药消耗巨大，需维持高强度铁路+马车补给。' +
+        '在角色 tab 中解读弹药储备、补给瓶颈与铁路枢纽脆弱点。',
+      aggression: 0.2,
+      obedience: 0.7,
+    },
+    // ============================================================
+    // 第 3 批新增：英国（远征军，法方盟友）AI 角色
+    // ============================================================
+    // === 英军参谋长：黑格（消耗战信奉者，索姆河牵制） ===
+    {
+      id: 'ai-haig-chief',
+      type: 'chief',
+      factionId: 'britain',
+      displayName: '黑格',
+      personality:
+        '英国远征军（BEF）总司令，消耗战信奉者。发动索姆河战役牵制德军、减轻凡尔登压力。' +
+        '坚信重炮+步兵持续冲锋能压垮德军防线。固执、重视骑兵突击学说。',
+      aggression: 0.8,
+      obedience: 0.5,
+    },
+    // === 英军后勤官：索姆河补给线指挥（第 3 批新增） ===
+    {
+      id: 'ai-britain-logistics',
+      type: 'logistics',
+      factionId: 'britain',
+      displayName: '英军索姆河后勤',
+      personality:
+        '英军索姆河方向后勤指挥，统筹从本土/海峡港口→索姆河前线的兵员/弹药/物资海运+铁路运输。' +
+        '维持索姆河攻势的后勤生命线。在角色 tab 中解读跨海峡补给态势与攻势维持潜力。',
+      aggression: 0.2,
+      obedience: 0.7,
+    },
   ],
 }

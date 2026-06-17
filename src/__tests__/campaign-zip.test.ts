@@ -249,16 +249,16 @@ describe('凡尔登默认示例包', () => {
     expect(verdunCampaign.manifest.schemaVersion).toBe('1.0.0')
   })
 
-  it('manifest.playerFactionIds 含法/德', () => {
+  it('manifest.playerFactionIds 含法/德/英（第 3 批加英国盟友）', () => {
     expect(verdunCampaign.manifest.playerFactionIds).toEqual(
-      expect.arrayContaining(['france', 'germany']),
+      expect.arrayContaining(['france', 'germany', 'britain']),
     )
   })
 
-  it('含四员指挥官（贝当/尼韦勒/法金汉/皇太子）', () => {
+  it('含五员指挥官（贝当/尼韦勒/法金汉/皇太子/黑格，第 3 批加黑格）', () => {
     const names = verdunCampaign.commanders.map((c) => c.id)
     expect(names).toEqual(
-      expect.arrayContaining(['petain', 'nivelle', 'falkenhayn', 'crown-prince']),
+      expect.arrayContaining(['petain', 'nivelle', 'falkenhayn', 'crown-prince', 'haig']),
     )
   })
 
@@ -314,7 +314,7 @@ describe('buildInitialWorldState（凡尔登投影）', () => {
     expect(world.scenarioSeed).toBe(verdunCampaign.manifest.scenarioSeed)
     expect(world.turnIndex).toBe(0)
     expect(world.inGameDate).toBe('1916-02-21')
-    expect(world.factions).toHaveLength(2)
+    expect(world.factions).toHaveLength(3)
     expect(world.units.length).toBeGreaterThan(0)
     expect(world.map.cols).toBe(verdunCampaign.map.cols)
     expect(world.intel.decayRule.halfLifeTurns).toBe(3)
@@ -489,8 +489,8 @@ describe('内置战役包：官渡之战 200', () => {
   it('通过 schema + 一致性 + ZIP 闭环校验', () => {
     assertBuiltinCampaignValid(guanduCampaign, {
       scenarioId: 'guandu-200',
-      playerFactionIds: ['caocao', 'yuanshao'],
-      factionCount: 2,
+      playerFactionIds: ['caocao', 'yuanshao', 'biaojiao'],
+      factionCount: 3,
     })
   })
 
@@ -535,8 +535,8 @@ describe('内置战役包：俄乌冲突 2022', () => {
   it('通过 schema + 一致性 + ZIP 闭环校验', () => {
     assertBuiltinCampaignValid(ukraineCampaign, {
       scenarioId: 'ukraine-2022',
-      playerFactionIds: ['ukraine', 'russia'],
-      factionCount: 2,
+      playerFactionIds: ['ukraine', 'russia', 'nato'],
+      factionCount: 3,
     })
   })
 
@@ -639,8 +639,8 @@ describe('内置战役包：美以伊冲突 2026', () => {
   it('通过 schema + 一致性 + ZIP 闭环校验', () => {
     assertBuiltinCampaignValid(iranCampaign, {
       scenarioId: 'iran-2026',
-      playerFactionIds: ['usisrael', 'iran'],
-      factionCount: 2,
+      playerFactionIds: ['usa', 'israel', 'iran'],
+      factionCount: 3,
     })
   })
 
@@ -657,10 +657,20 @@ describe('内置战役包：美以伊冲突 2026', () => {
     expect(iranCampaign.manifest.daysPerTurn).toBe(2)
   })
 
-  it('内塔尼亚胡人格：aggression 0.8 / rapid（先发制人）', () => {
+  it('内塔尼亚胡人格：aggression 0.8 / rapid（第 2+3 批降格为以色列外交官，仍保留人格）', () => {
     const netanyahu = iranCampaign.commanders.find((c) => c.id === 'netanyahu')!
     expect(netanyahu.aggression).toBe(0.8)
     expect(netanyahu.preferredTempo).toBe('rapid')
+    // 第 2+3 批：netanyahu 归属 israel 阵营（从 usisrael 拆出）
+    expect(netanyahu.factionId).toBe('israel')
+  })
+
+  it('第 2+3 批：CENTCOM 司令（usa 参谋长）+ IRGC 司令（iran 参谋长）', () => {
+    const centcom = iranCampaign.commanders.find((c) => c.id === 'centcom-commander')!
+    expect(centcom.factionId).toBe('usa')
+    expect(centcom.preferredTempo).toBe('methodical')
+    const irgc = iranCampaign.commanders.find((c) => c.id === 'irgc-commander')!
+    expect(irgc.factionId).toBe('iran')
   })
 
   it('rules 含伊朗弹道导弹反击事件（turn_in 2/5/8）', () => {
@@ -675,26 +685,35 @@ describe('内置战役包：美以伊冲突 2026', () => {
     expect(decisionIds).toContain('strike-nuclear')
   })
 
-  it('单位数：美以 9 + 伊朗 9', () => {
-    const usisrael = iranCampaign.units.filter((u) => u.factionId === 'usisrael')
+  it('单位数：第 3 批拆分——美 6 + 以 3 + 伊朗 9', () => {
+    const usa = iranCampaign.units.filter((u) => u.factionId === 'usa')
+    const israel = iranCampaign.units.filter((u) => u.factionId === 'israel')
     const iran = iranCampaign.units.filter((u) => u.factionId === 'iran')
-    expect(usisrael).toHaveLength(9)
+    expect(usa).toHaveLength(6)
+    expect(israel).toHaveLength(3)
     expect(iran).toHaveLength(9)
   })
 
-  it('胜负：美以=摧毁纳坦兹+福特罗；伊朗=重创美军（战损 0.45）', () => {
+  it('胜负：美=摧毁纳坦兹+福特罗；以=摧毁核设施+削弱伊朗导弹60%；伊朗=重创美军（战损 0.45）', () => {
     const natanzCond = iranCampaign.victory.conditions.find(
-      (c) => c.id === 'usisrael-destroy-natanz',
+      (c) => c.id === 'usa-destroy-natanz',
     )
     expect(natanzCond?.nodeId).toBe('natanz')
     const fordowCond = iranCampaign.victory.conditions.find(
-      (c) => c.id === 'usisrael-destroy-fordow',
+      (c) => c.id === 'usa-destroy-fordow',
     )
     expect(fordowCond?.nodeId).toBe('fordow')
+    // 第 3 批：以色列独立条件（削弱伊朗导弹 60%）
+    const israelWeaken = iranCampaign.victory.conditions.find(
+      (c) => c.id === 'israel-weaken-iran-missiles',
+    )
+    expect(israelWeaken?.targetFactionId).toBe('iran')
+    expect(israelWeaken?.casualtyThreshold).toBe(0.6)
+    // 第 3 批：伊朗 casualty target 改为 usa（从 usisrael）
     const iranCasualty = iranCampaign.victory.conditions.find(
       (c) => c.factionId === 'iran' && c.type === 'casualty',
     )
-    expect(iranCasualty?.targetFactionId).toBe('usisrael')
+    expect(iranCasualty?.targetFactionId).toBe('usa')
     expect(iranCasualty?.casualtyThreshold).toBe(0.45)
   })
 })

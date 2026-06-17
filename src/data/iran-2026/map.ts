@@ -158,18 +158,28 @@ export const iranMap: CampaignMap = {
    */
   supplyNetwork: {
     lines: [
-      // === 美以补给：以色列本土 → 波斯湾航母（海上 + 空中走廊） ===
+      // === 第 3 批：原"美以补给"按拆分阵营分为美军 + 以色列两条 ===
+      // 美军补给：海湾国家基地 → 波斯湾航母（海上补给走廊）
       {
-        id: 'usisrael-israel-carrier-supply',
-        factionId: 'usisrael',
-        type: 'road', // 海上 + 空中补给走廊无完全对应类型，用 road 代理
-        // 以色列(source)→地中海东岸→阿拉伯半岛北→波斯湾航母战斗群
+        id: 'usa-gulf-carrier-supply',
+        factionId: 'usa',
+        type: 'road', // 海上补给走廊无完全对应类型，用 road 代理
+        // 海湾国家基地(source)→波斯湾西部海域→航母战斗群阵位
+        cellIds: [
+          'cell-5-10', // 波斯湾西部海域（source，海湾国家基地补给点）
+          'cell-6-10', // 波斯湾航母战斗群阵位
+          'cell-7-10', // 宙斯盾驱逐舰阵位
+        ],
+      },
+      // 以色列补给：以色列本土 → F-35 出发基地（本土弹药储备）
+      {
+        id: 'israel-local-supply',
+        factionId: 'israel',
+        type: 'road',
+        // 以色列本土(source)→F-35 出发基地
         cellIds: [
           'cell-1-5', // 以色列本土（source，F-35/特种部队基地）
-          'cell-2-6', // 地中海东岸（空中走廊）
-          'cell-3-8', // 阿拉伯半岛北部
-          'cell-5-10', // 波斯湾西部海域
-          'cell-6-10', // 波斯湾航母战斗群阵位
+          'cell-2-6', // 地中海东岸（空中走廊起点）
         ],
       },
       // === 伊朗补给：德黑兰 → 各导弹阵地/革命卫队据点 ===

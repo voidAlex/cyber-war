@@ -179,12 +179,18 @@ const PHASE_NAMES: Record<string, string> = {
   decision: '战术决策',
 }
 
-/** 各角色 tab 图标（单字标识，色标由 CSS --role-{type} 变量驱动）。 */
+/** 各角色 tab 图标（单字标识，色标由 CSS --role-{type} 变量驱动）。
+ *
+ * 第 2+3 批扩展：staff（参谋/谋士，单字「谋」）/logistics（后勤官，单字「勤」），
+ * 均为纯对话角色 tab。
+ */
 const ROLE_ICON: Record<PlayerRoleTab['type'], string> = {
   chief: '参',
   diplomat: '外',
   commander: '指',
   director: '导',
+  staff: '谋',
+  logistics: '勤',
   player: '我',
 }
 

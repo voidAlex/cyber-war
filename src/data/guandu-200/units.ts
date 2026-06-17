@@ -408,4 +408,49 @@ export const guanduUnits: CampaignUnit[] = [
     // 装备：辎重车（运粮车辆）—史实被曹军焚毁
     equipment: [{ type: 'supply-cart', count: 200, quality: 0.5 }],
   },
+
+  // ============================================================
+  // 刘表军（第 3 批新增中立第三方，2 单位，南方荆州守备）
+  // ============================================================
+  // 史实：刘表荆州军在南方（荆襄），与官渡主战场相距甚远，仅作守备，不主动出击。
+  // 部署在网格南方边缘（row 8），象征荆州方向，不动。
+  // === 荆州守备步兵 ×2：南方据守（不参战，保境安民） ===
+  {
+    id: 'biaojiao-infantry-1',
+    factionId: 'biaojiao',
+    type: 'infantry',
+    // 荆州北部守备（南阳方向，监视官渡战局但不介入）
+    coord: { col: 3, row: 8 },
+    strength: 65,
+    personnel: 6000,
+    maxPersonnel: 8000,
+    fuel: 50,
+    ammo: 60,
+    morale: 60, // 中立守备，士气一般（无战意）
+    fatigue: 20,
+    status: [],
+    equipment: [
+      { type: 'spear', count: 5000, quality: 0.65 },
+      { type: 'shield', count: 3000, quality: 0.6 },
+    ],
+  },
+  {
+    id: 'biaojiao-infantry-2',
+    factionId: 'biaojiao',
+    type: 'infantry',
+    // 荆州北部守备（新野方向）
+    coord: { col: 4, row: 8 },
+    strength: 63,
+    personnel: 5500,
+    maxPersonnel: 8000,
+    fuel: 48,
+    ammo: 58,
+    morale: 60,
+    fatigue: 22,
+    status: [],
+    equipment: [
+      { type: 'spear', count: 4500, quality: 0.65 },
+      { type: 'shield', count: 2800, quality: 0.6 },
+    ],
+  },
 ]

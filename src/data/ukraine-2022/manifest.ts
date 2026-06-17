@@ -19,8 +19,8 @@ export const ukraineManifest: CampaignManifest = {
   // 固定种子（确定性随机基底：scenarioSeed:turn:sequence）
   scenarioSeed: 'ukraine-2022:20220224',
   schemaVersion: CAMPAIGN_SCHEMA_VERSION,
-  // 玩家可选乌克兰（守）或俄罗斯（攻）
-  playerFactionIds: ['ukraine', 'russia'],
+  // 玩家可选乌克兰（守）/俄罗斯（攻）/北约（第 3 批新增，纯外交军援阵营）。
+  playerFactionIds: ['ukraine', 'russia', 'nato'],
   description:
     '2022年2月24日，俄罗斯对乌克兰发动全面入侵。俄军多路装甲纵队从北、东、南推进，' +
     '企图速战速决夺取基辅。乌军在泽连斯基领导下灵活抵抗，依托城市防御与西方军援（标枪/NLAW/HIMARS）' +

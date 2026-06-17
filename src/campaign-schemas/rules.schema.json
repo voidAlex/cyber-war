@@ -180,7 +180,7 @@
           "id": { "type": "string", "minLength": 1 },
           "type": {
             "type": "string",
-            "enum": ["chief", "diplomat", "commander", "director"]
+            "enum": ["chief", "diplomat", "commander", "director", "staff", "logistics"]
           },
           "factionId": { "type": "string", "minLength": 1 },
           "displayName": { "type": "string", "minLength": 1, "maxLength": 64 },

@@ -21,8 +21,8 @@ export const guanduManifest: CampaignManifest = {
   // 选用 'guandu:200' 作为可读固定 seed
   scenarioSeed: 'guandu:200',
   schemaVersion: CAMPAIGN_SCHEMA_VERSION,
-  // 玩家可选曹操（守）或袁绍（攻）
-  playerFactionIds: ['caocao', 'yuanshao'],
+  // 第 3 批：玩家可选曹操（守）/袁绍（攻）/刘表（中立第三方，保境安民）。
+  playerFactionIds: ['caocao', 'yuanshao', 'biaojiao'],
   description:
     '建安五年（公元200年），袁绍率精兵十万南下，与曹操会战于官渡。曹军兵少粮乏，' +
     '凭官渡大营据守不退。相持数月，曹操采纳许攸之计，亲率精锐夜袭乌巢粮仓，' +

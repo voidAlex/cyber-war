@@ -59,5 +59,15 @@ export const ukraineVictory: CampaignVictory = {
       targetFactionId: 'ukraine',
       casualtyThreshold: 0.6,
     },
+    // === 北约胜利条件（第 3 批新增） ===
+    // 北约不直接参战，其胜利绑定乌方生存：乌克兰守住基辅至回合上限即视为北约军援/制裁战略成功。
+    {
+      id: 'nato-ukraine-survives',
+      factionId: 'nato',
+      type: 'objective',
+      description:
+        '乌克兰守住基辅至战役回合上限（北约军援/情报/制裁战略成功，俄军速战速决企图彻底破产）',
+      nodeId: 'kyiv',
+    },
   ],
 }

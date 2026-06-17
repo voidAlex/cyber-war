@@ -21,8 +21,8 @@ export const iranManifest: CampaignManifest = {
   // 固定种子（确定性随机基底：scenarioSeed:turn:sequence）
   scenarioSeed: 'iran-2026:20260228',
   schemaVersion: CAMPAIGN_SCHEMA_VERSION,
-  // 玩家可选美以联军（攻）或伊朗（守反击）
-  playerFactionIds: ['usisrael', 'iran'],
+  // 第 3 批：美以联军拆为 3 方——玩家可选美国/以色列（攻）/伊朗（守反击）。
+  playerFactionIds: ['usa', 'israel', 'iran'],
   description:
     '2026年2月，美以联军对伊朗核设施（纳坦兹/福特罗）实施先发制人精确打击，企图摧毁伊朗核能力。' +
     '伊朗以弹道导弹（Sejjil/Emad）反击以色列与美军波斯湾舰队，革命卫队（IRGC）导弹快艇封锁' +

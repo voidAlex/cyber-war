@@ -1,15 +1,14 @@
 /**
  * 美以伊冲突 2026 — units.json 数据（初始部署）。
  *
- * 部署设定（虚构近未来剧本）：
- * - 美以联军：美军波斯湾航母战斗群（cell-6-10 海域）+ F-35（以色列 cell-1-5 出发）+
- *   驱逐舰 + 战斧导弹驱逐舰 + 特种部队。先发制人精确打击。
- * - 伊朗：弹道导弹阵地（纳坦兹/福特罗周边）+ 革命卫队（IRGC）+ 防空（S-300/Bavar-373）+
- *   导弹快艇（霍尔木兹海峡 cell-8-11）+ Shahed-136 无人机。
+ * 第 3 批多阵营拆分：原"美以联军"（usisrael）按真实归属拆为 usa + israel：
+ * - 美国（usa）：波斯湾航母战斗群（航母 ×2 / 宙斯盾驱逐舰 ×2 / 战斧导弹驱逐舰 ×2）。
+ *   海空精确打击主力，航母 + 战斧远程摧毁核设施。
+ * - 以色列（israel）：F-35I Adir 隐身战机 ×2（钻地弹摧毁深埋工事）+ 特种部队 ×1。
+ *   突防摧毁福特罗深埋工事 + 激光指示核设施 + 定点清除。
+ * - 伊朗（iran）：弹道导弹阵地 + 革命卫队 + 防空 + 导弹快艇 + 无人机（9 单位，未变）。
  *
  * 坐标对齐 map.ts（16×12）。
- * - 美以航母在波斯湾（cell-6-10 water）；F-35 从以色列（cell-1-5）出发。
- * - 伊朗导弹阵地在核设施周边（cell-12-4/cell-13-6）；快艇在霍尔木兹（cell-8-11）。
  *
  * 类型映射（schema）：航母/驱逐舰 → naval；F-35/无人机 → air；弹道导弹 → missile；
  * 革命卫队 → infantry；防空 → support；战斧导弹驱逐舰 → missile。
@@ -22,12 +21,12 @@ import type { CampaignUnit } from '@/types'
 /** 美以伊冲突初始单位部署 */
 export const iranUnits: CampaignUnit[] = [
   // ============================================================
-  // 美以联军（攻，8 单位）
+  // 美国（usa，攻，6 单位，从 usisrael 拆出）
   // ============================================================
   // === 航母 ×2（波斯湾航母战斗群） ===
   {
     id: 'us-carrier-1',
-    factionId: 'usisrael',
+    factionId: 'usa',
     type: 'naval',
     // 波斯湾航母战斗群（核心海空打击平台，携舰载机 + 战斧）
     coord: { col: 6, row: 10 },
@@ -47,7 +46,7 @@ export const iranUnits: CampaignUnit[] = [
   },
   {
     id: 'us-carrier-2',
-    factionId: 'usisrael',
+    factionId: 'usa',
     type: 'naval',
     // 第二航母战斗群（波斯湾备份/防空指挥）
     coord: { col: 5, row: 10 },
@@ -64,10 +63,79 @@ export const iranUnits: CampaignUnit[] = [
       { type: 'cruise-missile', count: 50, quality: 0.95 },
     ],
   },
+  // === 驱逐舰 ×2（宙斯盾防空 + 反导） ===
+  {
+    id: 'us-destroyer-1',
+    factionId: 'usa',
+    type: 'naval',
+    // 宙斯盾驱逐舰（防空反导，掩护航母抵御伊朗弹道导弹）
+    coord: { col: 7, row: 10 },
+    strength: 60,
+    personnel: 300,
+    maxPersonnel: 300,
+    fuel: 78,
+    ammo: 70,
+    morale: 78,
+    fatigue: 15,
+    status: [],
+    // 装备：标准系列防空/反导导弹（SM-3/SM-6，反导拦截伊朗弹道导弹）
+    equipment: [{ type: 'sam', count: 90, quality: 0.92 }],
+  },
+  {
+    id: 'us-destroyer-2',
+    factionId: 'usa',
+    type: 'naval',
+    coord: { col: 4, row: 11 },
+    strength: 60,
+    personnel: 300,
+    maxPersonnel: 300,
+    fuel: 76,
+    ammo: 68,
+    morale: 76,
+    fatigue: 18,
+    status: [],
+    equipment: [{ type: 'sam', count: 90, quality: 0.92 }],
+  },
+  // === 战斧导弹驱逐舰 ×2（远程精确打击核设施） ===
+  {
+    id: 'us-missile-ddg-1',
+    factionId: 'usa',
+    type: 'missile', // 战斧巡航导弹驱逐舰归 missile
+    // 波斯湾海域（战斧远程精确打击纳坦兹核设施）
+    coord: { col: 6, row: 11 },
+    strength: 50,
+    personnel: 300,
+    maxPersonnel: 300,
+    fuel: 72,
+    ammo: 90, // 战斧弹药充足
+    morale: 78,
+    fatigue: 15,
+    status: [],
+    // 装备：战斧 Block V 巡航导弹（远程精确打击，命中核设施）
+    equipment: [{ type: 'cruise-missile', count: 120, quality: 0.95 }],
+  },
+  {
+    id: 'us-missile-ddg-2',
+    factionId: 'usa',
+    type: 'missile',
+    coord: { col: 3, row: 11 },
+    strength: 50,
+    personnel: 300,
+    maxPersonnel: 300,
+    fuel: 70,
+    ammo: 88,
+    morale: 76,
+    fatigue: 18,
+    status: [],
+    equipment: [{ type: 'cruise-missile', count: 120, quality: 0.95 }],
+  },
+  // ============================================================
+  // 以色列（israel，攻，3 单位，从 usisrael 拆出）
+  // ============================================================
   // === F-35 隐身战机 ×2（以色列出发，突防摧毁深埋工事） ===
   {
-    id: 'us-f35-1',
-    factionId: 'usisrael',
+    id: 'israel-f35-1',
+    factionId: 'israel',
     type: 'air',
     // F-35I Adir（以色列空军，突防摧毁福特罗深埋工事）
     coord: { col: 1, row: 5 },
@@ -85,16 +153,14 @@ export const iranUnits: CampaignUnit[] = [
       { type: 'bunker-buster', count: 48, quality: 0.9 },
     ],
     // T2 第 2 批：F-35 AN/APG-81 AESA 雷达 + AN/ASQ-239 电子战套件。
-    // jammingRange=3（雷达干扰范围）、stealthReduction=0.5（隐身降低敌方侦察成功率×0.5）、
-    // detectionBoost=1（增强己方对 F-35 视野内敌方的观测）。
     ewCapability: { jammingRange: 3, detectionBoost: 1, stealthReduction: 0.5 },
   },
   {
-    id: 'us-f35-2',
-    factionId: 'usisrael',
+    id: 'israel-f35-2',
+    factionId: 'israel',
     type: 'air',
-    // F-35 第二编队（美军，从波斯湾航母/海湾国家基地出发）
-    coord: { col: 4, row: 8 },
+    // F-35 第二编队（以色列空军，备份突防编队）
+    coord: { col: 2, row: 6 },
     strength: 88,
     personnel: 0,
     maxPersonnel: 1,
@@ -107,81 +173,14 @@ export const iranUnits: CampaignUnit[] = [
       { type: 'stealth-fighter', count: 24, quality: 0.95 },
       { type: 'bunker-buster', count: 48, quality: 0.9 },
     ],
-    // T2 第 2 批：同 us-f35-1，挂载 AN/ASQ-239 电子战套件。
     ewCapability: { jammingRange: 3, detectionBoost: 1, stealthReduction: 0.5 },
   },
-  // === 驱逐舰 ×2（宙斯盾防空 + 反导） ===
+  // === 特种部队 ×1（侦察/定点清除，第 3 批归属改为以色列 Sayeret Matkal） ===
   {
-    id: 'us-destroyer-1',
-    factionId: 'usisrael',
-    type: 'naval',
-    // 宙斯盾驱逐舰（防空反导，掩护航母抵御伊朗弹道导弹）
-    coord: { col: 7, row: 10 },
-    strength: 60,
-    personnel: 300,
-    maxPersonnel: 300,
-    fuel: 78,
-    ammo: 70,
-    morale: 78,
-    fatigue: 15,
-    status: [],
-    // 装备：标准系列防空/反导导弹（SM-3/SM-6，反导拦截伊朗弹道导弹）
-    equipment: [{ type: 'sam', count: 90, quality: 0.92 }],
-  },
-  {
-    id: 'us-destroyer-2',
-    factionId: 'usisrael',
-    type: 'naval',
-    coord: { col: 4, row: 11 },
-    strength: 60,
-    personnel: 300,
-    maxPersonnel: 300,
-    fuel: 76,
-    ammo: 68,
-    morale: 76,
-    fatigue: 18,
-    status: [],
-    equipment: [{ type: 'sam', count: 90, quality: 0.92 }],
-  },
-  // === 战斧导弹驱逐舰 ×2（远程精确打击核设施） ===
-  {
-    id: 'us-missile-ddg-1',
-    factionId: 'usisrael',
-    type: 'missile', // 战斧巡航导弹驱逐舰归 missile
-    // 波斯湾海域（战斧远程精确打击纳坦兹核设施）
-    coord: { col: 6, row: 11 },
-    strength: 50,
-    personnel: 300,
-    maxPersonnel: 300,
-    fuel: 72,
-    ammo: 90, // 战斧弹药充足
-    morale: 78,
-    fatigue: 15,
-    status: [],
-    // 装备：战斧 Block V 巡航导弹（远程精确打击，命中核设施）
-    equipment: [{ type: 'cruise-missile', count: 120, quality: 0.95 }],
-  },
-  {
-    id: 'us-missile-ddg-2',
-    factionId: 'usisrael',
-    type: 'missile',
-    coord: { col: 3, row: 11 },
-    strength: 50,
-    personnel: 300,
-    maxPersonnel: 300,
-    fuel: 70,
-    ammo: 88,
-    morale: 76,
-    fatigue: 18,
-    status: [],
-    equipment: [{ type: 'cruise-missile', count: 120, quality: 0.95 }],
-  },
-  // === 特种部队 ×1（侦察/定点清除） ===
-  {
-    id: 'us-special-1',
-    factionId: 'usisrael',
+    id: 'israel-special-1',
+    factionId: 'israel',
     type: 'infantry',
-    // 伊朗境内渗透（激光指示核设施/定点清除核科学家，引导精确打击）
+    // 伊朗境内渗透（以色列 Sayeret Matkal 特种部队，激光指示核设施/定点清除核科学家）
     coord: { col: 12, row: 5 },
     strength: 70,
     personnel: 120,
@@ -199,7 +198,7 @@ export const iranUnits: CampaignUnit[] = [
   },
 
   // ============================================================
-  // 伊朗（守反击，9 单位）
+  // 伊朗（守反击，9 单位，未变）
   // ============================================================
   // === 弹道导弹 ×3（Sejjil/Emad，反击以色列/美军） ===
   {
@@ -310,9 +309,6 @@ export const iranUnits: CampaignUnit[] = [
     // 装备：S-300PMU2 远程地空导弹（拒止美以空中优势）
     equipment: [{ type: 'sam', count: 48, quality: 0.82 }],
     // T2 第 2 批：S-300 配套 64N6 大鸟雷达（反隐身预警）+ T2 第 5 批 A 拦截能力（equipment.sam）。
-    // ewCapability.detectionBoost=1 增强伊朗对美以联军的观测（雷达哨）；
-    // jammingRange=4（雷达探测半径，作为 EW 被动增强半径复用）；
-    // stealthReduction=1（S-300 非隐身单位，无隐身折扣）。
     ewCapability: { jammingRange: 4, detectionBoost: 1, stealthReduction: 1 },
   },
   {

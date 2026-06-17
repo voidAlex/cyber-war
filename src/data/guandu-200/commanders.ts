@@ -54,4 +54,25 @@ export const guanduCommanders: CampaignCommander[] = [
     preferredTempo: 'balanced',
     doctrineTags: ['兵力碾压', '正面强攻', '优柔寡断', '外宽内忌'],
   },
+  // === 刘表方（第 3 批新增中立第三方） ===
+  // 史实：刘表坐拥荆州（南方富庶之地），优柔观望。袁绍曾联络刘表夹击曹操，
+  // 但刘表首鼠两端、不助任何一方。曹操平定北方后才南下攻荆州（刘表已病亡）。
+  {
+    id: 'liaobiao-lord',
+    name: '刘表 (Liu Biao)',
+    rank: '荆州牧（镇南将军，领荆襄八郡）',
+    factionId: 'biaojiao',
+    personality:
+      '优柔观望的荆州牧。坐拥荆襄八郡富庶之地、带甲十余万，却首鼠两端、不助任何一方。' +
+      '袁绍曾遣使联络夹击曹操，刘表许诺而不发兵；曹操亦遣使安抚，刘表两不得罪。' +
+      '汉室宗亲，雅重文士（建荆州学宫），但无争雄之志，唯求保境安民。' +
+      '可被袁绍外交拉拢（结盟夹击曹操）或被曹操收买（保持中立），玩家可施加外交影响。',
+    // 低进攻性（优柔观望，不主动出击）
+    aggression: 0.2,
+    // 低服从度（首鼠两端，不纳任何一方之命）
+    obedience: 0.3,
+    // schema 无 'steady'；刘表稳健观望之意映射为 balanced
+    preferredTempo: 'balanced',
+    doctrineTags: ['保境安民', '优柔观望', '首鼠两端', '中立观望', '富庶自守'],
+  },
 ]

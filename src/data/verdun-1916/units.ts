@@ -235,4 +235,68 @@ export const verdunUnits: CampaignUnit[] = [
     fatigue: 15,
     status: [],
   },
+  // === 第 3 批新增：英国远征军（索姆河方向，3 单位） ===
+  // 史实：英军在凡尔登西南的索姆河方向集结，1916/7/1 发动索姆河战役牵制德军。
+  // 部署在网格西南（col 2-4, row 6-7），象征索姆河方向，与凡尔登主战场（默兹河）区分。
+  // === 英军步兵师 ×2：索姆河方向 ===
+  {
+    id: 'brit-infantry-1',
+    factionId: 'britain',
+    type: 'infantry',
+    // 索姆河北岸步兵师（牵制德军，减轻凡尔登压力）
+    coord: { col: 3, row: 7 },
+    strength: 78,
+    personnel: 9000,
+    maxPersonnel: 12000,
+    fuel: 55,
+    ammo: 72,
+    morale: 70,
+    fatigue: 30,
+    status: [],
+    // 装备：李-恩菲尔德步枪 + 维克斯机枪（英军制式）
+    equipment: [
+      { type: 'rifle', count: 7000, quality: 0.7 },
+      { type: 'machine-gun', count: 12, quality: 0.72 },
+    ],
+  },
+  {
+    id: 'brit-infantry-2',
+    factionId: 'britain',
+    type: 'infantry',
+    // 索姆河南岸步兵师
+    coord: { col: 4, row: 7 },
+    strength: 76,
+    personnel: 8500,
+    maxPersonnel: 12000,
+    fuel: 53,
+    ammo: 70,
+    morale: 68,
+    fatigue: 32,
+    status: [],
+    equipment: [
+      { type: 'rifle', count: 6500, quality: 0.7 },
+      { type: 'machine-gun', count: 10, quality: 0.72 },
+    ],
+  },
+  // === 英军炮兵 ×1：索姆河炮兵阵地 ===
+  {
+    id: 'brit-artillery-1',
+    factionId: 'britain',
+    type: 'artillery',
+    // 索姆河炮兵阵地（弹幕射击压制德军，支援步兵冲锋）
+    coord: { col: 2, row: 6 },
+    strength: 75,
+    personnel: 2800,
+    maxPersonnel: 4000,
+    fuel: 38,
+    ammo: 82,
+    morale: 70,
+    fatigue: 25,
+    status: [],
+    // 装备：18 磅野战炮（英军制式）+ 重榴弹炮
+    equipment: [
+      { type: 'field-gun', count: 30, quality: 0.8 },
+      { type: 'howitzer', count: 8, quality: 0.82 },
+    ],
+  },
 ]

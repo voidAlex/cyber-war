@@ -547,8 +547,20 @@ export interface TacticalDecision {
 export interface AIRoleDef {
   /** 角色 id（唯一，如 'petain-chief'/'falkenhayn-director'） */
   id: string
-  /** 角色类型：参谋长/外交官/战区司令/导演部 */
-  type: 'chief' | 'diplomat' | 'commander' | 'director'
+  /**
+   * 角色类型：参谋长/外交官/战区司令/导演部/参谋（谋士）/后勤官。
+   *
+   * 第 2+3 批扩展：
+   * - 'staff'：参谋/谋士，纯对话角色（如郭嘉/沮授），不参与物理结算，
+   *   只在角色 tab 对话中提供战术建议（影响玩家决策，不直接产出 AI 命令）。
+   * - 'logistics'：后勤官，纯对话角色（如神圣之路运输指挥），在角色 tab 中
+   *   提供后勤/补给态势解读，不产出 AI 命令也不参与战斗结算。
+   *
+   * 运行时 orchestrator 仅对 'commander'/'chief' 产出 AI 行动；
+   * 'staff'/'logistics'/'diplomat'/'director' 仅作为玩家侧角色 tab 对话对象
+   * （由 useCommandDialogue 过滤玩家方角色渲染 tab，无 LLM 行动产出）。
+   */
+  type: 'chief' | 'diplomat' | 'commander' | 'director' | 'staff' | 'logistics'
   /** 所属阵营 id（引用 factions.json） */
   factionId: string
   /**

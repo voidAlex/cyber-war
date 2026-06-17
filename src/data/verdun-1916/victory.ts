@@ -96,5 +96,16 @@ export const verdunVictory: CampaignVictory = {
         '德军累计积分达 1000（占节点 +100/歼敌 +10/回合 -5），标志消耗战略达成',
       scoreThreshold: 1000,
     },
+    // === 英国胜利条件（第 3 批新增，法方盟友） ===
+    // 英方独立目标：牵制德军（索姆河攻势分散德军 30% 兵力），间接支援凡尔登守军。
+    {
+      id: 'britain-pin-germany',
+      factionId: 'britain',
+      type: 'casualty',
+      description:
+        '牵制德军：德军战损超过 30%（索姆河攻势分散德军兵力，间接缓解凡尔登守军压力）',
+      targetFactionId: 'germany',
+      casualtyThreshold: 0.3,
+    },
   ],
 }

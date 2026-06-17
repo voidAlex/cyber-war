@@ -242,67 +242,147 @@ export const iranRules: CampaignRules = {
   ],
   // 第 5 批 + 第 2+3 批：自定义 AI 角色定义（rules.aiRoles）。
   //
-  // 美以伊为 2 方战役，无第三方外交方；故 diplomat 角色不在此声明。
+  // 第 2+3 批角色重构 + 第 3 批多阵营拆分：
+  // - 参谋长改正为职业军人（CENTCOM 司令 / IDF 总参谋长 / IRGC 司令）。
+  // - 政治领袖（内塔尼亚胡 / 哈梅内伊）降格为外交官角色（diplomat）。
+  // - "美以联军"拆为 usa + israel + iran 3 方，各方各加 chief/commander/diplomat/logistics。
   aiRoles: [
     // ============================================================
-    // 美以联军侧（usisrael）
+    // 美国侧（usa，第 3 批从 usisrael 拆出）
     // ============================================================
-    // === 美以参谋长：内塔尼亚胡（果断先发制人） ===
+    // === 美军参谋长：CENTCOM 司令（精确打击 + 联合作战） ===
     {
-      id: 'ai-netanyahu-chief',
+      id: 'ai-centcom-chief',
       type: 'chief',
-      factionId: 'usisrael',
-      displayName: '内塔尼亚胡',
+      factionId: 'usa',
+      displayName: 'CENTCOM 司令',
       personality:
-        '以色列总理，美以联军政治主导者。果断先发制人的鹰派，坚信伊朗核能力是以色列生存的根本威胁，' +
-        '主张以精确打击"斩首"伊朗核设施。决策果断、不犹豫，敢冒地区升级风险。',
-      aggression: 0.8,
-      obedience: 0.7,
+        '美军中央司令部（CENTCOM）战区总司令，统筹波斯湾航母战斗群 + F-35 + 战斧联合作战。' +
+        '崇尚精确打击 + 隐身突防的"外科手术"。methodical 不冒进，受以色列政治推动参战但警惕升级。',
+      aggression: 0.7,
+      obedience: 0.8,
     },
-    // === 美军中央司令：负责航母/F-35 联合作战 ===
+    // === 美军舰队司令：负责航母/驱逐舰/战斧 ===
     {
-      id: 'ai-uscentcom-commander',
+      id: 'ai-usfleet-commander',
       type: 'commander',
-      factionId: 'usisrael',
-      displayName: '美军中央司令',
+      factionId: 'usa',
+      displayName: '美军舰队司令',
       personality:
-        '美军中央司令部（CENTCOM）前线指挥官，指挥波斯湾航母战斗群与 F-35 联合作战。' +
-        '崇尚精确打击 + 隐身突防的"外科手术"，善用战斧巡航导弹与钻地弹摧毁深埋工事。' +
-        '执行内塔尼亚胡先发制人战略，把握战机窗口。',
+        '美军波斯湾航母战斗群司令，指挥航母舰载机 + 宙斯盾驱逐舰反导 + 战斧远程精确打击。' +
+        '把握战机窗口，以战斧巡航导弹摧毁核设施。执行 CENTCOM 战区统筹。',
       aggression: 0.75,
       obedience: 0.75,
       responsibleUnits: [
         'us-carrier-1',
         'us-carrier-2',
-        'us-f35-1',
-        'us-f35-2',
+        'us-destroyer-1',
+        'us-destroyer-2',
+        'us-missile-ddg-1',
+        'us-missile-ddg-2',
       ],
+    },
+    // === 美军后勤官：跨海补给线指挥（第 2+3 批新增） ===
+    {
+      id: 'ai-usa-logistics',
+      type: 'logistics',
+      factionId: 'usa',
+      displayName: '美军跨海后勤',
+      personality:
+        '美军跨海后勤指挥，统筹波斯湾航母战斗群的海上补给线 + 精确打击弹药（战斧/GBU-28）运输。' +
+        '从本土/海湾国家基地向波斯湾舰队持续输送弹药/燃料。解读跨海补给脆弱点与伊朗快艇威胁。',
+      aggression: 0.2,
+      obedience: 0.8,
+    },
+    // ============================================================
+    // 以色列侧（israel，第 3 批从 usisrael 拆出）
+    // ============================================================
+    // === 以色列参谋长：IDF 总参谋长（果断先发制人） ===
+    {
+      id: 'ai-idf-chief',
+      type: 'chief',
+      factionId: 'israel',
+      displayName: 'IDF 总参谋长',
+      personality:
+        '以色列国防军（IDF）总参谋长，果断先发制人的军事指挥者。坚信伊朗核能力是以色列生存的根本威胁，' +
+        '主张以 F-35I 隐身突防 + 钻地弹精确打击"斩首"伊朗核设施。决策果断、不犹豫。',
+      aggression: 0.8,
+      obedience: 0.7,
+    },
+    // === 以色列外交官：内塔尼亚胡（推动美军参战 + 国际斡旋） ===
+    {
+      id: 'ai-netanyahu-diplomat',
+      type: 'diplomat',
+      factionId: 'israel',
+      displayName: '内塔尼亚胡',
+      personality:
+        '以色列总理，外交与战略主导者。果断先发制人的鹰派，坚信伊朗核能力是以色列生存威胁。' +
+        '对美方有政治影响力，推动美军参与联合作战；主导对美/欧盟/海湾国家的外交斡旋，争取联军支持。',
+      aggression: 0.8,
+      obedience: 0.7,
+    },
+    // === 以色列空军司令：负责 F-35 突防 ===
+    {
+      id: 'ai-israel-air-commander',
+      type: 'commander',
+      factionId: 'israel',
+      displayName: '以色列空军司令',
+      personality:
+        '以色列空军（IAF）司令，指挥 F-35I Adir 隐身战机突防摧毁伊朗深埋核工事 + 特种部队（Sayeret Matkal）' +
+        '侦察定点清除。把握突防窗口，善用钻地弹（GBU-28）根除地下核设施。',
+      aggression: 0.8,
+      obedience: 0.7,
+      responsibleUnits: ['israel-f35-1', 'israel-f35-2', 'israel-special-1'],
+    },
+    // === 以色列后勤官：本土弹药补给（第 2+3 批新增） ===
+    {
+      id: 'ai-israel-logistics',
+      type: 'logistics',
+      factionId: 'israel',
+      displayName: '以色列本土后勤',
+      personality:
+        '以色列本土后勤指挥，统筹 F-35 钻地弹（GBU-28/Bunker Buster）储备 + 特种部队装备补给。' +
+        '本土作战储备为主，远程奔袭伊朗需精确弹药保障。解读弹药储备与远程奔袭航程限制。',
+      aggression: 0.2,
+      obedience: 0.8,
     },
     // ============================================================
     // 伊朗侧（iran）
     // ============================================================
-    // === 伊朗参谋长：最高领袖哈梅内伊（强硬抵抗消耗战） ===
+    // === 伊朗参谋长：IRGC 司令（强硬抵抗消耗战） ===
     {
-      id: 'ai-khamenei-chief',
+      id: 'ai-irgc-chief',
       type: 'chief',
+      factionId: 'iran',
+      displayName: 'IRGC 司令',
+      personality:
+        '伊朗革命卫队（IRGC）总司令，强硬抵抗消耗战的军事最高指挥者。主张以弹道导弹反击 + ' +
+        '革命卫队非对称作战 + 霍尔木兹海峡封锁拖入持久消耗。崇尚以非对称手段反击强敌。',
+      aggression: 0.6,
+      obedience: 0.4,
+    },
+    // === 伊朗外交官：哈梅内伊（最高领袖，抵抗战略叙事） ===
+    {
+      id: 'ai-khamenei-diplomat',
+      type: 'diplomat',
       factionId: 'iran',
       displayName: '哈梅内伊',
       personality:
-        '伊朗最高领袖，强硬抵抗消耗战的最高统帅。主张以弹道导弹反击 + 革命卫队非对称作战 + ' +
-        '霍尔木兹海峡封锁拖入持久消耗。独断专行，对革命卫队绝对掌控。',
+        '伊朗最高领袖，外交与战略主导者。强硬抵抗消耗战的最高统帅。主张以弹道导弹反击 + ' +
+        '非对称作战拖入持久消耗。主导"抵抗经济"叙事，争取俄中朝等国外交支持，分化西方联盟。',
       aggression: 0.4,
       obedience: 0.3,
     },
-    // === 伊朗革命卫队司令：负责 IRGC + 弹道导弹反击 ===
+    // === 伊朗导弹部队司令：负责弹道导弹反击 ===
     {
-      id: 'ai-irgc-commander',
+      id: 'ai-iran-missile-commander',
       type: 'commander',
       factionId: 'iran',
       displayName: '革命卫队司令',
       personality:
-        '伊朗伊斯兰革命卫队（IRGC）司令，指挥革命卫队地面部队 + 弹道导弹部队。' +
+        '伊朗伊斯兰革命卫队（IRGC）导弹部队司令，指挥革命卫队地面部队 + 弹道导弹部队。' +
         '崇尚非对称作战（导弹快艇 swarm/无人机饱和），主张以弹道导弹反击以色列与美军舰队，' +
-        '封锁霍尔木兹海峡制造全球能源危机。意识形态坚定，执行最高领袖强硬抵抗战略。',
+        '封锁霍尔木兹海峡制造全球能源危机。意识形态坚定，执行 IRGC 总司令强硬抵抗战略。',
       aggression: 0.65,
       obedience: 0.6,
       responsibleUnits: [
@@ -312,6 +392,18 @@ export const iranRules: CampaignRules = {
         'iran-missile-2',
         'iran-missile-3',
       ],
+    },
+    // === 伊朗后勤官：本土补给网络（第 2+3 批新增） ===
+    {
+      id: 'ai-iran-logistics',
+      type: 'logistics',
+      factionId: 'iran',
+      displayName: '伊朗本土后勤',
+      personality:
+        '伊朗本土后勤指挥，统筹德黑兰→各弹道导弹阵地/革命卫队据点的陆上补给网。' +
+        '本土作战补给相对稳，但 S-300/导弹快艇/无人机备件受制裁影响。解读本土补给态势与制裁压力。',
+      aggression: 0.2,
+      obedience: 0.7,
     },
   ],
 }

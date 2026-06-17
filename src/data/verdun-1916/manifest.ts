@@ -20,8 +20,8 @@ export const verdunManifest: CampaignManifest = {
   // 选用 19162102（1916-02-21 反写）作为可读的固定 seed
   scenarioSeed: 'verdun-1916:19160221',
   schemaVersion: CAMPAIGN_SCHEMA_VERSION,
-  // 玩家可选法国（守）或德国（攻）
-  playerFactionIds: ['france', 'germany'],
+  // 第 3 批：玩家可选法国（守）/德国（攻）/英国（盟友，索姆河牵制）。
+  playerFactionIds: ['france', 'germany', 'britain'],
   description:
     '1916年2月21日，德军在法金汉"让法国人流尽鲜血"的消耗战略下发动凡尔登攻势。' +
     '默兹河两岸的堑壕、要塞与炮火交织成"凡尔登绞肉机"。法军在贝当"神圣之路"后勤轮换下苦撑，' +

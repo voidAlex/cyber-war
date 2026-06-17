@@ -52,5 +52,14 @@ export const guanduVictory: CampaignVictory = {
       targetFactionId: 'caocao',
       casualtyThreshold: 0.7,
     },
+    // === 刘表胜利条件（第 3 批新增，中立第三方） ===
+    // 刘表目标：保持中立到结束（不被任何一方攻击/拉拢参战）。
+    {
+      id: 'biaojiao-keep-neutral',
+      factionId: 'biaojiao',
+      type: 'turn_limit',
+      description:
+        '刘表保持中立至战役回合上限（30 回合，首鼠两端、保境安民，未卷入曹袁决战）',
+    },
   ],
 }

@@ -70,7 +70,8 @@ export interface PlayerRoleTab {
   /** 角色 id（'chief'/'diplomat'/'commander-xxx'） */
   roleId: string
   /** 角色类型（决定色标与对话路由） */
-  type: 'chief' | 'diplomat' | 'commander' | 'director' | 'player'
+  // 第 2+3 批扩展 staff（参谋/谋士）/logistics（后勤官），均为纯对话角色 tab。
+  type: 'chief' | 'diplomat' | 'commander' | 'director' | 'staff' | 'logistics' | 'player'
   /** tab 显示名（如「参谋长」「外交官」「炮兵司令」） */
   label: string
   /** 该角色负责的单位 id 列表（commander 用；缺省=本方全部） */
@@ -130,10 +131,18 @@ function usePlayerRoleTabs(
   return tabs
 }
 
-/** AIRoleDef → roleId（chief/diplomat 原样；commander 加前缀避免多 commander 冲突）。 */
+/** AIRoleDef → roleId（chief/diplomat 原样；其余类型加前缀避免冲突）。
+ *
+ * 第 2+3 批扩展：
+ * - staff（参谋/谋士）→ 'staff-' + ar.id，路由到 playerCommander.chat（战术建议对话）。
+ * - logistics（后勤官）→ 'logistics-' + ar.id，路由到 playerCommander.chat（后勤态势对话）。
+ * 二者均为纯对话角色 tab，不产出 AI 命令，仅提供决策建议/态势解读。
+ */
 function roleDefToRoleId(ar: AIRoleDef): string {
   if (ar.type === 'chief') return 'chief'
   if (ar.type === 'diplomat') return 'diplomat'
+  if (ar.type === 'staff') return `staff-${ar.id}`
+  if (ar.type === 'logistics') return `logistics-${ar.id}`
   // commander：用 'commander-' + ar.id（ar.id 已唯一）
   return `commander-${ar.id}`
 }
@@ -143,11 +152,14 @@ function roleDefLabel(ar: AIRoleDef): string {
   // 优先用战役包显式声明的 displayName（人名/职务短标签，如「法金汉」「皇太子」）。
   if (ar.displayName && ar.displayName.length > 0) return ar.displayName
   // 兜底：type 中文名（无 displayName 时，如内置 m1-skeleton 无 aiRoles）。
+  // 第 2+3 批扩展 staff（参谋/谋士）/logistics（后勤官），均为纯对话角色 tab。
   const ROLE_TYPE_CN: Record<AIRoleDef['type'], string> = {
     chief: '参谋长',
     diplomat: '外交官',
     commander: '指挥官',
     director: '导演部',
+    staff: '参谋',
+    logistics: '后勤官',
   }
   return ROLE_TYPE_CN[ar.type]
 }
@@ -331,11 +343,17 @@ export function useCommandDialogue(): {
           input, { world, playerFactionId }, history, onDelta,
         )
         reply = r
-      } else if (roleId.startsWith('commander-')) {
-        // 玩家方指挥官 tab：从 campaign rules.aiRoles 找该角色定义（responsibleUnits/title）
+      } else if (
+        roleId.startsWith('commander-') ||
+        roleId.startsWith('staff-') ||
+        roleId.startsWith('logistics-')
+      ) {
+        // 玩家方指挥官/参谋/后勤 tab：从 campaign rules.aiRoles 找该角色定义（responsibleUnits/title）。
+        // 第 2+3 批：staff（参谋/谋士）与 logistics（后勤官）均为纯对话角色，复用
+        // playerCommander.chat（战术建议/态势解读对话），title 取角色 displayName。
         const roleDef = findPlayerRoleDef(world.scenarioId, playerFactionId, roleId)
         const role = llmConfig !== null ? createLlmPlayerCommanderRole(llmService, llmConfig) : playerCommanderRole
-        logger.info('ui/command/chat', '指挥官对话', {
+        logger.info('ui/command/chat', '指挥官/参谋/后勤对话', {
           scope: 'save', saveId: world.saveId, turn: world.turnIndex,
           useLlm: llmConfig !== null, roleId,
         })
