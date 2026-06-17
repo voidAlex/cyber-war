@@ -5944,3 +5944,260 @@ th {
     min-width: 100px;
   }
 }
+
+/* ===========================================================================
+ * O. 开场参谋长简报弹窗（.opening-briefing*）— 第 5 批新战役开场
+ *    深空蓝底 + 青光描边 + 扫描线全屏 modal。
+ * =========================================================================== */
+.opening-briefing {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5, 8, 18, 0.82);
+  backdrop-filter: blur(4px);
+  animation: opening-briefing__fade-in 0.25s ease-out;
+}
+
+@keyframes opening-briefing__fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 背景层：扫描线 + 网格 + 径向光晕 */
+.opening-briefing__bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(6, 182, 212, 0.04) 0px,
+      rgba(6, 182, 212, 0.04) 1px,
+      transparent 1px,
+      transparent 4px
+    ),
+    radial-gradient(ellipse at center, rgba(6, 182, 212, 0.10), transparent 60%);
+}
+
+.opening-briefing__card {
+  position: relative;
+  width: min(720px, 96vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 28px 32px 20px;
+  background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-panel-2) 100%);
+  border: 1.5px solid var(--accent-cyan);
+  border-radius: 4px;
+  box-shadow:
+    0 0 24px rgba(6, 182, 212, 0.35),
+    inset 0 0 32px rgba(6, 182, 212, 0.06);
+  overflow: hidden;
+  animation: opening-briefing__slide-in 0.3s ease-out;
+}
+
+@keyframes opening-briefing__slide-in {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* 四角青光切角装饰 */
+.opening-briefing__card::before,
+.opening-briefing__card::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--accent-cyan);
+}
+.opening-briefing__card::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+.opening-briefing__card::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
+.opening-briefing__header {
+  text-align: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(6, 182, 212, 0.3);
+}
+
+.opening-briefing__tag {
+  display: inline-block;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--accent-cyan);
+  margin-bottom: 6px;
+}
+
+.opening-briefing__title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #e2f3f6;
+  text-shadow: 0 0 12px rgba(6, 182, 212, 0.6);
+  margin: 0 0 4px;
+}
+
+.opening-briefing__scenario {
+  font-size: 13px;
+  color: var(--accent-cyan);
+  opacity: 0.85;
+  margin: 0;
+}
+
+.opening-briefing__body {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 6px;
+  margin-bottom: 12px;
+}
+
+.opening-briefing__loading {
+  text-align: center;
+  color: var(--accent-cyan);
+  opacity: 0.7;
+  padding: 40px 0;
+  font-style: italic;
+}
+
+.opening-briefing__section {
+  margin-bottom: 16px;
+}
+
+.opening-briefing__section-label {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent-cyan);
+  margin: 0 0 6px;
+}
+
+.opening-briefing__section-bracket {
+  color: rgba(6, 182, 212, 0.5);
+  margin: 0 2px;
+}
+
+.opening-briefing__section-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #c9d6e2;
+  white-space: pre-wrap;
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid rgba(6, 182, 212, 0.3);
+}
+
+.opening-briefing__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(6, 182, 212, 0.3);
+}
+
+.opening-briefing__source {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgba(6, 182, 212, 0.7);
+  letter-spacing: 1px;
+}
+
+/* 「开始指挥」按钮（青光切角 + 扫光 hover） */
+.opening-briefing__btn {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent-cyan);
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.12), rgba(6, 182, 212, 0.04));
+  border: 1.5px solid var(--accent-cyan);
+  padding: 10px 24px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.opening-briefing__btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.3), transparent);
+  transition: left 0.5s ease;
+}
+
+.opening-briefing__btn:hover:not(:disabled)::before {
+  left: 100%;
+}
+
+.opening-briefing__btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(6, 182, 212, 0.1));
+  box-shadow: 0 0 16px rgba(6, 182, 212, 0.5);
+}
+
+.opening-briefing__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ===========================================================================
+ * P. 内置战役列表（.campaign-list*）— 第 5 批 CampaignPanel 战役选择
+ * =========================================================================== */
+.campaign-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.campaign-list__item {
+  padding: 10px 12px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  border-radius: 3px;
+}
+
+.campaign-list__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.campaign-list__name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 1px;
+}
+
+.campaign-list__desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #9fb2c2;
+  margin: 0 0 8px;
+}

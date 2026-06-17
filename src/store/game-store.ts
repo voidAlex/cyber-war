@@ -39,7 +39,9 @@ import {
   type RuntimeLLMConfig,
   RuntimeConfigError,
 } from '@/layers/gateway/runtime-config'
-import { verdunRules } from '@/data/verdun-1916/rules'
+// 第 5 批：内置战役 rules 注册表迁移到 src/data/registry（单一数据来源，
+// 自动覆盖 5 个内置包）。本文件不再硬编码 verdunRules，避免每加新包都要改 store。
+import { BUILTIN_CAMPAIGN_RULES } from '@/data/registry'
 import type { WorldState, CampaignRules } from '@/types'
 import type { CacheStats } from '@/layers/application/services/llm-service'
 import type { LlmErrorBanner } from '@/layers/application/services/llm-service'
@@ -62,13 +64,10 @@ const physicsClient = initWorkerService()
 /**
  * 内置战役包的 scenarioId → CampaignRules 查表（第 2 批随机事件用）。
  *
- * createMultiAgentResolver 经 getCampaignRules 按当前 world.scenarioId 取对应 rules，
- * rules.randomEvents 为空或未注册时本回合无随机事件（默认行为兼容）。
+ * 第 5 批：从 src/data/registry 复用单一注册表（覆盖凡尔登/官渡/俄乌/中途岛/美以伊），
+ * createMultiAgentResolver 经 getCampaignRules 按当前 world.scenarioId 取对应 rules。
  * 后续支持 ZIP 导入战役包时，导入逻辑应在此注册其 rules（按 scenarioId）。
  */
-const BUILTIN_CAMPAIGN_RULES: Record<string, CampaignRules> = {
-  'verdun-1916': verdunRules,
-}
 
 /**
  * 按 scenarioId 查战役规则（第 2 批随机事件）。
@@ -458,6 +457,21 @@ export interface GameStoreState {
   markSaved: (turnIndex: number) => void
   /** 清除"已保存"角标（markSaved 的 setTimeout 回调用）。 */
   clearSavedIndicator: () => void
+
+  // —— 第 5 批：开场参谋长简报弹窗（OpeningBriefing）——
+  // 新战役开局（createSave / 内置包开局 / 导入 ZIP 战役包开局）时置 true，
+  // App.tsx 据此叠加 OpeningBriefing；玩家点击"开始指挥"调 dismissOpeningBriefing 置 false。
+  // 旧存档加载（loadSave）不置位（避免每次进存档都弹简报，符合验收）。
+  // 瞬态 UI 路由态，不进 reducer/context（不持久化）。
+  /**
+   * 是否显示开场参谋长简报弹窗。
+   * 新战役创建时 true（createSave/内置包开局）；旧存档加载时 false。
+   */
+  showOpeningBriefing: boolean
+  /** 标记需要显示开场简报（新战役开局后调用）。 */
+  markOpeningBriefing: () => void
+  /** 关闭开场简报（玩家点击"开始指挥"时调用）。 */
+  dismissOpeningBriefing: () => void
 }
 
 // 存档过滤谓词（纯函数，从 save-filter 导入；拆分以避免测试 import store 时触发 Worker）
@@ -573,7 +587,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       }
       const all = await persistenceService.listSaves()
       const saves = all.filter(isPlayerSaveId)
-      set({ context: ctx, saveId, saves, busy: false })
+      // 第 5 批：新战役创建后标记显示开场参谋长简报弹窗。
+      set({ context: ctx, saveId, saves, busy: false, showOpeningBriefing: true })
     } catch (err) {
       set({ busy: false, userError: `创建存档失败：${String(err)}` })
     }
@@ -613,7 +628,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         pendingDecision: null,
         error: null,
       }
-      set({ context: ctx, saveId, busy: false })
+      // 第 5 批：载入旧存档不显示开场参谋长简报（仅新战役创建时弹）。
+      set({ context: ctx, saveId, busy: false, showOpeningBriefing: false })
     } catch (err) {
       set({ busy: false, userError: `载入存档失败：${String(err)}` })
     }
@@ -934,6 +950,18 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   },
   clearSavedIndicator() {
     set({ showSavedIndicator: false })
+  },
+
+  // 第 5 批：开场参谋长简报弹窗（瞬态 UI 路由态）。
+  // 初始 false（标题屏未开局）。markOpeningBriefing 由 createSave / 内置包开局 /
+  // 导入 ZIP 开局调用（新战役才弹）；dismissOpeningBriefing 由 OpeningBriefing 按钮
+  // 「开始指挥」调用。loadSave 不调 markOpeningBriefing（旧存档不弹）。
+  showOpeningBriefing: false,
+  markOpeningBriefing() {
+    set({ showOpeningBriefing: true })
+  },
+  dismissOpeningBriefing() {
+    set({ showOpeningBriefing: false })
   },
 
   // 第 3 批：沙盘 cell 悬浮 tooltip（SandboxRenderer move 模式回调驱动）

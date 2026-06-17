@@ -101,6 +101,8 @@ export default function CampaignCreatorPage({
   const setFromWorld = useGameStore((s) => s.setFromWorld)
   const refreshSaves = useGameStore((s) => s.refreshSaves)
   const clearError = useGameStore((s) => s.clearError)
+  // 第 5 批：LLM 生成战役确认开局后标记显示开场参谋长简报。
+  const markOpeningBriefing = useGameStore((s) => s.markOpeningBriefing)
 
   // 当前 wizard 步骤（1..5）
   const [step, setStep] = useState<WizardStep>(1)
@@ -191,12 +193,14 @@ export default function CampaignCreatorPage({
         confirmFaction,
       )
       setFromWorld(world, newSaveId)
+      // 第 5 批：LLM 生成战役确认开局后标记显示开场参谋长简报弹窗。
+      markOpeningBriefing()
       await refreshSaves()
       // setFromWorld 后 context !== null，App 自动切 inGame，本组件卸载
     } catch (err) {
       setMessage(`开局失败：${err instanceof Error ? err.message : String(err)}`)
     }
-  }, [result, confirmFaction, clearError, setFromWorld, refreshSaves])
+  }, [result, confirmFaction, clearError, setFromWorld, refreshSaves, markOpeningBriefing])
 
   // —— 回退到指定步骤（仅允许回退到已完成或当前步骤之前）——
   const handleGoBack = (target: WizardStep): void => {

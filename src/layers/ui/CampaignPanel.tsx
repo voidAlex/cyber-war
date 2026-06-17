@@ -29,17 +29,12 @@ import {
 } from '@/layers/persistence'
 import {
   startCampaignFromPayload,
-  startDefaultCampaign,
 } from '@/layers/persistence'
 import type { CampaignPayload } from '@/types'
+// 第 5 批：内置战役包注册表（凡尔登/官渡/俄乌/中途岛/美以伊，单一数据来源）。
+import { BUILTIN_CAMPAIGNS, type BuiltinCampaignEntry } from '@/data/registry'
 import CampaignGeneratorPanel from './CampaignGeneratorPanel'
 import { logger } from '@/utils/logger'
-
-/** 凡尔登玩家可选阵营 */
-const VERDUN_FACTIONS = [
-  { id: 'france', label: '法国（守）' },
-  { id: 'germany', label: '德国（攻）' },
-] as const
 
 /**
  * 战役面板组件。
@@ -50,9 +45,21 @@ export default function CampaignPanel(): JSX.Element {
   const refreshSaves = useGameStore((s) => s.refreshSaves)
   const setFromWorld = useGameStore((s) => s.setFromWorld)
   const clearError = useGameStore((s) => s.clearError)
+  // 第 5 批：内置包/ZIP 包开局后标记显示开场参谋长简报。
+  const markOpeningBriefing = useGameStore((s) => s.markOpeningBriefing)
 
-  // 凡尔登开局所选阵营
-  const [verdunFaction, setVerdunFaction] = useState<string>('france')
+  // 第 5 批：每个内置战役包玩家所选阵营（scenarioId → factionId）。
+  // 初始化为各包 playerFactionOptions[0]（剧本默认玩家方）。
+  const [builtinFactionByScenario, setBuiltinFactionByScenario] = useState<
+    Record<string, string>
+  >(() => {
+    const init: Record<string, string> = {}
+    for (const c of BUILTIN_CAMPAIGNS) {
+      const first = c.playerFactionOptions[0]
+      if (first) init[c.scenarioId] = first.id
+    }
+    return init
+  })
   // 导入战役包 ZIP 后暂存的 payload（预览待确认）
   const [pendingPayload, setPendingPayload] = useState<CampaignPayload | null>(null)
   const [pendingFaction, setPendingFaction] = useState<string>('')
@@ -61,26 +68,34 @@ export default function CampaignPanel(): JSX.Element {
   const [exportSavePath, setExportSavePath] = useState('')
   const [message, setMessage] = useState<string>('')
 
-  // —— 凡尔登默认示例包开局 ——
-  const handleStartVerdun = async (): Promise<void> => {
+  // —— 内置战役包通用开局（凡尔登/官渡/俄乌/中途岛/美以伊同一路径）——
+  const handleStartBuiltin = async (entry: BuiltinCampaignEntry): Promise<void> => {
     clearError()
     setMessage('')
+    const factionId = builtinFactionByScenario[entry.scenarioId] ?? ''
+    if (factionId.length === 0) {
+      setMessage('请先选择阵营')
+      return
+    }
     try {
       // saveId 用 scenarioId + 时间戳避免冲突
-      const newSaveId = `verdun-1916-${Date.now()}`
-      logger.info('ui/campaign/start_verdun', '开局凡尔登默认包', {
+      const newSaveId = `${entry.scenarioId}-${Date.now()}`
+      logger.info('ui/campaign/start_builtin', `开局内置战役 ${entry.scenarioId}`, {
         scope: 'app',
         saveId: newSaveId,
-        faction: verdunFaction,
+        faction: factionId,
       })
-      const world = await startDefaultCampaign(newSaveId, verdunFaction)
+      const world = await startCampaignFromPayload(entry.payload, newSaveId, factionId)
       setFromWorld(world, newSaveId)
+      // 第 5 批：新战役开局后标记显示开场参谋长简报弹窗。
+      markOpeningBriefing()
       await refreshSaves()
-      setMessage(`已开局凡尔登战役（${verdunFaction === 'france' ? '法国' : '德国'}），存档 ${newSaveId}`)
+      setMessage(`已开局战役「${entry.name}」，存档 ${newSaveId}`)
     } catch (err) {
-      logger.error('ui/campaign/start_verdun_failed', `凡尔登开局失败: ${formatErr(err)}`, {
+      logger.error('ui/campaign/start_builtin_failed', `内置战役开局失败: ${formatErr(err)}`, {
         scope: 'app',
-        faction: verdunFaction,
+        scenarioId: entry.scenarioId,
+        faction: factionId,
       })
       setMessage(`开局失败：${formatErr(err)}`)
     }
@@ -126,6 +141,8 @@ export default function CampaignPanel(): JSX.Element {
         pendingFaction,
       )
       setFromWorld(world, newSaveId)
+      // 第 5 批：导入 ZIP 战役包开局后标记显示开场参谋长简报弹窗。
+      markOpeningBriefing()
       await refreshSaves()
       setPendingPayload(null)
       setMessage(`已开局战役「${pendingPayload.manifest.displayName}」，存档 ${newSaveId}`)
@@ -190,31 +207,51 @@ export default function CampaignPanel(): JSX.Element {
     <section className="panel campaign-panel">
       <h2 className="panel__title">战役包</h2>
 
-      {/* 默认示例包开局 */}
+      {/* 内置战役包列表（第 5 批：凡尔登/官渡/俄乌/中途岛/美以伊）*/}
       <div className="campaign-panel__section">
-        <h3 className="campaign-panel__subtitle">凡尔登战役 1916（默认示例包）</h3>
-        <div className="campaign-panel__row">
-          <select
-            value={verdunFaction}
-            onChange={(e) => setVerdunFaction(e.target.value)}
-            disabled={busy}
-          >
-            {VERDUN_FACTIONS.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => void handleStartVerdun()}
-            disabled={busy}
-          >
-            开局凡尔登
-          </button>
-        </div>
+        <h3 className="campaign-panel__subtitle">内置战役</h3>
+        <ul className="campaign-list">
+          {BUILTIN_CAMPAIGNS.map((entry) => {
+            const factionId = builtinFactionByScenario[entry.scenarioId] ?? ''
+            return (
+              <li key={entry.scenarioId} className="campaign-list__item">
+                <div className="campaign-list__head">
+                  <span className="campaign-list__name">{entry.name}</span>
+                </div>
+                {entry.description.length > 0 && (
+                  <p className="campaign-list__desc">{entry.description}</p>
+                )}
+                <div className="campaign-panel__row">
+                  <select
+                    value={factionId}
+                    onChange={(e) =>
+                      setBuiltinFactionByScenario((cur) => ({
+                        ...cur,
+                        [entry.scenarioId]: e.target.value,
+                      }))
+                    }
+                    disabled={busy}
+                  >
+                    {entry.playerFactionOptions.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void handleStartBuiltin(entry)}
+                    disabled={busy || factionId.length === 0}
+                  >
+                    开局
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
         <p className="campaign-panel__hint">
-          消耗战 · 默兹河两岸 · 杜奥蒙堡/沃堡/苏维尔堡。schema 已内置校验。
+          内置 5 个示例战役（凡尔登/官渡/俄乌/中途岛/美以伊），选阵营即可开局，schema 已内置校验。
         </p>
       </div>
 

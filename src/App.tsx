@@ -48,19 +48,20 @@ import MiniSandbox from '@/layers/ui/sandbox/MiniSandbox'
 import SandboxOverlay from '@/layers/ui/sandbox/SandboxOverlay'
 import InfoTabs from '@/layers/ui/InfoTabs'
 import BattleResultModal from '@/layers/ui/briefing/BattleResultModal'
+import OpeningBriefing from '@/layers/ui/briefing/OpeningBriefing'
 import { useGameStore } from '@/store/game-store'
 import { logger } from '@/utils/logger'
 import { formatHeaderDate, DEFAULT_DAYS_PER_TURN } from '@/utils/in-game-date'
-import { verdunManifest } from '@/data/verdun-1916/manifest'
+// 第 5 批：Header 时间推算所需 manifest 直接从内置战役注册表查（凡尔登/官渡/俄乌/
+// 中途岛/美以伊 全部覆盖）；导入 ZIP 包时按其 scenarioId 增量补充。
+import { BUILTIN_MANIFESTS_BY_ID } from '@/data/registry'
 
 /** 应用版本号（HUD 右下显示）。 */
 const APP_VERSION = 'v0.4.0'
 
 /** 当前内置战役清单（用于 Header 时间推算 startInGameDate/daysPerTurn）。
- *  按 scenarioId 查；未来多战役包时由 ZIP 导入注册扩充。 */
-const MANIFESTS_BY_SCENARIO: Record<string, typeof verdunManifest> = {
-  'verdun-1916': verdunManifest,
-}
+ *  按 scenarioId 查；从 src/data/registry 复用，未来 ZIP 导入包时增量补充。 */
+const MANIFESTS_BY_SCENARIO = BUILTIN_MANIFESTS_BY_ID
 
 /**
  * 应用根组件：根据 LLM 配置解锁态切换入口 / 主界面。
@@ -189,6 +190,9 @@ function GameScreen({
   // 第 4 批：自动保存角标（advance/resolveDecision 落盘成功后 3s 内 true）
   const showSavedIndicator = useGameStore((s) => s.showSavedIndicator)
   const lastSavedAt = useGameStore((s) => s.lastSavedAt)
+  // 第 5 批：开场参谋长简报弹窗（新战役开局后 store 标记 true，玩家关闭后 false）
+  const showOpeningBriefing = useGameStore((s) => s.showOpeningBriefing)
+  const dismissOpeningBriefing = useGameStore((s) => s.dismissOpeningBriefing)
 
   // 推算 Header 时间显示（manifest.startInGameDate + turnIndex × daysPerTurn）
   const scenarioId = context.game.world.scenarioId
@@ -296,6 +300,9 @@ function GameScreen({
         open={showBriefing && !battleResultDismissed}
         onClose={() => setBattleResultDismissed(true)}
       />
+
+      {/* 第 5 批：开场参谋长简报弹窗（新战役开局叠加，玩家关闭后进入正常游戏） */}
+      {showOpeningBriefing && <OpeningBriefing onDismiss={dismissOpeningBriefing} />}
 
       {/* 退出确认对话框 */}
       {confirmExit && (
