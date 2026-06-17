@@ -50,6 +50,7 @@ import InfoTabs from '@/layers/ui/InfoTabs'
 import BattleResultModal from '@/layers/ui/briefing/BattleResultModal'
 import OpeningBriefing from '@/layers/ui/briefing/OpeningBriefing'
 import GameOverModal from '@/layers/ui/briefing/GameOverModal'
+import NpcDiplomacyModal from '@/layers/ui/NpcDiplomacyModal'
 import { useGameStore } from '@/store/game-store'
 import { logger } from '@/utils/logger'
 import { formatHeaderDate, DEFAULT_DAYS_PER_TURN } from '@/utils/in-game-date'
@@ -316,6 +317,10 @@ function GameScreen({
 
           {/* 第 5 批：开场参谋长简报弹窗（新战役开局叠加，玩家关闭后进入正常游戏） */}
           {showOpeningBriefing && <OpeningBriefing onDismiss={dismissOpeningBriefing} />}
+
+          {/* T3-A：NPC 主动外交弹窗（world.pendingNpcRequests 非空时叠加）。
+              内部自带 null 守卫（requests 空时返回 null），故无条件渲染安全。 */}
+          <NpcDiplomacyModal />
         </>
       )}
 

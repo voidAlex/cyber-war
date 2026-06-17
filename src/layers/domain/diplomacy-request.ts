@@ -28,21 +28,14 @@ import type {
   DiplomacyTrust,
   DiplomacyEvent,
   Faction,
+  // T3-A：DiplomaticRequestKind/DiplomaticRequest 已上移到 types 契约层
+  // （types/diplomacy.ts，含新增 'threat'）。本文件 re-export 以保留旧 import 路径。
+  DiplomaticRequestKind,
+  DiplomaticRequest,
 } from '@/types'
 
-/**
- * 外交请求类别（玩家可向盟友提出的请求大类）。
- *
- * 供 commander Agent 上下文与 UI 卡片渲染参考。
- */
-export type DiplomaticRequestKind =
-  | 'air_support' // 空中支援
-  | 'artillery_support' // 炮兵支援
-  | 'reinforcement' // 增援
-  | 'supply' // 物资补给
-  | 'intelligence' // 情报共享
-  | 'ceasefire' // 停火协商
-  | 'other' // 其他
+// T3-A：re-export types 契约层定义，保留 domain barrel 旧导出路径不变。
+export type { DiplomaticRequestKind, DiplomaticRequest }
 
 /**
  * 盟友统帅对玩家请求的响应类别。
@@ -52,22 +45,6 @@ export type DiplomaticRequestKind =
  * - flake：答应却掉链子（信任度 -20，信任度越低越易发生）
  */
 export type DiplomaticResponseType = 'accept' | 'reject' | 'flake'
-
-/**
- * 玩家发起的外交请求。
- */
-export interface DiplomaticRequest {
-  /** 所属回合 */
-  turn: number
-  /** 发起方阵营 id（玩家） */
-  fromFactionId: string
-  /** 对方阵营 id（盟友） */
-  toFactionId: string
-  /** 请求类别 */
-  kind: DiplomaticRequestKind
-  /** 自然语言请求文本（玩家输入） */
-  text: string
-}
 
 /**
  * 盟友统帅响应产物（commander Agent 产出或规则引擎模拟）。
@@ -238,6 +215,7 @@ export function describeRequestKind(kind: DiplomaticRequestKind): string {
     supply: '物资补给',
     intelligence: '情报共享',
     ceasefire: '停火协商',
+    threat: '威胁勒索', // T3-A：NPC 兵力优势时威胁玩家投降
     other: '外交请求',
   }
   return map[kind] ?? '外交请求'

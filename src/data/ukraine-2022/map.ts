@@ -100,6 +100,16 @@ function buildUkraineCells(): CampaignMap['cells'] {
         isSupplySource = true
       }
 
+      // === T3-B：第聂伯河桥梁（col 7 纵贯水域上的 2 座预置桥）===
+      // 史实（查证自维基/百科）：第聂伯河上的桥梁是俄乌双方争夺焦点。
+      // 2022 年俄军曾试图经安东诺夫斯基桥（赫尔松）渡河，乌军多次炸桥迟滞。
+      // 此处预置 2 座桥（cell-7-4 中游 / cell-7-8 下游），让陆地单位可跨河机动，
+      // 玩家/NPC 可用 build_bridge/destroy_bridge 命令改变桥梁状态。
+      let bridge = false
+      if (col === DNIPRO_COL && (row === 4 || row === 8)) {
+        bridge = true
+      }
+
       cells.push({
         id,
         col,
@@ -109,6 +119,7 @@ function buildUkraineCells(): CampaignMap['cells'] {
         defenseBonus,
         isObjective,
         ...(isSupplySource ? { isSupplySource } : {}),
+        ...(bridge ? { bridge } : {}),
       })
     }
   }

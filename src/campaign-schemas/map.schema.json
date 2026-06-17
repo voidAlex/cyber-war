@@ -24,7 +24,10 @@
           "movementCost": { "type": "number", "minimum": 0, "maximum": 100 },
           "defenseBonus": { "type": "number", "minimum": 0, "maximum": 1 },
           "isObjective": { "type": "boolean" },
-          "isSupplySource": { "type": "boolean" }
+          "isSupplySource": { "type": "boolean" },
+          "bridge": { "type": "boolean" },
+          "road": { "type": "boolean" },
+          "fortificationLevel": { "type": "integer", "minimum": 0, "maximum": 3 }
         },
         "required": ["id", "col", "row", "terrain", "movementCost", "defenseBonus", "isObjective"],
         "additionalProperties": false

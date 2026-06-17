@@ -39,3 +39,5 @@ export { default as MiniSandbox } from './sandbox/MiniSandbox'
 export { default as SandboxOverlay } from './sandbox/SandboxOverlay'
 export { default as InfoTabs } from './InfoTabs'
 export { default as BattleResultModal } from './briefing/BattleResultModal'
+// T3-A：NPC 主动外交弹窗（world.pendingNpcRequests 非空时叠加）
+export { default as NpcDiplomacyModal } from './NpcDiplomacyModal'

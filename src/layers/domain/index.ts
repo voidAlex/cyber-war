@@ -111,6 +111,19 @@ export type {
   DiplomaticRequestResult,
 } from './diplomacy-request'
 
+// T3-A：NPC 主动外交（NPC→玩家请求队列，evaluateNpcDiplomacy 纯函数）
+export {
+  evaluateNpcDiplomacy,
+  computeFactionStrength,
+  computeFactionInitialStrength,
+  isFactionUnderAttack,
+  NPC_CEASEFIRE_TRUST_THRESHOLD,
+  NPC_REINFORCEMENT_TRUST_THRESHOLD,
+  NPC_CEASEFIRE_STRENGTH_RATIO,
+  NPC_THREAT_STRENGTH_RATIO,
+  NPC_DIPLOMACY_BASE_PROBABILITY,
+} from './diplomacy-npc'
+
 // 补给线/后勤（第 4 批：网络化补给判定）
 export {
   computeSupplyConnectivity,
@@ -153,3 +166,22 @@ export {
   MISSILE_BASE_DAMAGE,
 } from './missile-defense'
 export type { MissileAttackResult } from './missile-defense'
+
+// T3-C：空海专门规则（naval-combat / air-combat 纯函数）
+export {
+  resolveNavalEngagement,
+  resolveAirSortie,
+  isCarrier,
+  NAVAL_FIREPOWER_MULT,
+  NAVAL_DEFENDER_AMMO_COST,
+  NAVAL_ENGAGEMENT_RANGE,
+  AIR_SORTIE_DAMAGE_MIN,
+  AIR_SORTIE_DAMAGE_MAX,
+  AIR_SORTIE_SELF_STRENGTH_COST,
+} from './naval-combat'
+export {
+  resolveAirSuperiority,
+  AIR_SUPERIORITY_LOSER_MORALE_PENALTY,
+  AIR_SUPERIORITY_LOSER_STRENGTH_PENALTY,
+  AIR_SUPERIORITY_WINNER_RECON_BONUS,
+} from './air-combat'

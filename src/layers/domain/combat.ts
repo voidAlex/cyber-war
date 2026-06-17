@@ -67,6 +67,13 @@ export type ResolutionEventKind =
   | 'commando_raid' // 特种突袭/斩首（敌方 commander cell 所有单位 morale-20）
   // T2 第 5 批 A：导弹拦截
   | 'intercepted' // 导弹攻击被防空单位拦截（damage=0）
+  // T3-B：地形改造
+  | 'build' // 架桥/修路（cell.bridge=true 或 cell.road=true）
+  | 'destroy' // 炸桥（cell.bridge=false，阻断渡河）
+  // T3-C：空海专门规则
+  | 'naval_engagement' // 海上交战（naval vs naval，超视距射程=2，火力×1.5）
+  | 'air_sortie' // 舰载机出击（air 从 carrier cell 出击攻击目标，需返回）
+  | 'air_superiority' // 制空权争夺（air vs air，胜方获侦察加成）
 
 /**
  * 物理层结算事件（event-log 一条目级产物）。
@@ -642,11 +649,20 @@ export function applyResolutionStateChanges(
       if (!updateSetById.has(cell.id)) return cell
       const cellUpd = cellUpdateMap[cell.id]
       if (!cellUpd) return cell
-      // 仅 fortificationLevel 等可选字段合并（防御性：不破坏必填字段）
+      // 仅 fortificationLevel/bridge/road 等可选字段合并（防御性：不破坏必填字段）
       const nextCell = { ...cell }
       let cellChanged = false
       if (cellUpd.fortificationLevel !== undefined) {
         nextCell.fortificationLevel = cellUpd.fortificationLevel
+        cellChanged = true
+      }
+      // T3-B：bridge/road 增量（build_bridge/destroy_bridge/build_road 命令）
+      if (cellUpd.bridge !== undefined) {
+        nextCell.bridge = cellUpd.bridge
+        cellChanged = true
+      }
+      if (cellUpd.road !== undefined) {
+        nextCell.road = cellUpd.road
         cellChanged = true
       }
       if (cellChanged) mapChanged = true

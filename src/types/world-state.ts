@@ -15,6 +15,7 @@ import type { Unit } from './unit'
 import type { GameMap } from './map'
 import type { ActionEnvelope } from './action-envelope'
 import type { AgentAction } from './agent-action'
+import type { DiplomaticRequest } from './diplomacy'
 
 /**
  * 世界状态接口（唯一真相源）。
@@ -153,6 +154,19 @@ export interface WorldState {
    * 旧存档（无此字段）视为 'day'（兼容回填）。
    */
   timeOfDay?: 'day' | 'night'
+  /**
+   * NPC 主动发起的外交请求队列（T3-A，可选）。
+   *
+   * 由 domain/diplomacy.evaluateNpcDiplomacy 在 commander 批次后产出，
+   * turn-resolution 写入此字段（每回合最多 1 个 NPC 请求）。store 订阅此字段
+   * 变化 → NpcDiplomacyModal 弹窗，玩家选择 接受/拒绝/谈判：
+   * - 接受 ceasefire → trust+10；接受 threat → trust-10（屈辱让步）。
+   * - 拒绝 → trust-5（关系紧张）。
+   * - 谈判 → 进入外交官对话 tab。
+   * 玩家处理后清空（store set pendingNpcRequests: []）。
+   * 旧存档（无此字段）视为无 NPC 外交（兼容回填）。
+   */
+  pendingNpcRequests?: DiplomaticRequest[]
 }
 
 /**

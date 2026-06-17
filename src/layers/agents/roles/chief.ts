@@ -192,6 +192,29 @@ const INTENT_KEYWORDS: ReadonlyArray<{ intent: CommandIntent; words: readonly st
       'commando', 'raid', 'spec ops', 'special ops',
     ],
   },
+  // T3-B：地形改造（架桥/炸桥/修路）。比 move 更具体——"架桥"不应归到 move。
+  // 放在 move 之前确保命中 build_*/destroy_*。
+  {
+    intent: 'build_bridge',
+    words: [
+      '架桥', '造桥', '建桥', '搭桥', '构筑浮桥', '架设浮桥',
+      'build bridge', 'build_bridge', 'construct bridge',
+    ],
+  },
+  {
+    intent: 'destroy_bridge',
+    words: [
+      '炸桥', '毁桥', '拆桥', '爆破桥梁', '摧毁桥梁',
+      'destroy bridge', 'destroy_bridge', 'demolish bridge',
+    ],
+  },
+  {
+    intent: 'build_road',
+    words: [
+      '修路', '筑路', '建路', '铺路', '构筑公路',
+      'build road', 'build_road', 'construct road', 'pave road',
+    ],
+  },
   // T2 第 3 批：宣传/舆论（放 move 之前避免"宣传攻势"被误判）。
   {
     intent: 'propaganda',
@@ -1024,6 +1047,69 @@ function parseCommandMock(
       const summary =
         airUnits.map((u) => u.id).join('、') + ` 空降至 (${targetCoord.col},${targetCoord.row})`
       return parsed('paradrop', airUnits.map((u) => u.id), { targetCoord, summary })
+    }
+
+    case 'build_bridge':
+    case 'destroy_bridge':
+    case 'build_road': {
+      // T3-B：地形改造。build_bridge/build_road 需工程单位（type support 或 engineer 装备）；
+      // destroy_bridge 任何单位可执行（爆破）。目标坐标必填。
+      const isDestroy = intent === 'destroy_bridge'
+      let engineerUnits = matchedUnits
+      if (engineerUnits.length === 0) {
+        if (isDestroy) {
+          // 炸桥：任何玩家单位可执行（取首个）
+          engineerUnits = playerUnits.length > 0 ? [playerUnits[0]] : []
+        } else {
+          // 架桥/修路：需工程单位（type support 或装备含 engineer/pontoon/bridge/dozer/road）
+          const engineers = playerUnits.filter((u) => {
+            if (u.type === 'support') return true
+            const slots = u.equipment
+            if (!slots) return false
+            return slots.some((s) => {
+              const t = s.type.toLowerCase()
+              return (
+                t.includes('engineer') ||
+                t.includes('pontoon') ||
+                t.includes('bridge') ||
+                t.includes('dozer') ||
+                t.includes('road')
+              )
+            })
+          })
+          if (engineers.length === 0) {
+            return clarify(
+              input,
+              '未匹配到具备工程能力的单位（需 type support 或 engineer 装备）',
+              playerUnits.slice(0, 5).map((u) => `可用单位：${describeUnit(u)}`),
+            )
+          }
+          engineerUnits = [engineers[0]]
+        }
+      }
+      const coord = matchCoord(trimmed, ctx.world.map.cols, ctx.world.map.rows)
+      let targetCoord: GridCoord | null = coord
+      if (targetCoord === null) {
+        const node = matchNode(trimmed, ctx.world.map.highValueNodes)
+        if (node !== null) targetCoord = parseCellId(node.cellId)
+      }
+      if (targetCoord === null) {
+        return clarify(
+          input,
+          `未解析到${intent === 'build_bridge' ? '架桥' : intent === 'destroy_bridge' ? '炸桥' : '修路'}目标坐标，请指明目标格（如 C3）`,
+          [coordFormatHint(ctx.world.map.cols, ctx.world.map.rows)],
+        )
+      }
+      const verb =
+        intent === 'build_bridge'
+          ? '架桥'
+          : intent === 'destroy_bridge'
+            ? '炸桥'
+            : '修路'
+      const summary =
+        engineerUnits.map((u) => u.id).join('、') +
+        ` 对 (${targetCoord.col},${targetCoord.row}) 实施${verb}`
+      return parsed(intent, engineerUnits.map((u) => u.id), { targetCoord, summary })
     }
 
     default: {

@@ -48,6 +48,14 @@ import type { GridCoord } from './unit'
  * - paradrop：空降——type air 单位直接跳到目标 cell（无视 terrain/movementCost），
  *   strength-15 + status 'pinned' 1 回合（空降散降）。
  * - commando_raid：特种突袭/斩首——针对敌方 commander cell，成功则该 cell 所有单位 morale-20。
+ *
+ * T3-B（地形改造）：
+ * - build_bridge：架桥——type support/engineer 单位在水域 cell 上建桥（cell.bridge=true），
+ *   使陆地单位可通行该水域格（movementCost=2）。产出 'build' 事件。
+ * - destroy_bridge：炸桥——破坏 cell.bridge（bridge=false），阻断渡河。
+ *   产出 'destroy' 事件。
+ * - build_road：修路——在非水域 cell 修路（cell.road=true，movementCost 减半，min 1）。
+ *   产出 'build' 事件。
  */
 export type CommandIntent =
   | 'move'
@@ -62,6 +70,9 @@ export type CommandIntent =
   | 'sabotage' // T2 第 4 批：破坏
   | 'paradrop' // T2 第 4 批：空降
   | 'commando_raid' // T2 第 4 批：特种突袭/斩首
+  | 'build_bridge' // T3-B：架桥（水域 cell.bridge=true）
+  | 'destroy_bridge' // T3-B：炸桥（cell.bridge=false）
+  | 'build_road' // T3-B：修路（cell.road=true，movementCost 减半）
 
 /**
  * 参谋长解析成功的结构化命令。

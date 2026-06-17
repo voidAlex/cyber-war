@@ -92,6 +92,9 @@ export type {
   DiplomacyTrust,
   DiplomaticStance,
   DiplomacyEvent,
+  // T3-A：DiplomaticRequestKind/DiplomaticRequest 上移到 types 契约层（加 'threat'）
+  DiplomaticRequestKind,
+  DiplomaticRequest,
 } from './diplomacy'
 export {
   INITIAL_TRUST_BY_STANCE,

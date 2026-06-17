@@ -49,6 +49,18 @@ import {
   resolveMissileAttack,
   MISSILE_BASE_DAMAGE,
 } from '@/layers/domain/missile-defense'
+import {
+  resolveNavalEngagement,
+  resolveAirSortie,
+  isCarrier,
+  NAVAL_DEFENDER_AMMO_COST,
+  AIR_SORTIE_SELF_STRENGTH_COST,
+} from '@/layers/domain/naval-combat'
+import {
+  resolveAirSuperiority,
+  AIR_SUPERIORITY_LOSER_MORALE_PENALTY,
+  AIR_SUPERIORITY_LOSER_STRENGTH_PENALTY,
+} from '@/layers/domain/air-combat'
 import type {
   ResolutionResult,
   ResolutionEvent,
@@ -216,6 +228,15 @@ export function simulateTurn(
       case 'commando_raid':
         resolveCommandoRaidOrder(worldState, envelope, events, stateChanges, turn)
         break
+      case 'build_bridge':
+        resolveBuildBridgeOrder(worldState, envelope, events, stateChanges, turn)
+        break
+      case 'destroy_bridge':
+        resolveDestroyBridgeOrder(worldState, envelope, events, stateChanges, turn)
+        break
+      case 'build_road':
+        resolveBuildRoadOrder(worldState, envelope, events, stateChanges, turn)
+        break
       default:
         events.push({
           id: `evt:${envelope.sequence}:action_executed:0`,
@@ -373,6 +394,7 @@ function normalizeIntent(
   intent: string,
 ): 'move' | 'attack' | 'capture' | 'resupply' | 'recon' | 'hold' | 'entrench'
   | 'ew_jam' | 'ew_support' | 'propaganda' | 'sabotage' | 'paradrop' | 'commando_raid'
+  | 'build_bridge' | 'destroy_bridge' | 'build_road'
   | 'other' {
   const lower = intent.toLowerCase().trim()
   if (lower === 'move' || lower === 'movement' || lower === 'march' || lower === 'advance') {
@@ -471,6 +493,39 @@ function normalizeIntent(
   ) {
     return 'commando_raid'
   }
+  // T3-B：地形改造（架桥/炸桥/修路）。
+  if (
+    lower === 'build_bridge' ||
+    lower === 'build-bridge' ||
+    lower === '架桥' ||
+    lower === '造桥' ||
+    lower === '建桥' ||
+    lower === '搭桥' ||
+    lower === 'build bridge'
+  ) {
+    return 'build_bridge'
+  }
+  if (
+    lower === 'destroy_bridge' ||
+    lower === 'destroy-bridge' ||
+    lower === '炸桥' ||
+    lower === '毁桥' ||
+    lower === '拆桥' ||
+    lower === 'destroy bridge'
+  ) {
+    return 'destroy_bridge'
+  }
+  if (
+    lower === 'build_road' ||
+    lower === 'build-road' ||
+    lower === '修路' ||
+    lower === '筑路' ||
+    lower === '建路' ||
+    lower === '铺路' ||
+    lower === 'build road'
+  ) {
+    return 'build_road'
+  }
   // Bug2 修复：hold/defend/stand/guard 等归一为 hold（原映射缺失，hold 命令落到 other → unsupported）。
   if (lower === 'hold' || lower === 'defend' || lower === 'stand' || lower === 'guard') {
     return 'hold'
@@ -535,11 +590,40 @@ function resolveMoveOrder(
     events.push(makeBlockadeEvent(envelope, turn, '缺少目标坐标', { unitId }))
     return
   }
-  const targetCell = getCellAt(worldState.map, targetCoord.col, targetCoord.row)
-  if (!targetCell) {
+  const baseCell = getCellAt(worldState.map, targetCoord.col, targetCoord.row)
+  if (!baseCell) {
     events.push(makeBlockadeEvent(envelope, turn, '目标坐标越界', { unitId, target: targetCoord }))
     return
   }
+
+  // T3-B：合并本回合 cellUpdates 增量（build_bridge/build_road 可能本回合刚改此 cell），
+  // 得到 effective cell（含最新 bridge/road 标记）。命令结算按 sequence 升序，
+  // 故先执行的 build_* 已写入 stateChanges.cellUpdates，后续 move 能看到。
+  const cellDelta = stateChanges.cellUpdates?.[baseCell.id]
+  const targetCell = cellDelta ? { ...baseCell, ...cellDelta } : baseCell
+
+  // T3-B：地形改造对 movementCost 的等效影响。
+  // - cell.bridge=true（水域有桥）：陆地单位可通行，movementCost 等效=2（渡桥消耗）。
+  //   空军/海军不受桥影响（air 忽略地形；naval 本就在水上）。
+  // - cell.road=true（陆地有公路）：movementCost 减半（min 1）。
+  // 构造等效 targetCell 副本传入 resolveMovement，不改原 cell 数据。
+  let effectiveMovementCost = targetCell.movementCost
+  const isLandUnit =
+    unit.type === 'infantry' ||
+    unit.type === 'armor' ||
+    unit.type === 'artillery' ||
+    unit.type === 'recon' ||
+    unit.type === 'fortress' ||
+    unit.type === 'support'
+  if (targetCell.bridge === true && isLandUnit) {
+    // 桥：陆地单位过水域 movementCost=2（无论原 water movementCost 多少）
+    effectiveMovementCost = 2
+  }
+  if (targetCell.road === true) {
+    // 公路：movementCost 减半（min 1）。与桥叠加时桥优先（已设=2，公路再减半=1）。
+    effectiveMovementCost = Math.max(1, Math.floor(effectiveMovementCost / 2))
+  }
+  const effectiveCell = { ...targetCell, movementCost: effectiveMovementCost }
 
   // 距离估算（曼哈顿距离，M2 简化路径）
   const distance =
@@ -551,7 +635,7 @@ function resolveMoveOrder(
 
   const result = resolveMovement({
     unit,
-    targetCell,
+    targetCell: effectiveCell,
     cellsToTraverse: distance,
     rng,
   })
@@ -592,6 +676,11 @@ function resolveMoveOrder(
         fuelCost: adjustedFuelCost,
         fatigueGain: result.fatigueGain,
         terrain: targetCell.terrain,
+        // T3-B：地形改造标记（桥/路应用情况，供回放与可观测）
+        bridge: targetCell.bridge === true,
+        road: targetCell.road === true,
+        effectiveMovementCost,
+        baseMovementCost: baseCell.movementCost,
         weatherMoveMult,
         nightMoveMult,
       },
@@ -645,6 +734,40 @@ function resolveAttackOrder(
   // T2 第 5 批 A：导弹攻击走防空拦截判定路径。
   if (attacker.type === 'missile') {
     resolveMissileAttackOrder(worldState, envelope, rng, events, stateChanges, turn, attacker, defenderId)
+    return
+  }
+
+  const defender = worldState.units.find((u) => u.id === defenderId)
+  if (!defender) {
+    // 目标不存在：复用 resolveEngagement 的 no_target 分支（统一占位事件）
+    const outcome = resolveEngagement({
+      world: worldState,
+      attacker,
+      defenderId,
+      rng,
+      sequence: envelope.sequence,
+      turn,
+      agentId: envelope.agentId,
+    })
+    events.push(...outcome.events)
+    return
+  }
+
+  // T3-C：空海专门规则分流（在通用 resolveEngagement 之前）。
+  // - air vs air → resolveAirSuperiority（制空权争夺）。
+  // - air 且 payload 有 baseCarrierCellId（或攻方阵营有 carrier）→ resolveAirSortie（舰载机出击）。
+  // - attacker.naval 或 defender.naval → resolveNavalEngagement（海上交战）。
+  // 其余走通用 resolveEngagement。
+  if (attacker.type === 'air' && defender.type === 'air') {
+    resolveAirSuperiorityOrder(worldState, envelope, rng, events, stateChanges, turn, attacker, defender)
+    return
+  }
+  if (attacker.type === 'air' && hasCarrierSupport(worldState, attacker)) {
+    resolveAirSortieOrder(worldState, envelope, rng, events, stateChanges, turn, attacker, defender)
+    return
+  }
+  if (attacker.type === 'naval' || defender.type === 'naval') {
+    resolveNavalEngagementOrder(worldState, envelope, rng, events, stateChanges, turn, attacker, defender)
     return
   }
 
@@ -1966,6 +2089,304 @@ function resolveCommandoRaidOrder(
       targetCoord,
       raided,
       moraleDelta: -20,
+    },
+  })
+}
+
+// =============================================================================
+// T3-B：地形改造（build_bridge / destroy_bridge / build_road）
+// =============================================================================
+//
+// 工程单位识别：type support（后勤/工兵）或装备含 'engineer'/'pontoon'/'bridge'/
+// 'dozer' 关键字。无工程能力的单位执行 build_* → blockade。
+//
+// resolveBuildBridgeOrder：水域 cell 上建桥（cell.bridge=true）→ 陆地单位可通行。
+// resolveDestroyBridgeOrder：破坏 cell.bridge（bridge=false）→ 阻断渡河。
+// resolveBuildRoadOrder：陆地 cell 修路（cell.road=true）→ movementCost 减半（min 1）。
+// 三者均产出 'build'/'destroy' 事件 + cellUpdates 增量（落 world.map.cells）。
+
+/**
+ * 判定单位是否具备工程/建造能力（build_bridge/build_road 执行资格）。
+ *
+ * 条件：type='support'，或装备含 engineer/pontoon/bridge/dozer/road 关键字。
+ * 与 isSpecialOperator 同构（特种能力识别模式）。
+ */
+function isEngineerUnit(unit: Unit): boolean {
+  if (unit.type === 'support') return true
+  const slots = unit.equipment
+  if (!slots) return false
+  return slots.some((s) => {
+    const t = s.type.toLowerCase()
+    return (
+      t.includes('engineer') ||
+      t.includes('pontoon') ||
+      t.includes('bridge') ||
+      t.includes('dozer') ||
+      t.includes('road')
+    )
+  })
+}
+
+/**
+ * 结算架桥命令（build_bridge）。
+ *
+ * 语义（T3-B）：工程单位在水域 cell 上建造桥梁。
+ * - 执行单位需具备工程能力（isEngineerUnit）。
+ * - 目标 cell（payload.target）terrain 必须为 'water'，否则 blockade（陆地上无需架桥）。
+ * - cell.bridge=true + cellUpdates 增量。
+ * - 产出 'build' 事件（kind='build'，记录 cellId/terrain/bridge=true）。
+ * - 工程单位消耗：ammo-5 + fatigue+5（建造消耗）。
+ *
+ * 确定性：纯数值计算，无随机数。
+ */
+function resolveBuildBridgeOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少工程单位 unitId', {}))
+    return
+  }
+  const unit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!unit) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+  if (!isEngineerUnit(unit)) {
+    events.push(
+      makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不具备工程能力（需 type support 或 engineer 装备）`, { unitId }),
+    )
+    return
+  }
+
+  const targetCoord = extractCoord(envelope, 'target')
+  if (!targetCoord) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少架桥目标坐标 target', { unitId }))
+    return
+  }
+  const targetCell = getCellAt(worldState.map, targetCoord.col, targetCoord.row)
+  if (!targetCell) {
+    events.push(makeBlockadeEvent(envelope, turn, '架桥目标坐标越界', { unitId, target: targetCoord }))
+    return
+  }
+  if (targetCell.terrain !== 'water') {
+    events.push(
+      makeBlockadeEvent(envelope, turn, `目标格 (${targetCoord.col},${targetCoord.row}) 非水域（terrain=${targetCell.terrain}），无需架桥`, {
+        unitId, target: targetCoord, terrain: targetCell.terrain,
+      }),
+    )
+    return
+  }
+  if (targetCell.bridge === true) {
+    events.push(
+      makeBlockadeEvent(envelope, turn, `目标格 (${targetCoord.col},${targetCoord.row}) 已有桥`, {
+        unitId, target: targetCoord,
+      }),
+    )
+    return
+  }
+
+  // 应用：cell.bridge=true + 工程单位 ammo-5/fatigue+5
+  if (!stateChanges.cellUpdates) stateChanges.cellUpdates = {}
+  const existingCell = stateChanges.cellUpdates[targetCell.id] ?? {}
+  stateChanges.cellUpdates[targetCell.id] = { ...existingCell, bridge: true }
+
+  const existing = stateChanges.unitUpdates[unitId] ?? {}
+  stateChanges.unitUpdates[unitId] = {
+    ...existing,
+    ammo: Math.max(0, unit.ammo - 5),
+    fatigue: Math.min(100, unit.fatigue + 5),
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:build:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'build',
+    description: `${unitId} 在 (${targetCoord.col},${targetCoord.row}) 水域架桥完成（陆地单位现可通行）`,
+    data: {
+      unitId,
+      buildKind: 'bridge',
+      cellId: targetCell.id,
+      coord: targetCoord,
+      terrain: targetCell.terrain,
+      bridge: true,
+    },
+  })
+}
+
+/**
+ * 结算炸桥命令（destroy_bridge）。
+ *
+ * 语义（T3-B）：破坏 cell.bridge（阻断渡河）。
+ * - 目标 cell 需 bridge=true，否则 blockade（无桥可炸）。
+ * - 任何单位可执行炸桥（爆破无需专业工程，普通单位携炸药即可；简化不校验装备）。
+ * - cell.bridge=false + cellUpdates 增量。
+ * - 产出 'destroy' 事件。
+ * - 执行单位消耗：ammo-3 + fatigue+3（爆破消耗）。
+ */
+function resolveDestroyBridgeOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少执行单位 unitId', {}))
+    return
+  }
+  const unit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!unit) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+
+  const targetCoord = extractCoord(envelope, 'target')
+  if (!targetCoord) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少炸桥目标坐标 target', { unitId }))
+    return
+  }
+  const targetCell = getCellAt(worldState.map, targetCoord.col, targetCoord.row)
+  if (!targetCell) {
+    events.push(makeBlockadeEvent(envelope, turn, '炸桥目标坐标越界', { unitId, target: targetCoord }))
+    return
+  }
+  if (targetCell.bridge !== true) {
+    events.push(
+      makeBlockadeEvent(envelope, turn, `目标格 (${targetCoord.col},${targetCoord.row}) 无桥可炸`, {
+        unitId, target: targetCoord,
+      }),
+    )
+    return
+  }
+
+  // 应用：cell.bridge=false + 执行单位 ammo-3/fatigue+3
+  if (!stateChanges.cellUpdates) stateChanges.cellUpdates = {}
+  const existingCell = stateChanges.cellUpdates[targetCell.id] ?? {}
+  stateChanges.cellUpdates[targetCell.id] = { ...existingCell, bridge: false }
+
+  const existing = stateChanges.unitUpdates[unitId] ?? {}
+  stateChanges.unitUpdates[unitId] = {
+    ...existing,
+    ammo: Math.max(0, unit.ammo - 3),
+    fatigue: Math.min(100, unit.fatigue + 3),
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:destroy:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'destroy',
+    description: `${unitId} 炸毁 (${targetCoord.col},${targetCoord.row}) 的桥梁（渡河被阻断）`,
+    data: {
+      unitId,
+      destroyKind: 'bridge',
+      cellId: targetCell.id,
+      coord: targetCoord,
+      bridge: false,
+    },
+  })
+}
+
+/**
+ * 结算修路命令（build_road）。
+ *
+ * 语义（T3-B）：工程单位在陆地 cell 修建公路。
+ * - 执行单位需具备工程能力（isEngineerUnit）。
+ * - 目标 cell terrain 不能为 'water'（水上修路无意义）。
+ * - cell.road=true + cellUpdates 增量。movementCost 在 resolveMovementOrder 中
+ *   按 road=true 减半（min 1），此处不改 cell.movementCost（避免数据冗余）。
+ * - 产出 'build' 事件。
+ * - 工程单位消耗：ammo-5 + fatigue+5。
+ */
+function resolveBuildRoadOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少工程单位 unitId', {}))
+    return
+  }
+  const unit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!unit) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+  if (!isEngineerUnit(unit)) {
+    events.push(
+      makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不具备工程能力（需 type support 或 engineer 装备）`, { unitId }),
+    )
+    return
+  }
+
+  const targetCoord = extractCoord(envelope, 'target')
+  if (!targetCoord) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少修路目标坐标 target', { unitId }))
+    return
+  }
+  const targetCell = getCellAt(worldState.map, targetCoord.col, targetCoord.row)
+  if (!targetCell) {
+    events.push(makeBlockadeEvent(envelope, turn, '修路目标坐标越界', { unitId, target: targetCoord }))
+    return
+  }
+  if (targetCell.terrain === 'water') {
+    events.push(
+      makeBlockadeEvent(envelope, turn, `目标格 (${targetCoord.col},${targetCoord.row}) 为水域，无法修路`, {
+        unitId, target: targetCoord, terrain: targetCell.terrain,
+      }),
+    )
+    return
+  }
+  if (targetCell.road === true) {
+    events.push(
+      makeBlockadeEvent(envelope, turn, `目标格 (${targetCoord.col},${targetCoord.row}) 已有公路`, {
+        unitId, target: targetCoord,
+      }),
+    )
+    return
+  }
+
+  // 应用：cell.road=true + 工程单位 ammo-5/fatigue+5
+  if (!stateChanges.cellUpdates) stateChanges.cellUpdates = {}
+  const existingCell = stateChanges.cellUpdates[targetCell.id] ?? {}
+  stateChanges.cellUpdates[targetCell.id] = { ...existingCell, road: true }
+
+  const existing = stateChanges.unitUpdates[unitId] ?? {}
+  stateChanges.unitUpdates[unitId] = {
+    ...existing,
+    ammo: Math.max(0, unit.ammo - 5),
+    fatigue: Math.min(100, unit.fatigue + 5),
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:build:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'build',
+    description: `${unitId} 在 (${targetCoord.col},${targetCoord.row}) 修建公路完成（机动消耗减半）`,
+    data: {
+      unitId,
+      buildKind: 'road',
+      cellId: targetCell.id,
+      coord: targetCoord,
+      terrain: targetCell.terrain,
+      road: true,
     },
   })
 }

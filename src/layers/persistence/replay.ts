@@ -611,6 +611,45 @@ function applyResolutionEvent(
       // 仅采信 log，不重复扣减（worker 已扣，replay 不再动）。
       break
     }
+    case 'build': {
+      // T3-B：架桥/修路。从 event.data 重建 cellUpdates 增量（bridge/road=true）。
+      // double-write 安全：worker 已写入 stateChanges.cellUpdates，replay double-apply 等幂。
+      // 仅当该 cell 未被 worker 处理（existing.cellUpdates 无此 cell）时补写。
+      const cellId = evt.data.cellId as string | null | undefined
+      const buildKind = evt.data.buildKind as string | undefined
+      if (cellId) {
+        if (!stateChanges.cellUpdates) stateChanges.cellUpdates = {}
+        const existingCellUpd = stateChanges.cellUpdates[cellId] ?? {}
+        if (buildKind === 'bridge' && existingCellUpd.bridge === undefined) {
+          stateChanges.cellUpdates[cellId] = { ...existingCellUpd, bridge: true }
+        } else if (buildKind === 'road' && existingCellUpd.road === undefined) {
+          stateChanges.cellUpdates[cellId] = { ...existingCellUpd, road: true }
+        }
+      }
+      // 执行单位 ammo/fatigue 消耗：double-write 安全（worker 已扣，replay double-apply 等幂，
+      // 因 ammo 为绝对值赋值而非累加）。此处不重复扣减。
+      break
+    }
+    case 'destroy': {
+      // T3-B：炸桥。从 event.data 重建 cellUpdates 增量（bridge=false）。
+      const cellId = evt.data.cellId as string | null | undefined
+      if (cellId) {
+        if (!stateChanges.cellUpdates) stateChanges.cellUpdates = {}
+        const existingCellUpd = stateChanges.cellUpdates[cellId] ?? {}
+        if (existingCellUpd.bridge === undefined) {
+          stateChanges.cellUpdates[cellId] = { ...existingCellUpd, bridge: false }
+        }
+      }
+      break
+    }
+    case 'naval_engagement':
+    case 'air_sortie':
+    case 'air_superiority': {
+      // T3-C：空海专门规则。这些事件的单位 strength/morale/ammo 变更已由 worker
+      // 写入 stateChanges.unitUpdates（resolveAttackOrder 分流到 naval/air 结算）。
+      // replay double-write 安全（绝对值赋值等幂），此处仅采信 log，不重复应用。
+      break
+    }
     default:
       // casualty（衍生）/ blockade（失败占位）/ hold（数值已在 data 采信，不单独应用）：
       // 不单独应用
@@ -828,11 +867,31 @@ function commitStateChanges(world: WorldState, stateChanges: CombatStateChanges)
       })
     }
   }
+  // 3.5 T1-A/T3-B：cellUpdates 增量落地到 world.map.cells（fortificationLevel/bridge/road）。
+  //     原 commitStateChanges 漏处理 cellUpdates，导致回放时 entrench 工事 / build_bridge 桥
+  //     / build_road 路不落地（回放与实时态不一致）。此处补齐：按 cellId 匹配，
+  //     把 Partial<MapCell> 合并到对应单元（仅落可选字段，不破坏必填字段）。
+  if (stateChanges.cellUpdates) {
+    for (const [cellId, cellUpd] of Object.entries(stateChanges.cellUpdates)) {
+      const cell = world.map.cells.find((c) => c.id === cellId)
+      if (!cell) continue
+      if (cellUpd.fortificationLevel !== undefined) {
+        cell.fortificationLevel = cellUpd.fortificationLevel
+      }
+      if (cellUpd.bridge !== undefined) {
+        cell.bridge = cellUpd.bridge
+      }
+      if (cellUpd.road !== undefined) {
+        cell.road = cellUpd.road
+      }
+    }
+  }
   // 4. 重置增量（下一回合从 world 当前态起）
   stateChanges.unitUpdates = {}
   stateChanges.annihilated = []
   stateChanges.objectiveChanges = []
   stateChanges.intelReconHits = []
+  stateChanges.cellUpdates = {}
 }
 
 // =============================================================================

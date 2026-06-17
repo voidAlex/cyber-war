@@ -63,6 +63,22 @@ export interface MapCell {
    * 旧存档缺省视为 0（兼容回填）。
    */
   fortificationLevel?: number
+  /**
+   * 是否有桥（T3-B，水域 cell 专用，缺省 false）。
+   *
+   * 由 'build_bridge' 命令在水域 cell 上建造（cell.bridge=true）。有桥的水域可通行
+   * 陆地单位（resolveMovementOrder：bridge=true 时陆地单位可进入 water cell，
+   * movementCost=2）。'destroy_bridge' 命令可破坏（bridge=false），阻断渡河。
+   * 旧存档缺省视为 false（兼容回填）。
+   */
+  bridge?: boolean
+  /**
+   * 是否有公路（T3-B，陆地 cell 专用，缺省 false）。
+   *
+   * 由 'build_road' 命令在非水域 cell 上修建（cell.road=true）。有路的 cell
+   * movementCost 减半（min 1），加速机动。旧存档缺省视为 false（兼容回填）。
+   */
+  road?: boolean
 }
 
 /**

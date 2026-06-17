@@ -71,6 +71,10 @@ export interface CampaignMapCell {
   isObjective: boolean
   /** 是否为补给源（第 4 批；与 MapCell.isSupplySource 对齐） */
   isSupplySource?: boolean
+  /** 是否有桥（T3-B；与 MapCell.bridge 对齐，水域 cell 预置桥） */
+  bridge?: boolean
+  /** 是否有公路（T3-B；与 MapCell.road 对齐，陆地 cell 预置路） */
+  road?: boolean
 }
 
 /** 战役包高价值节点（堡垒/城市/隘口，胜负条件引用） */

@@ -68,3 +68,50 @@ export const DEFAULT_DIPLOMACY_DELTAS = {
   /** 毁约扣减（-15~25，取下界草案） */
   break: -20,
 } as const
+
+// =============================================================================
+// T3-A：NPC 主动外交请求（DiplomaticRequestKind / DiplomaticRequest）
+// =============================================================================
+//
+// 历史背景：M4-B 引入「玩家 → 盟友统帅」单向外交请求（DiplomaticRequestKind 原仅
+// air_support/artillery_support/reinforcement/supply/intelligence/ceasefire/other），
+// 类型定义原在 domain/diplomacy-request.ts。T3-A 新增 NPC 主动外交（NPC → 玩家），
+// 需补充 'threat'（威胁/勒索），并把这些类型上移到 types 契约层（铁律：types/ 是契约
+// 唯一真相源）。domain/diplomacy-request.ts 改为 re-export 本文件，避免双重定义。
+
+/**
+ * 外交请求类别（玩家→盟友 或 NPC→玩家 共用）。
+ *
+ * T3-A 新增 'threat'：NPC 在兵力优势时主动威胁玩家投降（接受=trust-10/拒绝=战斗/谈判=对话）。
+ *
+ * 供 commander Agent 上下文与 UI 卡片渲染参考。
+ */
+export type DiplomaticRequestKind =
+  | 'air_support' // 空中支援
+  | 'artillery_support' // 炮兵支援
+  | 'reinforcement' // 增援
+  | 'supply' // 物资补给
+  | 'intelligence' // 情报共享
+  | 'ceasefire' // 停火协商
+  | 'threat' // T3-A：威胁/勒索（NPC 兵力优势时主动威胁玩家投降）
+  | 'other' // 其他
+
+/**
+ * 外交请求（玩家发起 或 NPC 主动发起）。
+ *
+ * - 玩家发起：fromFactionId=玩家，toFactionId=盟友，由 commander Agent 响应。
+ * - NPC 主动发起（T3-A）：fromFactionId=NPC 阵营，toFactionId=玩家，写入
+ *   world.pendingNpcRequests，由 NpcDiplomacyModal 弹窗等待玩家处理。
+ */
+export interface DiplomaticRequest {
+  /** 所属回合 */
+  turn: number
+  /** 发起方阵营 id（玩家 或 NPC） */
+  fromFactionId: string
+  /** 对方阵营 id（盟友 或 玩家） */
+  toFactionId: string
+  /** 请求类别 */
+  kind: DiplomaticRequestKind
+  /** 自然语言请求文本（NPC 发起时为模板生成的中文，玩家发起时为玩家原始输入） */
+  text: string
+}

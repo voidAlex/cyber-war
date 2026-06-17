@@ -42,7 +42,7 @@ import {
 // 第 5 批：内置战役 rules 注册表迁移到 src/data/registry（单一数据来源，
 // 自动覆盖 5 个内置包）。本文件不再硬编码 verdunRules，避免每加新包都要改 store。
 import { BUILTIN_CAMPAIGN_RULES } from '@/data/registry'
-import type { WorldState, CampaignRules } from '@/types'
+import type { WorldState, CampaignRules, DiplomaticRequest } from '@/types'
 import type { CacheStats } from '@/layers/application/services/llm-service'
 import type { LlmErrorBanner } from '@/layers/application/services/llm-service'
 import type { ActionEnvelope, AgentRole, ParseCommandResult } from '@/types'
@@ -485,6 +485,25 @@ export interface GameStoreState {
   showGameOver: boolean
   /** 关闭胜负终局弹窗（玩家点"查看沙盘"时调用；弹窗关闭但仍留游戏界面）。 */
   dismissGameOver: () => void
+
+  // —— T3-A：NPC 主动外交响应（NpcDiplomacyModal）——
+  // advanceTurn 结算后若 world.pendingNpcRequests 非空，App 渲染 NpcDiplomacyModal。
+  // 玩家选择 接受/拒绝/谈判 后调 respondNpcDiplomacy：
+  // - accept ceasefire/reinforcement：发起方 faction 对玩家 trust +10（感恩/履约）。
+  // - accept threat：发起方 faction 对玩家 trust 不变（玩家让步但 NPC 视为理所当然）。
+  // - reject：发起方 faction 对玩家 trust -5（关系紧张）。
+  // - negotiate：不改 trust，仅清空请求（玩家进入外交官对话 tab 自行交涉）。
+  // 响应后清空 world.pendingNpcRequests（避免重复弹窗）+ best-effort 持久化。
+  /**
+   * 响应 NPC 主动外交请求（接受/拒绝/谈判）。
+   *
+   * @param request 当前处理的请求（来自 world.pendingNpcRequests[0]）
+   * @param response 玩家响应类别（accept/reject/negotiate）
+   */
+  respondNpcDiplomacy: (
+    request: DiplomaticRequest,
+    response: 'accept' | 'reject' | 'negotiate',
+  ) => void
 }
 
 // 存档过滤谓词（纯函数，从 save-filter 导入；拆分以避免测试 import store 时触发 Worker）
@@ -1018,6 +1037,63 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   showGameOver: false,
   dismissGameOver() {
     set({ showGameOver: false })
+  },
+
+  // T3-A：响应 NPC 主动外交请求（NpcDiplomacyModal 玩家选择后调用）。
+  // 修改 world.factions 的 trust 数值（发起方对玩家的信任度）+ 清空
+  // pendingNpcRequests（避免重复弹窗）+ best-effort 持久化。
+  respondNpcDiplomacy(request, response) {
+    const ctx = get().context
+    if (ctx === null) return
+    const world = ctx.game.world
+    // 信任度增量：accept ceasefire/reinforcement +10 / accept threat 0 / reject -5 / negotiate 0
+    let trustDelta = 0
+    if (response === 'accept') {
+      // ceasefire/reinforcement：NPC 感恩玩家履约，trust+10；
+      // threat：玩家让步但 NPC 视为理所当然（trust 不变，避免玩家被威胁反而获信任增益）。
+      trustDelta = request.kind === 'threat' ? 0 : 10
+    } else if (response === 'reject') {
+      trustDelta = -5
+    }
+    // negotiate：不改 trust（玩家要求进一步谈判，关系暂不动）。
+
+    // 修改发起方 faction 对玩家的 trust（npc.trust[playerId]）
+    const playerId = world.playerFactionId
+    const newFactions = world.factions.map((f) => {
+      if (f.id !== request.fromFactionId) return f
+      if (trustDelta === 0) return f
+      const curTrust = f.trust[playerId] ?? 50
+      const newTrust = Math.max(0, Math.min(100, curTrust + trustDelta))
+      return { ...f, trust: { ...f.trust, [playerId]: newTrust } }
+    })
+
+    // 清空 pendingNpcRequests（玩家已响应）
+    const newWorld: WorldState = {
+      ...world,
+      factions: newFactions,
+      pendingNpcRequests: [],
+    }
+    const newCtx: StateMachineContext = {
+      ...ctx,
+      game: { ...ctx.game, world: newWorld },
+    }
+    set({ context: newCtx })
+
+    // best-effort 持久化（不阻塞 UI；失败只 warn）
+    const saveId = world.saveId
+    persistenceService.writeWorldState(saveId, newWorld).catch((e) => {
+      logger.warn('store/npc_diplomacy/persist_failed', `NPC 外交响应持久化失败: ${String(e)}`, {
+        scope: 'save', saveId,
+      })
+    })
+    logger.info('store/npc_diplomacy/respond', '玩家响应 NPC 外交请求', {
+      scope: 'save', saveId,
+      turn: world.turnIndex,
+      kind: request.kind,
+      fromFactionId: request.fromFactionId,
+      response,
+      trustDelta,
+    })
   },
 
   // 第 3 批：沙盘 cell 悬浮 tooltip（SandboxRenderer move 模式回调驱动）

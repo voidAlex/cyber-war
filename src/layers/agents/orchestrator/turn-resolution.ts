@@ -56,6 +56,7 @@ import {
   updateInternationalOpinion,
   applyMutinyPenalty,
 } from '@/layers/domain/public-opinion'
+import { evaluateNpcDiplomacy } from '@/layers/domain/diplomacy-npc'
 import { DeterministicRandom } from '@/layers/domain/deterministic-random'
 import { logger } from '@/utils/logger'
 
@@ -497,6 +498,29 @@ export async function orchestrateTurnResolution(
     commanderCount: commanderOuts.reduce((n, o) => n + o.envelopes.length, 0),
     totalEnvelopes: allEnvelopes.length,
   })
+
+  // -------------------------------------------------------------------------
+  // 步骤3.5：T3-A NPC 主动外交（commander 批次后、导演部前）
+  // -------------------------------------------------------------------------
+  // 非玩家阵营按当前态势（信任度 + 兵力对比 + 是否被攻击）主动发起外交请求，
+  // 推送给玩家。每回合最多 1 个请求（evaluateNpcDiplomacy 内部约束）。
+  // 确定性：用 DeterministicRandom.fromSequence(scenarioSeed, turn, 9997)
+  // （与天气 9998 / 随机事件 9999 错开）。结果写入 worldState.pendingNpcRequests，
+  // 由 store 订阅 → NpcDiplomacyModal 弹窗。
+  const npcDiploRng = DeterministicRandom.fromSequence(scenarioSeed, turn, 9997)
+  const npcRequests = evaluateNpcDiplomacy(worldState, turn, npcDiploRng, playerFactionId)
+  if (npcRequests.length > 0) {
+    worldState = { ...worldState, pendingNpcRequests: npcRequests }
+    logger.info('orch/resolve/npc_diplomacy', 'NPC 主动外交请求触发', {
+      ...logCtx,
+      count: npcRequests.length,
+      kinds: npcRequests.map((r) => r.kind),
+      fromFactionIds: npcRequests.map((r) => r.fromFactionId),
+    })
+  } else if (worldState.pendingNpcRequests && worldState.pendingNpcRequests.length > 0) {
+    // 上回合的请求已处理（玩家已响应），本回合清空避免残留弹窗
+    worldState = { ...worldState, pendingNpcRequests: [] }
+  }
 
   // -------------------------------------------------------------------------
   // 步骤4：批次4 导演部终裁（最后，串行）
