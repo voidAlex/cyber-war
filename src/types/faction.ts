@@ -124,4 +124,25 @@ export interface Faction {
   doctrineTags: string[]
   /** 阵营描述（可选） */
   description?: string
+  /**
+   * 民心/战意（T2 第 3 批，0..100，缺省 60）。
+   *
+   * 每回合由 domain/public-opinion.updatePublicWill 调整：
+   * - 战胜 +3 / 战败 -5 / 低补给 -2 / 每回合基线 -1（战争疲劳）。
+   * - propaganda 命令：targetFaction publicWill +5。
+   * - publicWill < 20 → 兵变概率陡升 + 全军 morale -10。
+   *
+   * 旧存档（无此字段）视为 60（兼容回填，由 public-opinion 内部兜底）。
+   */
+  publicWill?: number
+  /**
+   * 国际舆论（T2 第 3 批，0..100，缺省 50）。
+   *
+   * 每回合由 domain/public-opinion.updateInternationalOpinion 调整：
+   * - 外交行动 +5~10 / 核设施打击 -10 / 平民区战斗 -5。
+   * - internationalOpinion < 30 → 军援事件（reinforcement）不触发。
+   *
+   * 旧存档（无此字段）视为 50（兼容回填，由 public-opinion 内部兜底）。
+   */
+  internationalOpinion?: number
 }

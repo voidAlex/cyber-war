@@ -179,6 +179,11 @@ export function buildInitialWorldState(
       relations: f.relations ? { ...f.relations } : undefined,
       doctrineTags: [...f.doctrineTags],
       description: f.description,
+      // T2 第 3 批：民心/国际舆论初值映射到 runtime Faction。
+      // 缺省 publicWill=60 / internationalOpinion=50（由 campaign-service 显式注入，
+      // 避免 domain 层重复兜底；旧战役包无此字段时走缺省）。
+      publicWill: f.publicWill ?? 60,
+      internationalOpinion: f.internationalOpinion ?? 50,
     }
   })
 
@@ -245,6 +250,9 @@ export function buildInitialWorldState(
               quality: e.quality,
             }))
           : undefined,
+      // T2 第 2 批：电子战能力映射（无 ewCapability=undefined，保持旧战役包兼容）。
+      // entrenchment 缺省 0（旧存档兼容回填由 domain 层 ?? 0 兜底，CampaignUnit 无此字段）。
+      ewCapability: u.ewCapability ? { ...u.ewCapability } : undefined,
     }
   })
 

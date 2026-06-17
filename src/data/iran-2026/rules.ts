@@ -12,6 +12,20 @@
  * - 补给脆弱：美以跨海补给线长（severedMultiplier=1.5）；伊朗本土作战补给相对稳。
  * - 情报半衰：现代战场情报更新快，半衰较短（halfLifeTurns=2）。
  *
+ * T2 第 2 批（电子战）：F-35 隐身战机挂载 AN/ASQ-239 电子战套件（jammingRange=3，
+ * stealthReduction=0.5），伊朗 S-300/Bavar-373 防空挂载反隐身预警雷达（detectionBoost=1）。
+ * 美以 F-35 与伊朗 S-300 形成"隐身突防 vs 反隐身拒止"的 EW 对抗，由
+ * domain/electronic-warfare.applyEWEffects 在每回合 simulateTurn 开头结算。
+ *
+ * T2 第 4 批（特殊作战）：美军特种部队（us-special-1，infantry + laser-designator 装备）
+ * 具备特种作战能力，可执行 sabotage（破坏伊朗核设施 supplySource/防空工事）/
+ * commando_raid（斩首 IRGC 指挥中枢 morale-20）。需对该 cell 侦察等级 ≥ L2
+ * （特种部队的激光指示器引导精确打击，前提是先侦察确认目标）。
+ *
+ * T2 第 5 批 A（导弹拦截）：美以宙斯盾驱逐舰（us-destroyer-1/2，equipment sam 宙斯盾反导）
+ * 拦截伊朗弹道导弹（iran-missile-1/2/3）；伊朗 S-300/Bavar-373 防空拦截美以战斧巡航导弹
+ * （us-missile-ddg-1/2）。拦截概率 = quality×0.3 + count×0.1，封顶 0.95。
+ *
  * 注：schema combat 仅允许 attritionRate/artillerySuppression/fortressDefenseBonus/
  * trenchDefenseBonus（additionalProperties:false）。精确打击/防空拦截等专属数值由 units
  * equipment 代理。

@@ -19,6 +19,7 @@ export const UNIT_TYPE_NAMES: Record<UnitType, string> = {
   air: '空军',
   naval: '海军',
   missile: '导弹',
+  ew: '电子战',
 }
 
 /** 单位类型单字标识（沙盘军标旁标 + 列表 glyph 圆徽共用）。 */
@@ -32,4 +33,5 @@ export const UNIT_TYPE_GLYPH: Record<UnitType, string> = {
   air: '空',
   naval: '海',
   missile: '导',
+  ew: '电',
 }

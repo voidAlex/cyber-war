@@ -84,6 +84,10 @@ export const iranUnits: CampaignUnit[] = [
       { type: 'stealth-fighter', count: 24, quality: 0.95 },
       { type: 'bunker-buster', count: 48, quality: 0.9 },
     ],
+    // T2 第 2 批：F-35 AN/APG-81 AESA 雷达 + AN/ASQ-239 电子战套件。
+    // jammingRange=3（雷达干扰范围）、stealthReduction=0.5（隐身降低敌方侦察成功率×0.5）、
+    // detectionBoost=1（增强己方对 F-35 视野内敌方的观测）。
+    ewCapability: { jammingRange: 3, detectionBoost: 1, stealthReduction: 0.5 },
   },
   {
     id: 'us-f35-2',
@@ -103,6 +107,8 @@ export const iranUnits: CampaignUnit[] = [
       { type: 'stealth-fighter', count: 24, quality: 0.95 },
       { type: 'bunker-buster', count: 48, quality: 0.9 },
     ],
+    // T2 第 2 批：同 us-f35-1，挂载 AN/ASQ-239 电子战套件。
+    ewCapability: { jammingRange: 3, detectionBoost: 1, stealthReduction: 0.5 },
   },
   // === 驱逐舰 ×2（宙斯盾防空 + 反导） ===
   {
@@ -303,6 +309,11 @@ export const iranUnits: CampaignUnit[] = [
     status: [],
     // 装备：S-300PMU2 远程地空导弹（拒止美以空中优势）
     equipment: [{ type: 'sam', count: 48, quality: 0.82 }],
+    // T2 第 2 批：S-300 配套 64N6 大鸟雷达（反隐身预警）+ T2 第 5 批 A 拦截能力（equipment.sam）。
+    // ewCapability.detectionBoost=1 增强伊朗对美以联军的观测（雷达哨）；
+    // jammingRange=4（雷达探测半径，作为 EW 被动增强半径复用）；
+    // stealthReduction=1（S-300 非隐身单位，无隐身折扣）。
+    ewCapability: { jammingRange: 4, detectionBoost: 1, stealthReduction: 1 },
   },
   {
     id: 'iran-air-defense-2',
@@ -320,6 +331,8 @@ export const iranUnits: CampaignUnit[] = [
     status: [],
     // 装备：Bavar-373 伊朗国产远程防空导弹
     equipment: [{ type: 'sam', count: 36, quality: 0.78 }],
+    // T2 第 2 批：Bavar-373 配套相控阵雷达（反隐身预警）+ T2 第 5 批 A 拦截能力（equipment.sam）。
+    ewCapability: { jammingRange: 4, detectionBoost: 1, stealthReduction: 1 },
   },
   // === 导弹快艇 ×1（霍尔木兹海峡封锁，swarm 战术） ===
   {

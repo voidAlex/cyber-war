@@ -51,7 +51,19 @@
         "items": { "type": "string", "minLength": 1 },
         "uniqueItems": true
       },
-      "description": { "type": "string", "maxLength": 2000 }
+      "description": { "type": "string", "maxLength": 2000 },
+      "publicWill": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "description": "T2 第 3 批：民心/战意初值（缺省 60）。每回合由 updatePublicWill 调整（胜+3/败-5/低补给-2/回合-1）。publicWill<20 触发兵变惩罚。"
+      },
+      "internationalOpinion": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "description": "T2 第 3 批：国际舆论初值（缺省 50）。internationalOpinion<30 时军援（reinforcement）事件被中断。"
+      }
     },
     "required": ["id", "name", "color", "side", "commanderId", "supply", "doctrineTags"],
     "additionalProperties": false

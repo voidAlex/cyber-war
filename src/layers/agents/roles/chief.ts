@@ -155,6 +155,51 @@ const INTENT_KEYWORDS: ReadonlyArray<{ intent: CommandIntent; words: readonly st
       'entrench', 'dig in', 'dig_in', 'fortify', 'trench',
     ],
   },
+  // T2 第 2 批：电子战（比 move 更具体——"电子支援"不应归到 move 的"支援"）。
+  // 放在 move 之前确保"电子干扰/电子支援"命中 ew_* 而非 move。
+  {
+    intent: 'ew_jam',
+    words: [
+      '电子干扰', '干扰雷达', '压制雷达', '电磁压制', '干扰',
+      'jam', 'ew jam', 'ew_jam',
+    ],
+  },
+  {
+    intent: 'ew_support',
+    words: [
+      '电子支援', '电子战支援', '增强侦察', '电磁支援',
+      'ew support', 'ew_support',
+    ],
+  },
+  // T2 第 4 批：特殊作战（比 move/attack 更具体，放前面避免"空降"误判）。
+  {
+    intent: 'sabotage',
+    words: [
+      '破坏', '爆破', '炸毁', '摧毁', ' sabot', 'sabotage',
+    ],
+  },
+  {
+    intent: 'paradrop',
+    words: [
+      '空降', '伞降', '空投', '伞兵',
+      'paradrop', 'airdrop', 'airborne',
+    ],
+  },
+  {
+    intent: 'commando_raid',
+    words: [
+      '斩首', '特种作战', '偷袭', '突袭', '特种突袭', '突击队',
+      'commando', 'raid', 'spec ops', 'special ops',
+    ],
+  },
+  // T2 第 3 批：宣传/舆论（放 move 之前避免"宣传攻势"被误判）。
+  {
+    intent: 'propaganda',
+    words: [
+      '宣传', '舆论', '舆论战', '媒体', '宣传攻势',
+      'propaganda', 'media campaign',
+    ],
+  },
   {
     intent: 'move',
     // 第 3 批：增援/支援语义等同于「移动到目标位置」——解析阶段直接归一为 move，
@@ -839,6 +884,148 @@ function parseCommandMock(
       })
     }
 
+    case 'ew_jam':
+    case 'ew_support': {
+      // T2 第 2 批：电子战。执行单位优先取 EW 单位（type ew 或 ewCapability 存在），
+      // 玩家未指明时自动选首个 EW 单位兜底。目标坐标必填（干扰/支援区域）。
+      let ewUnits = matchedUnits
+      if (ewUnits.length === 0) {
+        const ew = playerUnits.filter((u) => u.type === 'ew' || u.ewCapability)
+        if (ew.length === 0) {
+          return clarify(
+            input,
+            '未匹配到具备电子战能力的单位（需 type ew 或挂载 EW 装备）',
+            playerUnits.slice(0, 5).map((u) => `可用单位：${describeUnit(u)}`),
+          )
+        }
+        ewUnits = [ew[0]]
+      }
+      const coord = matchCoord(trimmed, ctx.world.map.cols, ctx.world.map.rows)
+      let targetCoord: GridCoord | null = coord
+      if (targetCoord === null) {
+        // 节点名 / 敌方单位兜底坐标
+        const node = matchNode(trimmed, ctx.world.map.highValueNodes)
+        if (node !== null) targetCoord = parseCellId(node.cellId)
+      }
+      if (targetCoord === null) {
+        const enemyUnits = ctx.world.units.filter((u) => u.factionId !== ctx.playerFactionId)
+        const targetEnemy = matchUnits(trimmed, enemyUnits)[0]
+        if (targetEnemy !== undefined) targetCoord = { ...targetEnemy.coord }
+      }
+      if (targetCoord === null) {
+        return clarify(
+          input,
+          '未解析到电子战目标坐标，请指明目标格（如 C3）或敌方单位',
+          [coordFormatHint(ctx.world.map.cols, ctx.world.map.rows)],
+        )
+      }
+      const verb = intent === 'ew_jam' ? '电子干扰' : '电子支援'
+      const summary =
+        ewUnits.map((u) => u.id).join('、') + ` 对 (${targetCoord.col},${targetCoord.row}) 实施${verb}`
+      return parsed(intent, ewUnits.map((u) => u.id), { targetCoord, summary })
+    }
+
+    case 'propaganda': {
+      // T2 第 3 批：宣传。无 targetFaction 时为对内宣传（己方 morale+3）。
+      // 单位可选（宣传可不绑定具体单位）；targetFaction 解析从输入匹配阵营名/id。
+      const allFactions = ctx.world.factions.filter((f) => f.id !== ctx.playerFactionId)
+      const targetFaction = allFactions.find((f) => {
+        const lower = trimmed.toLowerCase()
+        return (
+          lower.includes(f.id.toLowerCase()) ||
+          (f.name.length > 0 && lower.includes(f.name.toLowerCase()))
+        )
+      })
+      const summary = targetFaction
+        ? `对 ${targetFaction.name} 发动宣传攻势（publicWill +5）`
+        : `${ctx.playerFactionId} 对内宣传（全军 morale +3）`
+      const unitIds = matchedUnits.length > 0 ? matchedUnits.map((u) => u.id) : []
+      const extra: { summary: string; targetUnitId?: string } = { summary }
+      if (targetFaction) extra.targetUnitId = targetFaction.id
+      return parsed('propaganda', unitIds, extra)
+    }
+
+    case 'sabotage':
+    case 'commando_raid': {
+      // T2 第 4 批：破坏/斩首突袭。执行单位优先取特种单位（recon/infantry+special）。
+      let opUnits = matchedUnits
+      if (opUnits.length === 0) {
+        const special = playerUnits.filter((u) => {
+          if (u.type !== 'recon' && u.type !== 'infantry') return false
+          if (u.ewCapability) return true
+          return (
+            !!u.equipment &&
+            u.equipment.some((s) => {
+              const t = s.type.toLowerCase()
+              return t.includes('special') || t.includes('laser') || t.includes('designator')
+            })
+          )
+        })
+        if (special.length === 0) {
+          return clarify(
+            input,
+            '未匹配到具备特种作战能力的单位（需 recon/infantry + special 装备）',
+            playerUnits.slice(0, 5).map((u) => `可用单位：${describeUnit(u)}`),
+          )
+        }
+        opUnits = [special[0]]
+      }
+      const coord = matchCoord(trimmed, ctx.world.map.cols, ctx.world.map.rows)
+      let targetCoord: GridCoord | null = coord
+      if (targetCoord === null) {
+        const node = matchNode(trimmed, ctx.world.map.highValueNodes)
+        if (node !== null) targetCoord = parseCellId(node.cellId)
+      }
+      if (targetCoord === null) {
+        const enemyUnits = ctx.world.units.filter((u) => u.factionId !== ctx.playerFactionId)
+        const targetEnemy = matchUnits(trimmed, enemyUnits)[0]
+        if (targetEnemy !== undefined) targetCoord = { ...targetEnemy.coord }
+      }
+      if (targetCoord === null) {
+        return clarify(
+          input,
+          '未解析到特种作战目标，请指明目标坐标（如 C3）、节点名或敌方单位',
+          [coordFormatHint(ctx.world.map.cols, ctx.world.map.rows)],
+        )
+      }
+      const verb = intent === 'sabotage' ? '破坏' : '斩首突袭'
+      const summary =
+        opUnits.map((u) => u.id).join('、') + ` 对 (${targetCoord.col},${targetCoord.row}) 实施${verb}`
+      return parsed(intent, opUnits.map((u) => u.id), { targetCoord, summary })
+    }
+
+    case 'paradrop': {
+      // T2 第 4 批：空降。执行单位需 type air。
+      let airUnits = matchedUnits
+      if (airUnits.length === 0) {
+        const air = playerUnits.filter((u) => u.type === 'air')
+        if (air.length === 0) {
+          return clarify(
+            input,
+            '未匹配到空中单位（需 type air 才能空降）',
+            playerUnits.slice(0, 5).map((u) => `可用单位：${describeUnit(u)}`),
+          )
+        }
+        airUnits = [air[0]]
+      }
+      const coord = matchCoord(trimmed, ctx.world.map.cols, ctx.world.map.rows)
+      let targetCoord: GridCoord | null = coord
+      if (targetCoord === null) {
+        const node = matchNode(trimmed, ctx.world.map.highValueNodes)
+        if (node !== null) targetCoord = parseCellId(node.cellId)
+      }
+      if (targetCoord === null) {
+        return clarify(
+          input,
+          '未解析到空降目标坐标，请指明目标格（如 C3）或节点名',
+          [coordFormatHint(ctx.world.map.cols, ctx.world.map.rows)],
+        )
+      }
+      const summary =
+        airUnits.map((u) => u.id).join('、') + ` 空降至 (${targetCoord.col},${targetCoord.row})`
+      return parsed('paradrop', airUnits.map((u) => u.id), { targetCoord, summary })
+    }
+
     default: {
       // 穷尽性检查
       const _exhaustive: never = intent
@@ -967,6 +1154,8 @@ const UNIT_TYPE_CN: Record<Unit['type'], string> = {
   air: '空军',
   naval: '海军',
   missile: '导弹',
+  // T2 第 2 批：电子战
+  ew: '电子战',
 }
 
 /**

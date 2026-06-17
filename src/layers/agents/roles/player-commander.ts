@@ -180,6 +180,7 @@ const UNIT_TYPE_CN: Record<Unit['type'], string> = {
   air: '空军',
   naval: '海军',
   missile: '导弹',
+  ew: '电子战',
 }
 
 /** 把 mock 回复一次性全量回调 onDelta（模拟瞬时完成）。 */

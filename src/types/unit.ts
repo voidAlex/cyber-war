@@ -17,6 +17,9 @@ import type { IntelLevel, IntelObservation } from './intelligence'
  * - air：空军（可跨格攻击，不受目标格 movementCost 影响）。
  * - naval：海军（仅水域可驻留/机动）。
  * - missile：导弹部队（超远程一回合攻击，弹药消耗巨大）。
+ *
+ * T2 第 2 批：ew（电子战单位）。可挂载 ewCapability（干扰/反隐身/侦察增强），
+ * 由 domain/electronic-warfare.applyEWEffects 在 simulateTurn 开头消费。
  */
 export type UnitType =
   | 'infantry' // 步兵
@@ -28,6 +31,7 @@ export type UnitType =
   | 'air' // 空军（跨格攻击，不受地形阻挡）
   | 'naval' // 海军（仅水域机动/驻留）
   | 'missile' // 导弹部队（超远程一回合打击）
+  | 'ew' // 电子战（干扰/反隐身/侦察增强，T2 第 2 批）
 
 /**
  * 装备槽（第 5 批）。
@@ -121,6 +125,38 @@ export interface Unit {
    * 旧存档缺省视为 0（兼容回填）。
    */
   entrenchment?: number
+  /**
+   * 电子战能力（T2 第 2 批，可选）。
+   *
+   * 仅 ew 类型单位或挂载电子战吊舱的特种单位（如 F-35 隐身战机）声明此字段。
+   * domain/electronic-warfare.applyEWEffects 消费：
+   * - jammingRange：干扰范围（曼哈顿距离），范围内敌方单位的 intel level 降低
+   *   （-1~2 level，见 applyEWEffects）。
+   * - detectionBoost：对己方侦察单位的情报加成（+N level，封顶 L3）。
+   * - stealthReduction：降低敌方对该单位自身的侦察等级倍率（0..1，越小越难发现）；
+   *   例如 F-35 stealthReduction=0.5 → 敌方对其侦察成功率 ×0.5。
+   *
+   * 缺省（undefined）视为无电子战能力（保持旧存档兼容）。
+   */
+  ewCapability?: EWCapability
+}
+
+/**
+ * 电子战能力参数（T2 第 2 批）。
+ *
+ * 由 Unit.ewCapability 持有，供 domain/electronic-warfare 消费。
+ * 所有数值为非负，stealthReduction ∈ [0,1]。
+ */
+export interface EWCapability {
+  /** 干扰范围（曼哈顿距离），范围内敌方单位 intel level 降低 */
+  jammingRange: number
+  /** 对己方侦察单位的情报加成（+N level，封顶 L3） */
+  detectionBoost: number
+  /**
+   * 降低敌方对该单位自身的侦察等级倍率（0..1，越小越隐蔽）。
+   * 0=完全隐身（敌方永远 L0），1=无隐身加成。F-35 类隐身单位典型值 0.5。
+   */
+  stealthReduction: number
 }
 
 /**

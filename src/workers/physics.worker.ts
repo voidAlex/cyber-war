@@ -44,6 +44,11 @@ import {
   computeSupplyConnectivity,
   applySupplyState,
 } from '@/layers/domain/supply'
+import { applyEWEffects } from '@/layers/domain/electronic-warfare'
+import {
+  resolveMissileAttack,
+  MISSILE_BASE_DAMAGE,
+} from '@/layers/domain/missile-defense'
 import type {
   ResolutionResult,
   ResolutionEvent,
@@ -159,6 +164,12 @@ export function simulateTurn(
   // 补给事件先入流（sequence 段位 2500-2999，与命令 0-1999、director 3000+ 区分）
   events.push(...baselineResult.events)
 
+  // T2 第 2 批：EW 被动效果（applyEWEffects）。
+  // 在命令结算前算，使后续 recon/attack 的 intel 与火力受 EW 影响。
+  // 把 detection 增量（intelDegraded + intelBoosted）合并到 stateChanges.unitUpdates[enemyId].detection，
+  // 并产出 ew_jam / ew_support 事件（sequence 段位 2400-2499，与 supply 2500-2998 区分）。
+  applyEWPassive(worldState, turn, events, stateChanges)
+
   // 第二遍：逐个命令结算
   for (const envelope of ordered) {
     // 每条命令一个独立的 DeterministicRandom（seed = scenarioSeed:turn:sequence）
@@ -186,6 +197,24 @@ export function simulateTurn(
         break
       case 'recon':
         resolveReconOrder(worldState, envelope, rng, events, stateChanges, turn)
+        break
+      case 'ew_jam':
+        resolveEWJamOrder(worldState, envelope, events, stateChanges, turn)
+        break
+      case 'ew_support':
+        resolveEWSupportOrder(worldState, envelope, events, stateChanges, turn)
+        break
+      case 'propaganda':
+        resolvePropagandaOrder(worldState, envelope, events, stateChanges, turn)
+        break
+      case 'sabotage':
+        resolveSabotageOrder(worldState, envelope, events, stateChanges, turn)
+        break
+      case 'paradrop':
+        resolveParadropOrder(worldState, envelope, events, stateChanges, turn)
+        break
+      case 'commando_raid':
+        resolveCommandoRaidOrder(worldState, envelope, events, stateChanges, turn)
         break
       default:
         events.push({
@@ -342,7 +371,9 @@ function applyRoutAndSurrender(
  */
 function normalizeIntent(
   intent: string,
-): 'move' | 'attack' | 'capture' | 'resupply' | 'recon' | 'hold' | 'entrench' | 'other' {
+): 'move' | 'attack' | 'capture' | 'resupply' | 'recon' | 'hold' | 'entrench'
+  | 'ew_jam' | 'ew_support' | 'propaganda' | 'sabotage' | 'paradrop' | 'commando_raid'
+  | 'other' {
   const lower = intent.toLowerCase().trim()
   if (lower === 'move' || lower === 'movement' || lower === 'march' || lower === 'advance') {
     return 'move'
@@ -374,6 +405,71 @@ function normalizeIntent(
     lower === '加固'
   ) {
     return 'entrench'
+  }
+  // T2 第 2 批：电子战。
+  // - ew_jam：电子干扰（"干扰"/"压制雷达"/"jam"/"电子干扰"）。
+  // - ew_support：电子支援（"电子支援"/"增强侦察"/"ew support"）。
+  if (
+    lower === 'ew_jam' ||
+    lower === 'ew-jam' ||
+    lower === 'jam' ||
+    lower === '干扰' ||
+    lower === '压制雷达' ||
+    lower === '电子干扰' ||
+    lower === '干扰雷达'
+  ) {
+    return 'ew_jam'
+  }
+  if (
+    lower === 'ew_support' ||
+    lower === 'ew-support' ||
+    lower === '电子支援' ||
+    lower === '增强侦察' ||
+    lower === '电子战支援'
+  ) {
+    return 'ew_support'
+  }
+  // T2 第 3 批：舆论战。
+  if (
+    lower === 'propaganda' ||
+    lower === '宣传' ||
+    lower === '舆论' ||
+    lower === '媒体' ||
+    lower === '舆论战' ||
+    lower === '宣传攻势'
+  ) {
+    return 'propaganda'
+  }
+  // T2 第 4 批：特殊作战。
+  if (
+    lower === 'sabotage' ||
+    lower === '破坏' ||
+    lower === '爆破' ||
+    lower === '摧毁' ||
+    lower === '炸毁'
+  ) {
+    return 'sabotage'
+  }
+  if (
+    lower === 'paradrop' ||
+    lower === 'airdrop' ||
+    lower === '空降' ||
+    lower === '伞降' ||
+    lower === '空投'
+  ) {
+    return 'paradrop'
+  }
+  if (
+    lower === 'commando_raid' ||
+    lower === 'commando-raid' ||
+    lower === 'commando' ||
+    lower === 'raid' ||
+    lower === '斩首' ||
+    lower === '特种作战' ||
+    lower === '偷袭' ||
+    lower === '突袭'
+  ) {
+    return 'commando_raid'
   }
   // Bug2 修复：hold/defend/stand/guard 等归一为 hold（原映射缺失，hold 命令落到 other → unsupported）。
   if (lower === 'hold' || lower === 'defend' || lower === 'stand' || lower === 'guard') {
@@ -518,6 +614,10 @@ function resolveMoveOrder(
 
 /**
  * 结算攻击命令。
+ *
+ * T2 第 5 批 A：当攻方 type='missile'（导弹部队）时，改走 resolveMissileAttack 路径
+ * （含防空拦截判定）。拦截成功 → damage=0 + 产出 'intercepted' 事件；
+ * 失败 → damage=MISSILE_BASE_DAMAGE（40）。其余类型走原有 resolveEngagement 流程。
  */
 function resolveAttackOrder(
   worldState: WorldState,
@@ -542,6 +642,12 @@ function resolveAttackOrder(
     return
   }
 
+  // T2 第 5 批 A：导弹攻击走防空拦截判定路径。
+  if (attacker.type === 'missile') {
+    resolveMissileAttackOrder(worldState, envelope, rng, events, stateChanges, turn, attacker, defenderId)
+    return
+  }
+
   const outcome = resolveEngagement({
     world: worldState,
     attacker,
@@ -554,6 +660,137 @@ function resolveAttackOrder(
 
   events.push(...outcome.events)
   applyEngagementChanges(stateChanges, attackerId, defenderId, outcome.attackerChange, outcome.defenderChange)
+}
+
+/**
+ * T2 第 5 批 A：导弹攻击结算（含防空拦截判定）。
+ *
+ * 流程：
+ * 1. resolveMissileAttack 判定拦截（守方阵营在目标 cell 周围有防空单位 → 拦截概率判定）。
+ * 2. 拦截成功 → damage=0 + 产出 'intercepted' 事件（守方无损，攻方弹药消耗）。
+ * 3. 失败 → damage=MISSILE_BASE_DAMAGE(40)，守方 strength -40（封顶 0）+ personnel 按比例损失
+ *    + morale -damage×0.5。产出 'engagement' 事件 + 若歼灭 'casualty'。
+ * 4. 攻方（missile）无论命中与否都消耗 ammo（按 resolveDamage.attackerAmmoCost 量级，简化 -20）
+ *    + fatigue +8（远程发射疲劳）。
+ *
+ * 确定性：拦截判定用注入的 rng（DeterministicRandom.fromSequence）。
+ */
+function resolveMissileAttackOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  rng: DeterministicRandom,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+  attacker: Unit,
+  defenderId: string,
+): void {
+  const defender = worldState.units.find((u) => u.id === defenderId)
+  if (!defender) {
+    // 目标不存在：占位事件（与 resolveEngagement 的 no_target 分支一致）
+    events.push({
+      id: `evt:${envelope.sequence}:engagement:0`,
+      source: 'physics',
+      turn,
+      sequence: envelope.sequence,
+      agentId: envelope.agentId,
+      kind: 'engagement',
+      description: `目标 ${defenderId} 不存在，导弹攻击未发生`,
+      data: { attackerId: attacker.id, defenderId, outcome: 'no_target' },
+    })
+    return
+  }
+
+  // 拦截判定（守方阵营的防空单位覆盖目标 cell）
+  const result = resolveMissileAttack(defender, defender.factionId, worldState, rng)
+
+  // 攻方弹药/疲劳消耗（导弹发射成本）
+  const attackerAmmoCost = 20
+  const attackerFatigueGain = 8
+  const attackerExisting = stateChanges.unitUpdates[attacker.id] ?? {}
+  stateChanges.unitUpdates[attacker.id] = {
+    ...attackerExisting,
+    ammo: Math.max(0, attacker.ammo - attackerAmmoCost),
+    fatigue: Math.min(100, attacker.fatigue + attackerFatigueGain),
+  }
+
+  if (result.intercepted) {
+    // 拦截成功：守方无损，产出 'intercepted' 事件
+    events.push({
+      id: `evt:${envelope.sequence}:intercepted:0`,
+      source: 'physics',
+      turn,
+      sequence: envelope.sequence,
+      agentId: envelope.agentId,
+      kind: 'intercepted',
+      description: `${attacker.id} 的导弹被 ${result.interceptorUnit?.id ?? '防空系统'} 拦截（拦截概率 ${(result.interceptionProb * 100).toFixed(0)}%）`,
+      data: {
+        attackerId: attacker.id,
+        defenderId: defender.id,
+        interceptorId: result.interceptorUnit?.id ?? null,
+        interceptionProb: result.interceptionProb,
+        damage: 0,
+        missileDamage: MISSILE_BASE_DAMAGE,
+      },
+    })
+    return
+  }
+
+  // 拦截失败：导弹命中，守方 strength -40 + 衍生损失
+  const damage = result.damage // = MISSILE_BASE_DAMAGE (40)
+  const defenderStrengthBefore = defender.strength
+  const newDefenderStrength = Math.max(0, defenderStrengthBefore - damage)
+  const defenderAnnihilated = newDefenderStrength <= 0
+  const personnelLoss = Math.round(
+    defender.personnel * (damage / Math.max(1, defenderStrengthBefore)),
+  )
+  const defenderMoraleLoss = Math.round(damage * 0.5)
+
+  const defenderExisting = stateChanges.unitUpdates[defender.id] ?? {}
+  stateChanges.unitUpdates[defender.id] = {
+    ...defenderExisting,
+    strength: newDefenderStrength,
+    personnel: Math.max(0, defender.personnel - personnelLoss),
+    morale: Math.max(0, defender.morale - defenderMoraleLoss),
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:engagement:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'engagement',
+    description: `${attacker.id} 导弹命中 ${defender.id}：-${damage}str（拦截失败，拦截概率 ${(result.interceptionProb * 100).toFixed(0)}%）`,
+    data: {
+      attackerId: attacker.id,
+      defenderId: defender.id,
+      missile: true,
+      attackerLoss: 0,
+      defenderLoss: damage,
+      attackerPersonnelLoss: 0,
+      defenderPersonnelLoss: personnelLoss,
+      defenderAnnihilated,
+      interceptionProb: result.interceptionProb,
+      interceptorPresent: result.interceptorUnit !== null,
+    },
+  })
+
+  if (defenderAnnihilated) {
+    if (!stateChanges.annihilated.includes(defender.id)) {
+      stateChanges.annihilated.push(defender.id)
+    }
+    events.push({
+      id: `evt:${envelope.sequence}:casualty:1`,
+      source: 'physics',
+      turn,
+      sequence: envelope.sequence,
+      agentId: envelope.agentId,
+      kind: 'casualty',
+      description: `${defender.id} 被导弹摧毁`,
+      data: { unitId: defender.id, factionId: defender.factionId, cause: 'missile' },
+    })
+  }
 }
 
 /**
@@ -1037,6 +1274,719 @@ function resolveReconOrder(
   })
 }
 
+// =============================================================================
+// T2 第 2 批：EW 被动效果（simulateTurn 开头调用）
+// =============================================================================
+
+/** EW 被动事件 sequence 段位（与 supply 2500-2998、随机事件 9999 区分）。 */
+const SEQUENCE_EW_PASSIVE_BASE = 2400
+
+/**
+ * 应用 EW 被动效果到 worldState（不可变产出：增量写入 stateChanges）。
+ *
+ * 由 simulateTurn 在命令结算前调用（影响后续 recon/attack 的 intel 与火力）。
+ * 把 applyEWEffects 返回的 intelDegraded/intelBoosted detection 增量合并到
+ * stateChanges.unitUpdates[enemyId].detection，并产出 ew_jam / ew_support 事件。
+ *
+ * 事件 sequence 段位 2400-2499（与 supply 2500+ 区分）。
+ */
+function applyEWPassive(
+  worldState: WorldState,
+  turn: number,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+): void {
+  const effects = applyEWEffects(worldState, turn)
+
+  // 合并 intelDegraded + intelBoosted 到 stateChanges.unitUpdates[*].detection。
+  // 增量合并语义：intelDegraded 与 intelBoosted 对同一 (unitId, observerFactionId)
+  // 可能都有写入——boosted 是 degraded 之后的累积态（applyEWEffects 内部已处理顺序），
+  // 故以 boosted 优先（最终态）。若无 boosted 则用 degraded。
+  const allUnitIds = new Set<string>([
+    ...effects.intelDegraded.keys(),
+    ...effects.intelBoosted.keys(),
+  ])
+  for (const unitId of allUnitIds) {
+    const degraded = effects.intelDegraded.get(unitId) ?? {}
+    const boosted = effects.intelBoosted.get(unitId) ?? {}
+    // 合并：boosted 覆盖 degraded（同 observer 取 boosted 最终态）
+    const merged: Record<string, IntelObservation> = { ...degraded, ...boosted }
+    if (Object.keys(merged).length === 0) continue
+    const existing = stateChanges.unitUpdates[unitId] ?? {}
+    const existingDet =
+      (existing.detection as Record<string, IntelObservation> | undefined) ?? {}
+    stateChanges.unitUpdates[unitId] = {
+      ...existing,
+      detection: { ...existingDet, ...merged },
+    }
+    // 追加 reconHits 流（EW 增强视为侦察命中）
+    if (!stateChanges.intelReconHits) stateChanges.intelReconHits = []
+    for (const observer of Object.keys(merged)) {
+      stateChanges.intelReconHits.push({ observerFactionId: observer, unitId })
+    }
+  }
+
+  // 产出 ew_jam / ew_support 事件（每个有 EW 能力的单位一条，便于 UI 联动）
+  let ewEvtIndex = 0
+  const ewUnits = worldState.units.filter((u) => u.ewCapability && u.strength > 0)
+  for (const ewUnit of ewUnits) {
+    const ew = ewUnit.ewCapability!
+    const sequence = SEQUENCE_EW_PASSIVE_BASE + ewEvtIndex
+    ewEvtIndex += 1
+
+    // 该 EW 单位本回合施加的干扰/增强目标数（统计用）
+    let jamTargets = 0
+    let boostTargets = 0
+    for (const target of worldState.units) {
+      if (target.factionId === ewUnit.factionId || target.strength <= 0) continue
+      const dist =
+        Math.abs(target.coord.col - ewUnit.coord.col) +
+        Math.abs(target.coord.row - ewUnit.coord.row)
+      if (dist > ew.jammingRange) continue
+      jamTargets += 1
+      if (ew.detectionBoost > 0) boostTargets += 1
+    }
+
+    // 干扰事件（即便无目标也记，表示该单位本回合执行了 EW 任务）
+    events.push({
+      id: `evt:${sequence}:ew_jam:0`,
+      source: 'physics',
+      turn,
+      sequence,
+      kind: 'ew_jam',
+      description: `${ewUnit.id} 电子战平台开机干扰（范围 ${ew.jammingRange}，压制 ${jamTargets} 个敌方单位侦察）`,
+      data: {
+        ewUnitId: ewUnit.id,
+        factionId: ewUnit.factionId,
+        jammingRange: ew.jammingRange,
+        detectionBoost: ew.detectionBoost,
+        stealthReduction: ew.stealthReduction,
+        jamTargets,
+        boostTargets,
+        coord: { ...ewUnit.coord },
+      },
+    })
+
+    // 若有增强目标，追加 ew_support 事件
+    if (boostTargets > 0) {
+      const seq2 = SEQUENCE_EW_PASSIVE_BASE + ewEvtIndex
+      ewEvtIndex += 1
+      events.push({
+        id: `evt:${seq2}:ew_support:0`,
+        source: 'physics',
+        turn,
+        sequence: seq2,
+        kind: 'ew_support',
+        description: `${ewUnit.id} 电子支援增强己方侦察（+${ew.detectionBoost} level，覆盖 ${boostTargets} 个敌方单位）`,
+        data: {
+          ewUnitId: ewUnit.id,
+          factionId: ewUnit.factionId,
+          detectionBoost: ew.detectionBoost,
+          boostTargets,
+          coord: { ...ewUnit.coord },
+        },
+      })
+    }
+  }
+}
+
+// =============================================================================
+// T2 第 2 批：EW 命令结算（ew_jam / ew_support）
+// =============================================================================
+
+/**
+ * 结算电子干扰命令（ew_jam）。
+ *
+ * 语义：EW 单位对 payload.target 坐标范围内的敌方单位施加 intel level 强制降级
+ * （比 applyEWEffects 被动更激进——主动 jam 直接 -2 level，下限 L0）。
+ * 产出 'ew_jam' 事件。
+ *
+ * 注：被动 EW 效果（applyEWPassive）已在 simulateTurn 开头应用，本命令是玩家/Agent
+ * 主动指定的"集中干扰"，与被动叠加。
+ */
+function resolveEWJamOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const ewFaction = envelope.faction
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少 EW 单位 unitId', {}))
+    return
+  }
+  const ewUnit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!ewUnit) {
+    events.push(makeBlockadeEvent(envelope, turn, `EW 单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+  if (!ewUnit.ewCapability) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 无电子战能力`, { unitId }))
+    return
+  }
+
+  const targetCoord = extractCoord(envelope, 'target')
+  if (!targetCoord) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少干扰目标坐标 target', { unitId }))
+    return
+  }
+
+  const range = ewUnit.ewCapability.jammingRange
+  // 在 target 坐标周围 range 范围内查找敌方单位，主动 jam -2 level
+  const jammed: Array<{ unitId: string; beforeLevel: number; afterLevel: number }> = []
+  for (const enemy of worldState.units) {
+    if (enemy.factionId === ewFaction || enemy.strength <= 0) continue
+    const dist =
+      Math.abs(enemy.coord.col - targetCoord.col) +
+      Math.abs(enemy.coord.row - targetCoord.row)
+    if (dist > range) continue
+
+    const curObs: IntelObservation = enemy.detection[ewFaction] ?? {
+      observerFactionId: ewFaction,
+      level: 0 as IntelLevel,
+      lastSeenTurn: -1,
+      staleTurns: 0,
+    }
+    const afterLevel = Math.max(0, (curObs.level as number) - 2) as IntelLevel
+    const newObs: IntelObservation = { ...curObs, level: afterLevel }
+
+    const existing = stateChanges.unitUpdates[enemy.id] ?? {}
+    const existingDet =
+      (existing.detection as Record<string, IntelObservation> | undefined) ?? {}
+    stateChanges.unitUpdates[enemy.id] = {
+      ...existing,
+      detection: { ...existingDet, [ewFaction]: newObs },
+    }
+    jammed.push({ unitId: enemy.id, beforeLevel: curObs.level, afterLevel })
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:ew_jam:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'ew_jam',
+    description: `${unitId} 对 (${targetCoord.col},${targetCoord.row}) 周围实施集中电子干扰，压制 ${jammed.length} 个敌方单位`,
+    data: {
+      ewUnitId: unitId,
+      factionId: ewFaction,
+      targetCoord,
+      range,
+      jammed,
+      detectionDelta: Object.fromEntries(
+        jammed.map((j) => [
+          j.unitId,
+          {
+            [ewFaction]: stateChanges.unitUpdates[j.unitId]?.detection?.[ewFaction],
+          },
+        ]),
+      ),
+    },
+  })
+}
+
+/**
+ * 结算电子支援命令（ew_support）。
+ *
+ * 语义：EW 单位增强己方对 target 坐标范围内敌方单位的观测（+detectionBoost level，封顶 L3）。
+ * 产出 'ew_support' 事件。
+ */
+function resolveEWSupportOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const ewFaction = envelope.faction
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少 EW 单位 unitId', {}))
+    return
+  }
+  const ewUnit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!ewUnit) {
+    events.push(makeBlockadeEvent(envelope, turn, `EW 单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+  if (!ewUnit.ewCapability || ewUnit.ewCapability.detectionBoost <= 0) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 无电子支援能力`, { unitId }))
+    return
+  }
+
+  const targetCoord = extractCoord(envelope, 'target')
+  if (!targetCoord) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少支援目标坐标 target', { unitId }))
+    return
+  }
+
+  const range = ewUnit.ewCapability.jammingRange
+  const boost = ewUnit.ewCapability.detectionBoost
+  const boosted: Array<{ unitId: string; beforeLevel: number; afterLevel: number }> = []
+  for (const enemy of worldState.units) {
+    if (enemy.factionId === ewFaction || enemy.strength <= 0) continue
+    const dist =
+      Math.abs(enemy.coord.col - targetCoord.col) +
+      Math.abs(enemy.coord.row - targetCoord.row)
+    if (dist > range) continue
+
+    const curObs: IntelObservation = enemy.detection[ewFaction] ?? {
+      observerFactionId: ewFaction,
+      level: 0 as IntelLevel,
+      lastSeenTurn: -1,
+      staleTurns: 0,
+    }
+    const afterLevel = Math.min(3, (curObs.level as number) + boost) as IntelLevel
+    const newObs: IntelObservation = {
+      ...curObs,
+      level: afterLevel,
+      lastSeenTurn: turn,
+      staleTurns: 0,
+    }
+
+    const existing = stateChanges.unitUpdates[enemy.id] ?? {}
+    const existingDet =
+      (existing.detection as Record<string, IntelObservation> | undefined) ?? {}
+    stateChanges.unitUpdates[enemy.id] = {
+      ...existing,
+      detection: { ...existingDet, [ewFaction]: newObs },
+    }
+    if (!stateChanges.intelReconHits) stateChanges.intelReconHits = []
+    stateChanges.intelReconHits.push({ observerFactionId: ewFaction, unitId: enemy.id })
+    boosted.push({ unitId: enemy.id, beforeLevel: curObs.level, afterLevel })
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:ew_support:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'ew_support',
+    description: `${unitId} 电子支援增强己方侦察（+${boost} level，发现/升级 ${boosted.length} 个敌方单位）`,
+    data: {
+      ewUnitId: unitId,
+      factionId: ewFaction,
+      targetCoord,
+      range,
+      detectionBoost: boost,
+      boosted,
+      detectionDelta: Object.fromEntries(
+        boosted.map((b) => [
+          b.unitId,
+          {
+            [ewFaction]: stateChanges.unitUpdates[b.unitId]?.detection?.[ewFaction],
+          },
+        ]),
+      ),
+    },
+  })
+}
+
+// =============================================================================
+// T2 第 3 批：宣传命令（propaganda）
+// =============================================================================
+
+/**
+ * 结算宣传命令（propaganda）。
+ *
+ * 语义（重写计划「第 3 批」）：
+ * - 若 payload.targetFaction 指定 → 该阵营 publicWill +5（发动宣传攻势提振/瓦解对方民心）。
+ * - 否则 → 己方阵营（envelope.faction）morale +3（对内宣传提振士气）。
+ * 产出 'propaganda' 事件。
+ *
+ * 注：publicWill 字段在 Faction 上（runtime），本命令直接改 worldState.factions。
+ * 但 worker 产出的是 ResolutionResult（仅 stateChanges.unitUpdates + 事件），
+ * Faction 变更需在 turn-resolution 层应用——此处仅产出事件留痕 + 记录 targetFactionId/amount，
+ * 由 turn-resolution 读事件 data 字段落地到 faction.publicWill。
+ *
+ * morale 变更（己方宣传提振士气）走 stateChanges.unitUpdates（影响该阵营所有单位）。
+ */
+function resolvePropagandaOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const ownFaction = envelope.faction
+  const targetFaction =
+    extractPayloadField<string>(envelope, 'targetFaction') ??
+    extractPayloadField<string>(envelope, 'targetFactionId')
+
+  if (targetFaction) {
+    // 目标阵营 publicWill +5（事件 data 携带，由 turn-resolution 落地到 faction）
+    const targetF = worldState.factions.find((f) => f.id === targetFaction)
+    if (!targetF) {
+      events.push(makeBlockadeEvent(envelope, turn, `目标阵营 ${targetFaction} 不存在`, { targetFaction }))
+      return
+    }
+    events.push({
+      id: `evt:${envelope.sequence}:propaganda:0`,
+      source: 'physics',
+      turn,
+      sequence: envelope.sequence,
+      agentId: envelope.agentId,
+      kind: 'propaganda',
+      description: `${ownFaction} 对 ${targetFaction} 发动宣传攻势（publicWill +5，当前 ${targetF.publicWill ?? 60}）`,
+      data: {
+        ownFaction,
+        targetFaction,
+        field: 'publicWill',
+        delta: 5,
+        before: targetF.publicWill ?? 60,
+      },
+    })
+    return
+  }
+
+  // 无 targetFaction → 己方全军 morale +3（对内宣传提振士气）
+  const ownUnits = worldState.units.filter((u) => u.factionId === ownFaction && u.strength > 0)
+  for (const u of ownUnits) {
+    const existing = stateChanges.unitUpdates[u.id] ?? {}
+    stateChanges.unitUpdates[u.id] = {
+      ...existing,
+      morale: Math.min(100, u.morale + 3),
+    }
+  }
+  events.push({
+    id: `evt:${envelope.sequence}:propaganda:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'propaganda',
+    description: `${ownFaction} 发动对内宣传，全军士气 +3（影响 ${ownUnits.length} 个单位）`,
+    data: {
+      ownFaction,
+      targetFaction: ownFaction,
+      field: 'morale',
+      delta: 3,
+      affectedUnitIds: ownUnits.map((u) => u.id),
+    },
+  })
+}
+
+// =============================================================================
+// T2 第 4 批：特殊作战（sabotage / paradrop / commando_raid）
+// =============================================================================
+
+/**
+ * 结算破坏命令（sabotage）。
+ *
+ * 语义（重写计划「第 4 批」）：特种单位（type recon/infantry，或携带 special/laser 装备）
+ * 对目标 cell 破坏：
+ * - 需对该 cell 的敌方单位 recon level ≥ L2（否则"未侦察确认目标，行动失败"blockade）。
+ * - 如 cell 有 supplySource → 该 cell fortificationLevel -2（破坏补给节点工事）。
+ * - 如 cell 有敌方单位 → 该单位 strength -15（破坏人员/装备）。
+ * 产出 'sabotage' 事件。
+ *
+ * 特种单位识别：type recon/infantry 且（equipment 含 special/laser-designator 或
+ * ewCapability 存在）。无特种能力的单位执行 sabotage → blockade。
+ */
+function resolveSabotageOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const ownFaction = envelope.faction
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少特种单位 unitId', {}))
+    return
+  }
+  const unit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!unit) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+  if (!isSpecialOperator(unit)) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不具备特种作战能力（需 recon/infantry + special 装备）`, { unitId }))
+    return
+  }
+
+  const targetCoord = extractCoord(envelope, 'target')
+  if (!targetCoord) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少破坏目标坐标 target', { unitId }))
+    return
+  }
+
+  // 侦察等级检查：该 cell 内敌方单位对己方观测需 ≥ L2
+  const enemiesInCell = worldState.units.filter(
+    (u) =>
+      u.factionId !== ownFaction &&
+      u.strength > 0 &&
+      u.coord.col === targetCoord.col &&
+      u.coord.row === targetCoord.row,
+  )
+  if (enemiesInCell.length > 0) {
+    const allReconOk = enemiesInCell.every((e) => {
+      const obs = e.detection[ownFaction]
+      return obs && (obs.level as number) >= 2
+    })
+    if (!allReconOk) {
+      events.push(
+        makeBlockadeEvent(envelope, turn, '未侦察确认目标（需 recon level ≥ L2），破坏行动失败', {
+          unitId,
+          targetCoord,
+        }),
+      )
+      return
+    }
+  }
+
+  // 执行破坏
+  const targetCell = getCellAt(worldState.map, targetCoord.col, targetCoord.row)
+  const cellIsSupply = targetCell?.isSupplySource === true
+
+  // 1. supplySource cell → fortificationLevel -2（下限 0）
+  if (cellIsSupply && targetCell) {
+    if (!stateChanges.cellUpdates) stateChanges.cellUpdates = {}
+    const before = Math.max(0, targetCell.fortificationLevel ?? 0)
+    const after = Math.max(0, before - 2)
+    const existingCell = stateChanges.cellUpdates[targetCell.id] ?? {}
+    stateChanges.cellUpdates[targetCell.id] = {
+      ...existingCell,
+      fortificationLevel: after,
+    }
+  }
+
+  // 2. cell 内敌方单位 → strength -15
+  const damaged: string[] = []
+  for (const enemy of enemiesInCell) {
+    const newStrength = Math.max(0, enemy.strength - 15)
+    const existing = stateChanges.unitUpdates[enemy.id] ?? {}
+    stateChanges.unitUpdates[enemy.id] = {
+      ...existing,
+      strength: newStrength,
+    }
+    damaged.push(enemy.id)
+    if (newStrength <= 0 && !stateChanges.annihilated.includes(enemy.id)) {
+      stateChanges.annihilated.push(enemy.id)
+    }
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:sabotage:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'sabotage',
+    description: `${unitId} 对 (${targetCoord.col},${targetCoord.row}) 实施破坏${cellIsSupply ? '（补给节点工事 -2）' : ''}${damaged.length > 0 ? `，重创 ${damaged.length} 个敌方单位（-15str）` : ''}`,
+    data: {
+      unitId,
+      factionId: ownFaction,
+      targetCoord,
+      targetCellId: targetCell?.id ?? null,
+      supplySourceDestroyed: cellIsSupply,
+      fortificationBefore: cellIsSupply ? targetCell?.fortificationLevel ?? 0 : null,
+      fortificationAfter: cellIsSupply ? Math.max(0, (targetCell?.fortificationLevel ?? 0) - 2) : null,
+      damagedUnits: damaged,
+      damage: 15,
+    },
+  })
+}
+
+/**
+ * 结算空降命令（paradrop）。
+ *
+ * 语义（重写计划「第 4 批」）：type air 单位直接跳到目标 cell（无视 movementCost/terrain），
+ * 但 strength -15（空降散降损失）+ status 'pinned'（1 回合无法行动，下回合由基线清除）。
+ * 产出 'paradrop' 事件。
+ *
+ * 约束：仅 air 类型可空降；目标 cell 必须在地图内。
+ */
+function resolveParadropOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少空降单位 unitId', {}))
+    return
+  }
+  const unit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!unit) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+  if (unit.type !== 'air') {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 非空中单位，无法空降（需 type=air）`, { unitId }))
+    return
+  }
+
+  const targetCoord = extractCoord(envelope, 'target')
+  if (!targetCoord) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少空降目标坐标 target', { unitId }))
+    return
+  }
+  const targetCell = getCellAt(worldState.map, targetCoord.col, targetCoord.row)
+  if (!targetCell) {
+    events.push(makeBlockadeEvent(envelope, turn, '空降目标坐标越界', { unitId, target: targetCoord }))
+    return
+  }
+
+  // 空降：直接跳到目标 cell（无视 movementCost/terrain），strength -15 + status 'pinned'
+  const newStrength = Math.max(0, unit.strength - 15)
+  const newStatus = unit.status.includes('pinned')
+    ? unit.status
+    : [...unit.status, 'pinned' as const]
+
+  const existing = stateChanges.unitUpdates[unitId] ?? {}
+  stateChanges.unitUpdates[unitId] = {
+    ...existing,
+    coord: targetCoord,
+    strength: newStrength,
+    status: newStatus,
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:paradrop:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'paradrop',
+    description: `${unitId} 空降至 (${targetCoord.col},${targetCoord.row})（散降损失 -15str，本回合 pinned）`,
+    data: {
+      unitId,
+      factionId: unit.factionId,
+      from: { ...unit.coord },
+      to: targetCoord,
+      strengthBefore: unit.strength,
+      strengthAfter: newStrength,
+      pinned: true,
+      terrain: targetCell.terrain,
+    },
+  })
+}
+
+/**
+ * 结算特种突袭/斩首命令（commando_raid）。
+ *
+ * 语义（重写计划「第 4 批」）：特种单位针对敌方 commander cell（敌方阵营有 commander 单位
+ * 或高价值节点 cell）执行斩首突袭。成功 → 该 cell 所有敌方单位 morale -20。
+ * 需 recon level ≥ L2（与 sabotage 一致）。
+ * 产出 'commando_raid' 事件。
+ */
+function resolveCommandoRaidOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const ownFaction = envelope.faction
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少特种单位 unitId', {}))
+    return
+  }
+  const unit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!unit) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+  if (!isSpecialOperator(unit)) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不具备特种作战能力`, { unitId }))
+    return
+  }
+
+  const targetCoord = extractCoord(envelope, 'target')
+  if (!targetCoord) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少突袭目标坐标 target', { unitId }))
+    return
+  }
+
+  // 目标 cell 内的敌方单位
+  const enemiesInCell = worldState.units.filter(
+    (u) =>
+      u.factionId !== ownFaction &&
+      u.strength > 0 &&
+      u.coord.col === targetCoord.col &&
+      u.coord.row === targetCoord.row,
+  )
+  if (enemiesInCell.length === 0) {
+    events.push(
+      makeBlockadeEvent(envelope, turn, '目标 cell 无敌方单位，斩首突袭无目标', {
+        unitId,
+        targetCoord,
+      }),
+    )
+    return
+  }
+
+  // 侦察等级检查 ≥ L2
+  const allReconOk = enemiesInCell.every((e) => {
+    const obs = e.detection[ownFaction]
+    return obs && (obs.level as number) >= 2
+  })
+  if (!allReconOk) {
+    events.push(
+      makeBlockadeEvent(envelope, turn, '未侦察确认目标（需 recon level ≥ L2），斩首突袭失败', {
+        unitId,
+        targetCoord,
+      }),
+    )
+    return
+  }
+
+  // 执行斩首：该 cell 所有敌方单位 morale -20
+  const raided: Array<{ unitId: string; moraleBefore: number; moraleAfter: number }> = []
+  for (const enemy of enemiesInCell) {
+    const newMorale = Math.max(0, enemy.morale - 20)
+    const existing = stateChanges.unitUpdates[enemy.id] ?? {}
+    stateChanges.unitUpdates[enemy.id] = {
+      ...existing,
+      morale: newMorale,
+    }
+    raided.push({ unitId: enemy.id, moraleBefore: enemy.morale, moraleAfter: newMorale })
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:commando_raid:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'commando_raid',
+    description: `${unitId} 对 (${targetCoord.col},${targetCoord.row}) 实施斩首突袭，${raided.length} 个敌方单位士气 -20`,
+    data: {
+      unitId,
+      factionId: ownFaction,
+      targetCoord,
+      raided,
+      moraleDelta: -20,
+    },
+  })
+}
+
+/**
+ * 判定单位是否具备特种作战能力（sabotage/commando_raid 执行资格）。
+ *
+ * 条件：type 为 recon/infantry，且装备含 special/laser-designator 关键字，
+ * 或具备 ewCapability（带特种侦察能力的隐身/特种单位）。
+ */
+function isSpecialOperator(unit: Unit): boolean {
+  if (unit.type !== 'recon' && unit.type !== 'infantry') return false
+  if (unit.ewCapability) return true
+  const slots = unit.equipment
+  if (!slots) return false
+  return slots.some((s) => {
+    const t = s.type.toLowerCase()
+    return t.includes('special') || t.includes('laser') || t.includes('designator')
+  })
+}
+
 // ============================================================================
 // 辅助函数
 // ============================================================================
@@ -1184,11 +2134,15 @@ function applyBaselineToAll(
     // 该格是否被任何单位占据（用 col/row 匹配，兼容多种 cell.id 格式）
     const isOccupied = occupiedCells.has(`${cell.col}:${cell.row}`)
     if (isOccupied) continue
-    // 无驻留 → 衰减 -1
-    if (!updates.cellUpdates) {
-      ;(updates as BaselineResult['updates']).cellUpdates = {}
+    // 无驻留 → 衰减 -1。用局部 typedRef 持有 updates 引用以安全访问/初始化 cellUpdates
+    // （updates 类型是交叉类型，cellUpdates 字段在初始化前需 cast 才能赋值）。
+    const typedUpdates: BaselineResult['updates'] = updates
+    if (!typedUpdates.cellUpdates) {
+      typedUpdates.cellUpdates = {}
     }
-    updates.cellUpdates[cell.id] = { fortificationLevel: Math.max(0, level - 1) }
+    if (typedUpdates.cellUpdates) {
+      typedUpdates.cellUpdates[cell.id] = { fortificationLevel: Math.max(0, level - 1) }
+    }
   }
 
   return { updates, events }

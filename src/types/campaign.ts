@@ -135,6 +135,18 @@ export interface CampaignFaction {
   relations?: Record<string, FactionRelation>
   doctrineTags: string[]
   description?: string
+  /**
+   * 民心/战意初值（T2 第 3 批，0..100，可选）。
+   *
+   * 缺省 60。注入 world 时复制到 Faction.publicWill。
+   */
+  publicWill?: number
+  /**
+   * 国际舆论初值（T2 第 3 批，0..100，可选）。
+   *
+   * 缺省 50。注入 world 时复制到 Faction.internationalOpinion。
+   */
+  internationalOpinion?: number
 }
 
 // =============================================================================
@@ -173,6 +185,14 @@ export interface CampaignUnit {
   status?: UnitStatusFlag[]
   /** 装备槽列表（第 5 批，可选；影响火力加成） */
   equipment?: CampaignEquipmentSlot[]
+  /**
+   * 电子战能力（T2 第 2 批，可选）。
+   *
+   * 与 runtime Unit.ewCapability 同构（见 types/unit.ts EWCapability）。
+   * 注入 world 时复制到 Unit.ewCapability，由 electronic-warfare.applyEWEffects 消费。
+   * 缺省（undefined）视为无电子战能力（旧战役包兼容）。
+   */
+  ewCapability?: import('./unit').EWCapability
 }
 
 // =============================================================================
@@ -252,8 +272,8 @@ export interface CampaignSupplyRules {
  *   缺省 2（即 [2,4] 回合）。
  */
 export interface CampaignWeatherRules {
-  /** 该战役可能出现的天气类型子集（缺省全部 5 类）。 */
-  possibleTypes?: Array<'clear' | 'rain' | 'storm' | 'fog' | 'snow'>
+  /** 该战役可能出现的天气类型子集（缺省全部 5 类）。readonly 兼容 as const 测试字面量。 */
+  possibleTypes?: ReadonlyArray<'clear' | 'rain' | 'storm' | 'fog' | 'snow'>
   /** 新天气基准持续回合（缺省 2，实际 [baseDuration, baseDuration+2]）。 */
   baseDuration?: number
 }

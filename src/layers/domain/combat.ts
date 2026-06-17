@@ -56,6 +56,17 @@ export type ResolutionEventKind =
   | 'entrench' // T1-A：单位构筑工事（entrenchment+1，cell.fortificationLevel 提升，morale+2）
   | 'rout' // T1-D：单位溃退（morale<15 且 strength<30 → 向己方补给源方向移 1 格 + status 'routed'）
   | 'surrender' // T1-D：单位投降（morale<5 且被敌方包围 → strength=0 + status 'destroyed'）
+  // T2 第 2 批：电子战
+  | 'ew_jam' // EW 单位执行电子干扰（敌方单位 intel level 降级）
+  | 'ew_support' // EW 单位执行电子支援（己方观测能力增强）
+  // T2 第 3 批：舆论战
+  | 'propaganda' // 宣传命令（targetFaction publicWill+5 或 ownFaction morale+3）
+  // T2 第 4 批：特殊作战
+  | 'sabotage' // 破坏（特种单位破坏目标 cell supplySource/单位 strength）
+  | 'paradrop' // 空降（air 单位跳到目标 cell，strength-15 + status pinned）
+  | 'commando_raid' // 特种突袭/斩首（敌方 commander cell 所有单位 morale-20）
+  // T2 第 5 批 A：导弹拦截
+  | 'intercepted' // 导弹攻击被防空单位拦截（damage=0）
 
 /**
  * 物理层结算事件（event-log 一条目级产物）。
@@ -107,7 +118,15 @@ export interface CombatStateChanges {
     Partial<
       Pick<
         Unit,
-        'strength' | 'personnel' | 'fuel' | 'ammo' | 'morale' | 'fatigue' | 'coord' | 'status'
+        | 'strength'
+        | 'personnel'
+        | 'fuel'
+        | 'ammo'
+        | 'morale'
+        | 'fatigue'
+        | 'coord'
+        | 'status'
+        | 'entrenchment'
       > & {
         /**
          * recon 命中产出的情报观测增量：key=observerFactionId（侦察执行方），

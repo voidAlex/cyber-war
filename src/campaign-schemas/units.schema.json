@@ -12,7 +12,7 @@
       "factionId": { "type": "string", "minLength": 1 },
       "type": {
         "type": "string",
-        "enum": ["infantry", "armor", "artillery", "recon", "fortress", "support", "air", "naval", "missile"]
+        "enum": ["infantry", "armor", "artillery", "recon", "fortress", "support", "air", "naval", "missile", "ew"]
       },
       "coord": {
         "type": "object",
@@ -51,6 +51,17 @@
           "required": ["type", "count", "quality"],
           "additionalProperties": false
         }
+      },
+      "ewCapability": {
+        "type": "object",
+        "description": "T2 第 2 批：电子战能力（可选）。由 electronic-warfare.applyEWEffects 消费。",
+        "properties": {
+          "jammingRange": { "type": "number", "minimum": 0, "maximum": 20, "description": "干扰范围（曼哈顿距离），范围内敌方单位 intel level 降低" },
+          "detectionBoost": { "type": "number", "minimum": 0, "maximum": 3, "description": "对己方侦察的情报加成（+N level，封顶 L3）" },
+          "stealthReduction": { "type": "number", "minimum": 0, "maximum": 1, "description": "降低敌方对该单位的侦察等级倍率（0=完全隐身，1=无加成）" }
+        },
+        "required": ["jammingRange", "detectionBoost", "stealthReduction"],
+        "additionalProperties": false
       }
     },
     "required": ["id", "factionId", "type", "coord", "strength", "personnel", "maxPersonnel", "fuel", "ammo", "morale", "fatigue"],

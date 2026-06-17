@@ -51,6 +51,11 @@ import { allocateSequences, SEQUENCE_BASE, makeSeed } from './sequence-allocator
 import { ruleEngineFallback, type RuleEngineFallbackResult } from '@/layers/agents/director/rule-engine-fallback'
 import { rollRandomEvents } from '@/layers/domain/random-events'
 import { rollWeather } from '@/layers/domain/weather'
+import {
+  updatePublicWill,
+  updateInternationalOpinion,
+  applyMutinyPenalty,
+} from '@/layers/domain/public-opinion'
 import { DeterministicRandom } from '@/layers/domain/deterministic-random'
 import { logger } from '@/utils/logger'
 
@@ -268,23 +273,84 @@ export async function orchestrateTurnResolution(
   })
 
   // -------------------------------------------------------------------------
+  // 步骤1.3：T2 第 3 批 舆论战/民心（物理结算后、随机事件前）。
+  // -------------------------------------------------------------------------
+  // 每回合根据上回合结算（worldState.lastResolution）调整各阵营 publicWill /
+  // internationalOpinion。publicWill < 20 → 全军 morale -10（兵变风险陡升）。
+  // internationalOpinion < 30 → 后续 randomEvents 的 reinforcement（军援）应被抑制
+  // （由 rollRandomEvents 在本轮感知，但当前 rollRandomEvents 未消费此信号；
+  //  本编排仅产出数值信号并落地到 worldState.factions，UI/director 据此叙事）。
+  // 确定性：纯数值计算（基于 lastResolution.casualties/objectiveChanges + faction.supply），
+  // 无随机数（兵变概率判定在 random-events.mutiny 模板，此处仅 morale 惩罚）。
+  const prevResolution = worldState.lastResolution
+  const publicWillUpdate = updatePublicWill(worldState, prevResolution)
+  const opinionFactions = updateInternationalOpinion(worldState, prevResolution)
+  // 合并：internationalOpinion 已含在 opinionFactions，publicWill 在 publicWillUpdate.factions。
+  // 取 opinionFactions 的 internationalOpinion 字段合并到 publicWillUpdate.factions。
+  const mergedFactions = publicWillUpdate.factions.map((f, i) => ({
+    ...f,
+    internationalOpinion: opinionFactions[i].internationalOpinion,
+  }))
+  worldState = { ...worldState, factions: mergedFactions }
+  // 兵变惩罚：crisisFactionIds 的所有单位 morale -10（应用到 worldState.units，不可变产出）。
+  if (publicWillUpdate.crisisFactionIds.length > 0) {
+    const newUnits = applyMutinyPenalty(worldState, publicWillUpdate.crisisFactionIds)
+    worldState = { ...worldState, units: newUnits }
+    logger.warn('orch/resolve/mutiny_penalty', '民心崩盘触发兵变惩罚（全军 morale -10）', {
+      ...logCtx,
+      crisisFactionIds: publicWillUpdate.crisisFactionIds,
+    })
+  }
+
+  // -------------------------------------------------------------------------
   // 步骤1.5：第 2 批 战役随机事件（物理结算后、导演部 adjudicate 前）
   // -------------------------------------------------------------------------
   // 确定性：rollRandomEvents 用 DeterministicRandom.fromSequence(scenarioSeed, turn, 9999)。
   // 不伪造：援军单位来自战役包 rules.randomEvents[].reinforcementUnits 定义。
   // 复用覆写链路：事件 effects 已是 DirectorOverride[]，由导演部在 adjudicate 中应用 + 叙事。
+  // T2 第 3 批：internationalOpinion < 30 → 抑制 reinforcement（军援中断）。rollRandomEvents
+  // 当前不消费此信号，故在此处对 reinforcement 触发结果做过滤（采信 faction.internationalOpinion）。
   let randomEvents: import('@/types').RandomEvent[] = []
   if (campaignRules?.randomEvents && campaignRules.randomEvents.length > 0) {
     const roll = rollRandomEvents(worldState, turn, campaignRules, scenarioSeed)
-    randomEvents = roll.events
-    // 援军注入到真实 worldState（CampaignUnit → Unit 初始化 detection/orders/status）
-    if (roll.reinforcements.length > 0) {
-      worldState = applyReinforcements(worldState, roll.reinforcements)
+    // T2 第 3 批：internationalOpinion < 30 的阵营不接收 reinforcement（军援中断）。
+    // 过滤掉目标 faction（reinforcement.factionId）opinion 低于阈值的 reinforcement 事件
+    // 与对应援军单位。
+    const lowOpinionFactions = new Set(
+      worldState.factions
+        .filter((f) => (f.internationalOpinion ?? 50) < 30)
+        .map((f) => f.id),
+    )
+    let filteredEvents = roll.events
+    let filteredReinforcements = roll.reinforcements
+    if (lowOpinionFactions.size > 0) {
+      filteredEvents = roll.events.filter((e) => {
+        if (e.kind !== 'reinforcement') return true
+        // reinforcement 事件的目标 faction 从 reinforcementUnits[0].factionId 取
+        const targetFaction = e.reinforcementUnits?.[0]?.factionId
+        return !targetFaction || !lowOpinionFactions.has(targetFaction)
+      })
+      filteredReinforcements = roll.reinforcements.filter(
+        (ru) => !lowOpinionFactions.has(ru.factionId),
+      )
+      if (filteredEvents.length !== roll.events.length) {
+        logger.info('orch/resolve/aid_cutoff', '国际舆论过低，军援（reinforcement）被中断', {
+          ...logCtx,
+          blocked: roll.events.length - filteredEvents.length,
+          lowOpinionFactions: Array.from(lowOpinionFactions),
+        })
+      }
+    }
+    randomEvents = filteredEvents
+    // 援军注入到真实 worldState（CampaignUnit → Unit 初始化 detection/orders/status）。
+    // T2 第 3 批：使用过滤后的 filteredReinforcements（low-opinion 阵营军援被中断）。
+    if (filteredReinforcements.length > 0) {
+      worldState = applyReinforcements(worldState, filteredReinforcements)
     }
     logger.info('orch/resolve/random_events', '随机事件判定完成', {
       ...logCtx,
       triggered: randomEvents.length,
-      reinforcementCount: roll.reinforcements.length,
+      reinforcementCount: filteredReinforcements.length,
       eventIds: randomEvents.map((e) => e.id),
     })
   }

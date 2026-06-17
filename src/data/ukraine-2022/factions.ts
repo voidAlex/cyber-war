@@ -32,6 +32,9 @@ export const ukraineFactions: CampaignFaction[] = [
     // 第 5 批：乌-俄定性关系——交战状态
     relations: { russia: 'at_war' },
     doctrineTags: ['灵活抵抗', '城市防御', '反装甲', '西方军援', '无人机侦察'],
+    // T2 第 3 批：乌克兰民心 70（泽连斯基凝聚抗战决心）、国际舆论 65（西方广泛支持/军援）。
+    publicWill: 70,
+    internationalOpinion: 65,
     description:
       '乌克兰在泽连斯基领导下灵活抵抗俄军全面入侵。依托城市防御（基辅/哈尔科夫/马里乌波尔）' +
       '与西方军援（标枪/NLAW 反坦克、HIMARS 远程火箭、Bayraktar 无人机），挫败俄军基辅速战速决企图，' +
@@ -55,6 +58,9 @@ export const ukraineFactions: CampaignFaction[] = [
     // 第 5 批：俄-乌定性关系——交战状态
     relations: { ukraine: 'at_war' },
     doctrineTags: ['重型装甲', '远程炮兵', '兵力碾压', '空中优势', '消耗战'],
+    // T2 第 3 批：俄罗斯民心 50（战争疲劳+制裁压力）、国际舆论 25（西方孤立/谴责）。
+    publicWill: 50,
+    internationalOpinion: 25,
     description:
       '俄罗斯以"特别军事行动"之名全面入侵乌克兰。多路装甲纵队（T-72/T-90/BMP）从北、东、南推进，' +
       '配以远程炮兵（2S19 自行榴弹炮）与空中力量，企图速战速决夺取基辅。' +

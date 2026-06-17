@@ -121,3 +121,35 @@ export {
   SEVERED_MORALE_PENALTY,
 } from './supply'
 export type { SupplyConnectivity } from './supply'
+
+// T2 第 2 批：电子战（EW 被动效果纯函数）
+export { applyEWEffects } from './electronic-warfare'
+export type { EWEffectsResult, EWDetectionDelta } from './electronic-warfare'
+
+// T2 第 3 批：舆论战/民心（每回合 publicWill/internationalOpinion 调整）
+export {
+  updatePublicWill,
+  updateInternationalOpinion,
+  updatePublicWillForFaction,
+  updateInternationalOpinionForFaction,
+  applyMutinyPenalty,
+  DEFAULT_PUBLIC_WILL,
+  DEFAULT_INTERNATIONAL_OPINION,
+  PUBLIC_WILL_CRISIS_THRESHOLD,
+  OPINION_AID_CUTOFF_THRESHOLD,
+  PUBLIC_WILL_DELTAS,
+} from './public-opinion'
+export type {
+  PublicWillDelta,
+  InternationalOpinionDelta,
+} from './public-opinion'
+
+// T2 第 5 批 A：导弹拦截（防空反导判定纯函数）
+export {
+  resolveMissileAttack,
+  findBestAirDefender,
+  getAirDefenseCapability,
+  computeInterceptionProb,
+  MISSILE_BASE_DAMAGE,
+} from './missile-defense'
+export type { MissileAttackResult } from './missile-defense'

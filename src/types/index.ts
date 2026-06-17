@@ -118,6 +118,7 @@ export type {
   CampaignCombatRules,
   CampaignMovementRules,
   CampaignSupplyRules,
+  CampaignWeatherRules,
   CampaignVictory,
   CampaignVictoryCondition,
   CampaignVictoryType,

@@ -34,6 +34,9 @@ export const iranFactions: CampaignFaction[] = [
     // 第 5 批：美以-伊朗定性关系——交战状态
     relations: { iran: 'at_war' },
     doctrineTags: ['先发制人', '精确打击', '隐身突防', '海空一体', '斩首核设施'],
+    // T2 第 3 批：美以联军民心 55（先发打击获国内支持但战争疲劳）、国际舆论 60（西方盟友支持）。
+    publicWill: 55,
+    internationalOpinion: 60,
     description:
       '美以联军对伊朗核设施实施先发制人精确打击，企图摧毁伊朗核能力。美军波斯湾航母战斗群' +
       '提供海空打击（战斧巡航导弹 + 舰载机），F-35 隐身战机突防摧毁深埋工事，特种部队执行' +
@@ -57,6 +60,9 @@ export const iranFactions: CampaignFaction[] = [
     // 第 5 批：伊朗-美以定性关系——交战状态
     relations: { usisrael: 'at_war' },
     doctrineTags: ['强硬抵抗', '弹道导弹反击', '消耗战', '非对称封锁', '无人机饱和'],
+    // T2 第 3 批：伊朗民心 75（政权意识形态动员+民族主义）、国际舆论 20（西方孤立/制裁）。
+    publicWill: 75,
+    internationalOpinion: 20,
     description:
       '伊朗以弹道导弹（Sejjil/Emad）反击以色列与美军波斯湾舰队，革命卫队（IRGC）导弹快艇群' +
       '封锁霍尔木兹海峡（全球石油咽喉），Shahed-136 无人机群饱和攻击。最高领袖主导"强硬抵抗"消耗战略，' +

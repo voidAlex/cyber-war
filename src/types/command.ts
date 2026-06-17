@@ -31,6 +31,23 @@ import type { GridCoord } from './unit'
  * - entrench：构筑工事/挖战壕（T1-A）——单位就地不动，entrenchment +1（封顶 3），
  *   同步提升所在格 cell.fortificationLevel + morale +2（专注工事）；产出 'entrench' 事件。
  *   每级 entrenchment 在战斗结算时给单位 +0.15 防御加成；cell.fortificationLevel 给 +0.1。
+ *
+ * T2 第 2 批（电子战）：
+ * - ew_jam：电子干扰——EW 单位对目标坐标范围内的敌方单位施加 intel level 降级；
+ *   产出 'ew_jam' 事件。
+ * - ew_support：电子支援——EW 单位增强己方侦察单位 detection level；
+ *   产出 'ew_support' 事件。
+ *
+ * T2 第 3 批（舆论战）：
+ * - propaganda：宣传/舆论——提升 targetFaction publicWill+5 或 ownFaction morale+3；
+ *   产出 'propaganda' 事件。
+ *
+ * T2 第 4 批（特殊作战）：
+ * - sabotage：破坏——特种单位（recon/infantry 携 special 装备）破坏目标 cell
+ *   （supplySource → fortificationLevel-2；cell 有单位 → strength-15）；需 recon level≥L2。
+ * - paradrop：空降——type air 单位直接跳到目标 cell（无视 terrain/movementCost），
+ *   strength-15 + status 'pinned' 1 回合（空降散降）。
+ * - commando_raid：特种突袭/斩首——针对敌方 commander cell，成功则该 cell 所有单位 morale-20。
  */
 export type CommandIntent =
   | 'move'
@@ -39,6 +56,12 @@ export type CommandIntent =
   | 'hold'
   | 'recon'
   | 'entrench'
+  | 'ew_jam' // T2 第 2 批：电子干扰
+  | 'ew_support' // T2 第 2 批：电子支援
+  | 'propaganda' // T2 第 3 批：宣传/舆论
+  | 'sabotage' // T2 第 4 批：破坏
+  | 'paradrop' // T2 第 4 批：空降
+  | 'commando_raid' // T2 第 4 批：特种突袭/斩首
 
 /**
  * 参谋长解析成功的结构化命令。

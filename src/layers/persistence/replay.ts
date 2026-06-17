@@ -481,8 +481,139 @@ function applyResolutionEvent(
       }
       break
     }
+    case 'ew_jam':
+    case 'ew_support': {
+      // T2 第 2 批：电子战命令。从 event.data.detectionDelta 重建 detection 增量
+      // （与 recon 同构：{ [unitId]: { [observerFactionId]: IntelObservation } }）。
+      // 采信 log 记录值（记录即真相），不重算。
+      const detectionDelta = evt.data.detectionDelta as
+        | Record<string, Record<string, IntelObservation>>
+        | undefined
+      if (detectionDelta) {
+        for (const [unitId, obsMap] of Object.entries(detectionDelta)) {
+          for (const [observerFactionId, observation] of Object.entries(obsMap)) {
+            const existing = stateChanges.unitUpdates[unitId] ?? {}
+            const existingDet =
+              (existing.detection as Record<string, IntelObservation>) ?? {}
+            stateChanges.unitUpdates[unitId] = {
+              ...existing,
+              detection: { ...existingDet, [observerFactionId]: observation },
+            }
+          }
+        }
+      }
+      break
+    }
+    case 'propaganda': {
+      // T2 第 3 批：宣传命令。
+      // - targetFaction 路径（field='publicWill'）：改 faction.publicWill，由 turn-resolution
+      //   落地到 worldState.factions（replay 在 commitStateChanges 后应用 trusted action，
+      //   但 propaganda 是 source:'physics' 类，此处仅留 event.data 供 director 采信；
+      //   publicWill 数值由本回合 updatePublicWill 重算覆盖，故 replay 不单独应用 publicWill）。
+      // - morale 路径（field='morale'）：从 affectedUnitIds 给己方单位 morale +3。
+      //   double-write 安全（morale 重算由 publicWill crisis 覆盖）。
+      const field = String(evt.data.field ?? '')
+      if (field === 'morale') {
+        const affectedUnitIds = (evt.data.affectedUnitIds as string[]) ?? []
+        const delta = Number(evt.data.delta ?? 0)
+        for (const unitId of affectedUnitIds) {
+          const unit = getEffectiveUnit(world, stateChanges, unitId)
+          if (!unit) continue
+          const existing = stateChanges.unitUpdates[unitId] ?? {}
+          stateChanges.unitUpdates[unitId] = {
+            ...existing,
+            morale: Math.min(100, unit.morale + delta),
+          }
+        }
+      }
+      // publicWill 路径：不在此应用（由 turn-resolution updatePublicWill 重算覆盖）。
+      break
+    }
+    case 'sabotage': {
+      // T2 第 4 批：破坏。从 event.data 重建：
+      // - fortificationAfter（cell.fortificationLevel，cellIsSupplySource 时）。
+      // - damagedUnits（敌方单位 strength -15，由 worker 已算入 stateChanges；
+      //   double-write 安全——replay 在 worker 写入基础上采信 event.data）。
+      // 采信 log：直接按 event.data 的 fortificationAfter 落地 cell 增量，
+      // damagedUnits 的 strength 已在 engagement-style 重算外被 worker 写入，
+      // 此处仅补 cell 增量（worker resolveSabotageOrder 写入 stateChanges.cellUpdates，
+      // 但 replay 的 commitStateChanges 当前不消费 cellUpdates——故此处直接落到 world.map.cells）。
+      const targetCellId = evt.data.targetCellId as string | null | undefined
+      const fortAfter = evt.data.fortificationAfter as number | null | undefined
+      const supplyDestroyed = evt.data.supplySourceDestroyed === true
+      if (targetCellId && supplyDestroyed && fortAfter !== null && fortAfter !== undefined) {
+        const cell = world.map.cells.find((c) => c.id === targetCellId)
+        if (cell) {
+          cell.fortificationLevel = fortAfter
+        }
+      }
+      // damagedUnits strength：double-write 安全（worker 已写入，replay double-apply 等幂）。
+      const damaged = (evt.data.damagedUnits as string[]) ?? []
+      const damage = Number(evt.data.damage ?? 0)
+      for (const unitId of damaged) {
+        const unit = getEffectiveUnit(world, stateChanges, unitId)
+        if (!unit) continue
+        const existing = stateChanges.unitUpdates[unitId] ?? {}
+        // double-write 安全：若 worker 已写入 strength，此处再次 -damage 后会减两次。
+        // 故仅当该单位未被 worker 处理（existing.strength undefined）时才补写。
+        if (existing.strength === undefined) {
+          stateChanges.unitUpdates[unitId] = {
+            ...existing,
+            strength: Math.max(0, unit.strength - damage),
+          }
+        }
+      }
+      break
+    }
+    case 'paradrop': {
+      // T2 第 4 批：空降。从 event.data 重建 coord/strengthAfter/pinned。
+      const unitId = String(evt.data.unitId ?? '')
+      const to = evt.data.to as { col: number; row: number } | undefined
+      const strengthAfter = evt.data.strengthAfter as number | undefined
+      if (unitId) {
+        const unit = getEffectiveUnit(world, stateChanges, unitId)
+        if (unit) {
+          const existing = stateChanges.unitUpdates[unitId] ?? {}
+          const upd: Record<string, unknown> = { ...existing }
+          if (to) upd.coord = to
+          if (strengthAfter !== undefined) upd.strength = strengthAfter
+          // pinned 标记
+          if (!unit.status.includes('pinned')) {
+            upd.status = [...unit.status, 'pinned']
+          }
+          stateChanges.unitUpdates[unitId] = upd as typeof existing
+        }
+      }
+      break
+    }
+    case 'commando_raid': {
+      // T2 第 4 批：斩首突袭。从 event.data.raided 重建 morale 增量。
+      // double-write 安全：仅当该单位未被 worker 处理（existing.morale undefined）时补写。
+      const raided = (evt.data.raided as
+        | Array<{ unitId: string; moraleBefore: number; moraleAfter: number }>
+        | undefined) ?? []
+      for (const r of raided) {
+        const unit = getEffectiveUnit(world, stateChanges, r.unitId)
+        if (!unit) continue
+        const existing = stateChanges.unitUpdates[r.unitId] ?? {}
+        if (existing.morale === undefined) {
+          stateChanges.unitUpdates[r.unitId] = {
+            ...existing,
+            morale: Math.max(0, r.moraleAfter),
+          }
+        }
+      }
+      break
+    }
+    case 'intercepted': {
+      // T2 第 5 批 A：导弹被拦截（damage=0）。守方无损，攻方弹药消耗已由 worker
+      // 写入 stateChanges（missile attacker ammo-20）。此处 double-write 安全——
+      // 仅采信 log，不重复扣减（worker 已扣，replay 不再动）。
+      break
+    }
     default:
-      // casualty（衍生）/ blockade（失败占位）/ hold（数值已在 data 采信，不单独应用）：不单独应用
+      // casualty（衍生）/ blockade（失败占位）/ hold（数值已在 data 采信，不单独应用）：
+      // 不单独应用
       break
   }
 }
