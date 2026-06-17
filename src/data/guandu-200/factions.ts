@@ -19,7 +19,8 @@ export const guanduFactions: CampaignFaction[] = [
     color: '#1E40AF', // 曹军蓝
     side: 'player',
     commanderId: 'caocao-lord',
-    theaterCommanderIds: ['xiahou-dun'],
+    // 注：战区司令角色由 rules.aiRoles 定义（夏侯惇 ai-xiahou-dun-commander），
+    // 此处不重复声明 theaterCommanderIds（其引用必须在 commanders.json 中存在的 id）。
     supply: {
       // 曹军兵少粮乏，开局物资紧张（史实"粮少欲退"）
       supplies: 40,
@@ -43,7 +44,7 @@ export const guanduFactions: CampaignFaction[] = [
     color: '#6B7280', // 袁军灰
     side: 'enemy',
     commanderId: 'yuanshao-lord',
-    theaterCommanderIds: ['yanliang'],
+    // 注：战区司令角色由 rules.aiRoles 定义（颜良 ai-yanliang-commander）。
     supply: {
       // 袁绍兵多粮足，开局物资充足（史实"十万众、粮秣山积"）
       supplies: 85,

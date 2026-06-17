@@ -61,6 +61,10 @@ import {
 import type { CampaignPayload } from '@/types'
 import { CAMPAIGN_ZIP_FILES } from '@/types'
 import { verdunCampaign } from '@/data/verdun-1916'
+import { guanduCampaign } from '@/data/guandu-200'
+import { ukraineCampaign } from '@/data/ukraine-2022'
+import { midwayCampaign } from '@/data/midway-1942'
+import { iranCampaign } from '@/data/iran-2026'
 
 // =============================================================================
 // 测试 fixture：最小合法 CampaignPayload（schema 边界测试用）
@@ -428,5 +432,269 @@ describe('validateCampaignConsistency 跨文件引用', () => {
     const p = makeValidPayload()
     p.manifest.playerFactionIds = ['france', 'ghost-faction']
     expect(() => validateCampaignConsistency(p)).toThrow(CampaignConsistencyError)
+  })
+})
+
+// =============================================================================
+// 6. 内置战役包校验（官渡/俄乌/中途岛/美以伊）
+//
+// 每个内置包必须通过 schema 校验 + 跨文件一致性校验 + ZIP 闭环，
+// 并校验关键史实字段（scenarioId/阵营/指挥官人格/胜负条件）。
+// =============================================================================
+
+/** 内置包参数化校验：schema + 一致性 + ZIP 闭环三连 */
+function assertBuiltinCampaignValid(
+  payload: CampaignPayload,
+  expected: {
+    scenarioId: string
+    playerFactionIds: string[]
+    factionCount: number
+  },
+): void {
+  // schema 校验
+  expect(() => validateCampaignPayload(payload)).not.toThrow()
+  // 跨文件一致性校验
+  expect(() => validateCampaignConsistency(payload)).not.toThrow()
+  // schemaVersion
+  expect(payload.manifest.schemaVersion).toBe('1.0.0')
+  // scenarioId / playerFactionIds
+  expect(payload.manifest.scenarioId).toBe(expected.scenarioId)
+  expect(payload.manifest.playerFactionIds).toEqual(
+    expect.arrayContaining(expected.playerFactionIds),
+  )
+  // 阵营数
+  expect(payload.factions).toHaveLength(expected.factionCount)
+  // 至少一员指挥官 + 至少一个单位 + 至少一个高价值节点
+  expect(payload.commanders.length).toBeGreaterThanOrEqual(1)
+  expect(payload.units.length).toBeGreaterThanOrEqual(1)
+  expect(payload.map.highValueNodes.length).toBeGreaterThanOrEqual(1)
+  // 胜负条件至少含双方阵营
+  const victoryFactions = payload.victory.conditions.map((c) => c.factionId)
+  for (const fid of expected.playerFactionIds) {
+    expect(victoryFactions).toContain(fid)
+  }
+  // ZIP 闭环：打包再解包字段一致
+  const zipBytes = buildCampaignZip(payload)
+  const roundtrip = loadCampaignZip(zipBytes)
+  expect(roundtrip.manifest).toEqual(payload.manifest)
+  expect(roundtrip.map).toEqual(payload.map)
+  expect(roundtrip.factions).toEqual(payload.factions)
+  expect(roundtrip.units).toEqual(payload.units)
+  expect(roundtrip.commanders).toEqual(payload.commanders)
+  expect(roundtrip.rules).toEqual(payload.rules)
+  expect(roundtrip.victory).toEqual(payload.victory)
+}
+
+describe('内置战役包：官渡之战 200', () => {
+  it('通过 schema + 一致性 + ZIP 闭环校验', () => {
+    assertBuiltinCampaignValid(guanduCampaign, {
+      scenarioId: 'guandu-200',
+      playerFactionIds: ['caocao', 'yuanshao'],
+      factionCount: 2,
+    })
+  })
+
+  it('含官渡大营/乌巢粮仓高价值节点', () => {
+    const nodeIds = guanduCampaign.map.highValueNodes.map((n) => n.id)
+    expect(nodeIds).toEqual(
+      expect.arrayContaining(['guandu-camp', 'wuchao-granary']),
+    )
+  })
+
+  it('曹操人格：aggression 0.6 / obedience 1.0 / methodical', () => {
+    const caocao = guanduCampaign.commanders.find((c) => c.id === 'caocao-lord')!
+    expect(caocao.aggression).toBe(0.6)
+    expect(caocao.obedience).toBe(1.0)
+    expect(caocao.preferredTempo).toBe('methodical')
+  })
+
+  it('袁绍人格：aggression 0.3 / obedience 0.4（优柔寡断）', () => {
+    const yuan = guanduCampaign.commanders.find((c) => c.id === 'yuanshao-lord')!
+    expect(yuan.aggression).toBe(0.3)
+    expect(yuan.obedience).toBe(0.4)
+  })
+
+  it('rules 含许攸来投事件 + 奇袭乌巢决策', () => {
+    const eventIds = guanduCampaign.rules.randomEvents?.map((e) => e.id) ?? []
+    expect(eventIds).toContain('xuyou-defect')
+    const decisionIds = guanduCampaign.rules.decisions?.map((d) => d.id) ?? []
+    expect(decisionIds).toContain('raid-wuchao')
+  })
+
+  it('胜负：曹=守至回合上限或重创袁军；袁=占官渡大营', () => {
+    const types = guanduCampaign.victory.conditions.map((c) => c.type)
+    expect(types).toEqual(expect.arrayContaining(['turn_limit', 'casualty', 'objective']))
+    const objCond = guanduCampaign.victory.conditions.find(
+      (c) => c.type === 'objective' && c.factionId === 'yuanshao',
+    )
+    expect(objCond?.nodeId).toBe('guandu-camp')
+  })
+})
+
+describe('内置战役包：俄乌冲突 2022', () => {
+  it('通过 schema + 一致性 + ZIP 闭环校验', () => {
+    assertBuiltinCampaignValid(ukraineCampaign, {
+      scenarioId: 'ukraine-2022',
+      playerFactionIds: ['ukraine', 'russia'],
+      factionCount: 2,
+    })
+  })
+
+  it('地图 16×12，含基辅/哈尔科夫/赫尔松/顿涅茨克/马里乌波尔节点', () => {
+    expect(ukraineCampaign.map.cols).toBe(16)
+    expect(ukraineCampaign.map.rows).toBe(12)
+    const nodeIds = ukraineCampaign.map.highValueNodes.map((n) => n.id)
+    expect(nodeIds).toEqual(
+      expect.arrayContaining(['kyiv', 'kharkiv', 'kherson', 'donetsk', 'mariupol']),
+    )
+  })
+
+  it('daysPerTurn=3（战争节奏较快）', () => {
+    expect(ukraineCampaign.manifest.daysPerTurn).toBe(3)
+  })
+
+  it('泽连斯基人格：aggression 0.7 / obedience 0.9 / rapid', () => {
+    const zelensky = ukraineCampaign.commanders.find((c) => c.id === 'zelensky')!
+    expect(zelensky.aggression).toBe(0.7)
+    expect(zelensky.obedience).toBe(0.9)
+    expect(zelensky.preferredTempo).toBe('rapid')
+  })
+
+  it('rules supply.severedMultiplier=2.0（俄军长补给线脆弱）', () => {
+    expect(ukraineCampaign.rules.supply?.severedMultiplier).toBe(2.0)
+  })
+
+  it('rules 含西方军援事件 + 基辅防御决策', () => {
+    const eventIds = ukraineCampaign.rules.randomEvents?.map((e) => e.id) ?? []
+    expect(eventIds).toContain('western-aid')
+    const decisionIds = ukraineCampaign.rules.decisions?.map((d) => d.id) ?? []
+    expect(decisionIds).toContain('kyiv-defense')
+  })
+
+  it('单位数：乌军 10 + 俄军 13', () => {
+    const ukr = ukraineCampaign.units.filter((u) => u.factionId === 'ukraine')
+    const rus = ukraineCampaign.units.filter((u) => u.factionId === 'russia')
+    expect(ukr).toHaveLength(10)
+    expect(rus).toHaveLength(13)
+  })
+})
+
+describe('内置战役包：中途岛海战 1942', () => {
+  it('通过 schema + 一致性 + ZIP 闭环校验', () => {
+    assertBuiltinCampaignValid(midwayCampaign, {
+      scenarioId: 'midway-1942',
+      playerFactionIds: ['usa', 'japan'],
+      factionCount: 2,
+    })
+  })
+
+  it('maxTurns=10（短战役）', () => {
+    expect(midwayCampaign.manifest.maxTurns).toBe(10)
+    expect(midwayCampaign.victory.maxTurns).toBe(10)
+  })
+
+  it('含中途岛高价值节点', () => {
+    const nodeIds = midwayCampaign.map.highValueNodes.map((n) => n.id)
+    expect(nodeIds).toContain('midway')
+  })
+
+  it('尼米兹人格：aggression 0.8 / methodical（情报至上）', () => {
+    const nimitz = midwayCampaign.commanders.find((c) => c.id === 'nimitz')!
+    expect(nimitz.aggression).toBe(0.8)
+    expect(nimitz.preferredTempo).toBe('methodical')
+  })
+
+  it('rules combat.attritionRate=0.15（海战消耗高）', () => {
+    expect(midwayCampaign.rules.combat.attritionRate).toBe(0.15)
+  })
+
+  it('rules 含 JN-25 破译 + 南云换弹危机事件', () => {
+    const eventIds = midwayCampaign.rules.randomEvents?.map((e) => e.id) ?? []
+    expect(eventIds).toEqual(
+      expect.arrayContaining(['decrypt-jn25', 'nakagawa-rearm']),
+    )
+  })
+
+  it('单位数：美军 8 + 日军 10', () => {
+    const usa = midwayCampaign.units.filter((u) => u.factionId === 'usa')
+    const japan = midwayCampaign.units.filter((u) => u.factionId === 'japan')
+    expect(usa).toHaveLength(8)
+    expect(japan).toHaveLength(10)
+  })
+
+  it('胜负：美=重创日军（casualtyThreshold 0.4）；日=占中途岛', () => {
+    const usaCasualty = midwayCampaign.victory.conditions.find(
+      (c) => c.factionId === 'usa' && c.type === 'casualty',
+    )
+    expect(usaCasualty?.targetFactionId).toBe('japan')
+    expect(usaCasualty?.casualtyThreshold).toBe(0.4)
+    const japanObj = midwayCampaign.victory.conditions.find(
+      (c) => c.factionId === 'japan' && c.type === 'objective',
+    )
+    expect(japanObj?.nodeId).toBe('midway')
+  })
+})
+
+describe('内置战役包：美以伊冲突 2026', () => {
+  it('通过 schema + 一致性 + ZIP 闭环校验', () => {
+    assertBuiltinCampaignValid(iranCampaign, {
+      scenarioId: 'iran-2026',
+      playerFactionIds: ['usisrael', 'iran'],
+      factionCount: 2,
+    })
+  })
+
+  it('地图 16×12，含纳坦兹/福特罗/德黑兰/霍尔木兹节点', () => {
+    expect(iranCampaign.map.cols).toBe(16)
+    expect(iranCampaign.map.rows).toBe(12)
+    const nodeIds = iranCampaign.map.highValueNodes.map((n) => n.id)
+    expect(nodeIds).toEqual(
+      expect.arrayContaining(['natanz', 'fordow', 'tehran', 'hormuz']),
+    )
+  })
+
+  it('daysPerTurn=2', () => {
+    expect(iranCampaign.manifest.daysPerTurn).toBe(2)
+  })
+
+  it('内塔尼亚胡人格：aggression 0.8 / rapid（先发制人）', () => {
+    const netanyahu = iranCampaign.commanders.find((c) => c.id === 'netanyahu')!
+    expect(netanyahu.aggression).toBe(0.8)
+    expect(netanyahu.preferredTempo).toBe('rapid')
+  })
+
+  it('rules 含伊朗弹道导弹反击事件（turn_in 2/5/8）', () => {
+    const evt = iranCampaign.rules.randomEvents?.find((e) => e.id === 'iran-retaliation')
+    expect(evt).toBeDefined()
+    expect(evt?.triggerCondition?.kind).toBe('turn_in')
+    expect(evt?.triggerCondition?.turns).toEqual([2, 5, 8])
+  })
+
+  it('rules 含打击核设施决策', () => {
+    const decisionIds = iranCampaign.rules.decisions?.map((d) => d.id) ?? []
+    expect(decisionIds).toContain('strike-nuclear')
+  })
+
+  it('单位数：美以 9 + 伊朗 9', () => {
+    const usisrael = iranCampaign.units.filter((u) => u.factionId === 'usisrael')
+    const iran = iranCampaign.units.filter((u) => u.factionId === 'iran')
+    expect(usisrael).toHaveLength(9)
+    expect(iran).toHaveLength(9)
+  })
+
+  it('胜负：美以=摧毁纳坦兹+福特罗；伊朗=重创美军（战损 0.45）', () => {
+    const natanzCond = iranCampaign.victory.conditions.find(
+      (c) => c.id === 'usisrael-destroy-natanz',
+    )
+    expect(natanzCond?.nodeId).toBe('natanz')
+    const fordowCond = iranCampaign.victory.conditions.find(
+      (c) => c.id === 'usisrael-destroy-fordow',
+    )
+    expect(fordowCond?.nodeId).toBe('fordow')
+    const iranCasualty = iranCampaign.victory.conditions.find(
+      (c) => c.factionId === 'iran' && c.type === 'casualty',
+    )
+    expect(iranCasualty?.targetFactionId).toBe('usisrael')
+    expect(iranCasualty?.casualtyThreshold).toBe(0.45)
   })
 })
