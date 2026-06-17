@@ -489,6 +489,38 @@ export function evaluateVictory(
   // 1. 折叠累计统计。
   const worldWithStats = accumulateTurnStats(world)
 
+  // Bug C 修复（2026-06）：通用"全军覆没"兜底判定（独立于战役注册条件）。
+  //
+  // 某阵营所有单位 strength<=0（含歼灭/投降/溃散后归零）→ 该阵营负，
+  // 对方阵营（首个仍有 strength>0 单位的非同阵营）胜。
+  // 这保证 Bug C 主动投降（玩家方全军 strength=0）即便战役未注册歼灭条件
+  // 也能触发对方胜利（确定性，无随机）。
+  //
+  // 多阵营场景：任一阵营覆灭即判负，胜方取"首个未覆灭的非负方阵营"
+  // （简化：避免复杂的多边胜负裁决；后续可扩展为 last-man-standing）。
+  // 平局兜底：所有阵营同时覆灭（罕见）→ draw。
+  const annihilationResult = checkAnnihilation(worldWithStats)
+  if (annihilationResult.decided) {
+    const playerFactionId = getPlayerFactionId(worldWithStats)
+    let victoryState: VictoryState
+    if (annihilationResult.winnerFactionId === null) {
+      // 所有阵营同时覆灭 → 平局
+      victoryState = 'draw'
+    } else if (annihilationResult.winnerFactionId === playerFactionId) {
+      // 对方覆灭，玩家方仍有单位 → 玩家胜
+      victoryState = 'won'
+    } else {
+      // 玩家方覆灭（含主动投降）→ 玩家负
+      victoryState = 'lost'
+    }
+    return {
+      ...worldWithStats,
+      victoryState,
+      winnerFactionId: annihilationResult.winnerFactionId,
+      victoryReason: annihilationResult.reason,
+    }
+  }
+
   // 2. 查 CampaignVictory。
   const victory = options?.victory ?? getBuiltinVictory(world.scenarioId)
   if (!victory) {
@@ -544,5 +576,59 @@ export function evaluateVictory(
     winnerFactionId: result.winnerFactionId,
     victoryReason: result.reason,
     victoryMaxTurns: victory.maxTurns,
+  }
+}
+
+/**
+ * Bug C 修复：通用"全军覆没"判定（独立于战役注册条件）。
+ *
+ * 扫描 world.factions，若某阵营在 world.units 中无任何 strength>0 的单位
+ * （全军覆灭/投降），则判定该阵营负，胜方取"首个仍有 strength>0 单位的非覆灭阵营"。
+ *
+ * 全部阵营同时覆灭 → decided:true 但 winnerFactionId:null（平局）。
+ * 无任何阵营覆灭 → decided:false（ongoing）。
+ *
+ * 确定性：纯数值扫描，无随机。
+ *
+ * @param world 当前世界状态
+ * @returns 判定结果（decided/winnerFactionId/reason）
+ */
+function checkAnnihilation(world: WorldState): {
+  decided: boolean
+  winnerFactionId: string | null
+  reason: string | null
+} {
+  if (world.factions.length === 0 || world.units.length === 0) {
+    return { decided: false, winnerFactionId: null, reason: null }
+  }
+  // 各阵营是否仍有 strength>0 的单位
+  const hasAlive = new Map<string, boolean>()
+  for (const f of world.factions) {
+    hasAlive.set(f.id, false)
+  }
+  for (const u of world.units) {
+    if (u.strength > 0 && hasAlive.has(u.factionId)) {
+      hasAlive.set(u.factionId, true)
+    }
+  }
+  const annihilatedFactions = world.factions.filter((f) => !hasAlive.get(f.id))
+  if (annihilatedFactions.length === 0) {
+    return { decided: false, winnerFactionId: null, reason: null }
+  }
+  // 取首个仍有单位的非覆灭阵营作为胜方
+  const winner = world.factions.find((f) => hasAlive.get(f.id)) ?? null
+  const loserNames = annihilatedFactions.map((f) => f.name || f.id).join('、')
+  if (winner === null) {
+    // 所有阵营同时覆灭（罕见）
+    return {
+      decided: true,
+      winnerFactionId: null,
+      reason: `全员覆灭（${loserNames}），势均力敌`,
+    }
+  }
+  return {
+    decided: true,
+    winnerFactionId: winner.id,
+    reason: `${loserNames} 全军覆没`,
   }
 }

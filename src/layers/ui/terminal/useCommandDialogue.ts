@@ -1,12 +1,16 @@
 /**
  * 命令对话共享 hook（useCommandDialogue.ts）— UI 重构第 1 批「全对话为主」。
  *
- * 把原 CommandTerminal 的对话/命令/外交逻辑提取为共享 hook，供：
+ * 把原 CommandTerminal 的对话/命令逻辑提取为共享 hook，供：
  * - DialogueStream（中栏）：气泡流 + 输入框
- * - CommandTerminal（右栏）：候选命令卡 / 外交卡 / 待锁队列 / 锁定按钮
+ * - CommandTerminal（右栏）：候选命令卡 / 待锁队列 / 锁定按钮
  * 共享同一份对话历史（dialogues）与状态，避免中右两栏参谋长回复不一致。
  *
  * 逻辑与原 CommandTerminal 完全一致（不重写对话逻辑），仅从组件 useState 提取到 hook。
+ *
+ * Bug D 修复（2026-06）：删除外交请求相关逻辑（draftDiplomatic/handleDiplomatic/
+ * diplomatic/setDiplomatic/diplomaticPending 及辅助函数）。外交请求现统一走
+ * 中栏 diplomat tab 对话（DialogueStream 已有 diplomat 路由），不再在此 hook 维护。
  *
  * 不 import @tauri-apps/api（UI 层）。gateway 唯一。
  *
@@ -45,19 +49,6 @@ import {
   canSubmitNow,
   canEnterHandshake,
 } from '@/layers/application/orchestrator/handshake-flow'
-import {
-  resolveDiplomaticResponse,
-  rollDiplomaticResponse,
-  inferRequestKind,
-  describeRequestKind,
-  describeResponseType,
-  responseColor,
-  type DiplomaticRequest,
-  type DiplomaticResponseType,
-  type DiplomaticRequestResult,
-} from '@/layers/domain/diplomacy-request'
-import { inferStance } from '@/layers/domain/diplomacy'
-import { commanderRole } from '@/layers/agents/roles/commander'
 import { logger } from '@/utils/logger'
 import type {
   ParseCommandResult,
@@ -212,13 +203,6 @@ export function useCommandDialogue(): {
   candidate: ParseCommandResult | null
   handleConfirm: () => void
   handleModify: () => void
-  // 外交
-  draftDiplomatic: string
-  setDraftDiplomatic: (v: string) => void
-  diplomatic: DiplomaticRequestResult | null
-  setDiplomatic: (v: DiplomaticRequestResult | null) => void
-  diplomaticPending: boolean
-  handleDiplomatic: () => Promise<void>
   // 锁定
   handleLock: () => void
   // 错误
@@ -247,10 +231,7 @@ export function useCommandDialogue(): {
   const clearLiveChat = useGameStore((s) => s.clearLiveChat)
 
   const [draftCommand, setDraftCommand] = useState('')
-  const [draftDiplomatic, setDraftDiplomatic] = useState('')
   const [parsing, setParsing] = useState(false)
-  const [diplomatic, setDiplomatic] = useState<DiplomaticRequestResult | null>(null)
-  const [diplomaticPending, setDiplomaticPending] = useState(false)
 
   const phase = context?.game.phase ?? 'idle'
   const canSubmit = context !== null && canSubmitNow(context) && !busy
@@ -438,73 +419,6 @@ export function useCommandDialogue(): {
     }
   }, [context])
 
-  /** 提交外交请求 → 盟友统帅响应 → 信任度变化 */
-  const handleDiplomatic = useCallback(async (): Promise<void> => {
-    if (context === null) return
-    const input = draftDiplomatic.trim()
-    if (input.length === 0) return
-    const cur = useGameStore.getState().context
-    if (cur === null) return
-    const world = cur.game.world
-    // 视角 bug 修复：优先用 world.playerFactionId 定位玩家阵营对象，fallback side==='player'。
-    const playerFaction =
-      world.playerFactionId && world.playerFactionId.length > 0
-        ? world.factions.find((f) => f.id === world.playerFactionId)
-        : world.factions.find((f) => f.side === 'player')
-    // 第 5 批多阵营支撑：优先用 faction.relations[playerFactionId]==='allied' 找盟友；
-    // 缺失 relations 时回退 side==='ally'（旧存档兼容）。
-    const allyFaction = playerFaction
-      ? world.factions.find(
-          (f) =>
-            f.id !== playerFaction.id &&
-            (f.relations?.[playerFaction.id] === 'allied' || f.side === 'ally'),
-        )
-      : undefined
-    if (playerFaction === undefined || allyFaction === undefined) {
-      useGameStore.setState({ userError: '未找到玩家或盟友阵营，无法发起外交请求' })
-      return
-    }
-    setDiplomaticPending(true)
-    try {
-      const request: DiplomaticRequest = {
-        turn: world.turnIndex,
-        fromFactionId: playerFaction.id,
-        toFactionId: allyFaction.id,
-        kind: inferRequestKind(input),
-        text: input,
-      }
-      const commanderResult = await commanderRole.resolve({
-        world,
-        factionId: allyFaction.id,
-        turn: world.turnIndex,
-        scenarioSeed: world.scenarioSeed,
-      })
-      const disobeying = commanderResult.disobeying
-      const trustValue = allyFaction.trust[playerFaction.id] ?? 50
-      const seedHash = hashSeed(world.scenarioSeed, world.turnIndex, input)
-      const rand = (seedHash % 1000) / 1000
-      const responseType: DiplomaticResponseType = rollDiplomaticResponse(trustValue, rand, disobeying)
-      const message = buildAllyMessage(responseType, disobeying, request.kind, trustValue)
-      const trustRecord = {
-        trust: trustValue,
-        stance: inferStance(trustValue),
-        honoredCount: 0,
-        brokenCount: 0,
-        lastChangeTurn: 0,
-      } as DiplomaticRequestResult['trustAfter']
-      const result = resolveDiplomaticResponse(trustRecord, {
-        request,
-        type: responseType,
-        message,
-        disobeying,
-      })
-      setDiplomatic(result)
-      setDraftDiplomatic('')
-    } finally {
-      setDiplomaticPending(false)
-    }
-  }, [context, draftDiplomatic])
-
   return {
     context,
     busy,
@@ -523,12 +437,6 @@ export function useCommandDialogue(): {
     candidate,
     handleConfirm,
     handleModify,
-    draftDiplomatic,
-    setDraftDiplomatic,
-    diplomatic,
-    setDiplomatic,
-    diplomaticPending,
-    handleDiplomatic,
     handleLock,
     userError,
     clearError,
@@ -578,40 +486,6 @@ function parsedCommandToPayload(cmd: ParsedCommand): Record<string, unknown> {
   return base
 }
 
-/** 确定性种子哈希（FNV-1a 变体） */
-function hashSeed(scenarioSeed: string, turn: number, text: string): number {
-  let h = 2166136261
-  const str = `${scenarioSeed}:${turn}:${text}`
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return Math.abs(h)
-}
-
-/** 构造盟友统帅的响应文本 */
-function buildAllyMessage(
-  type: DiplomaticResponseType,
-  disobeying: boolean,
-  kind: DiplomaticRequest['kind'],
-  trustValue: number,
-): string {
-  const kindName = describeRequestKind(kind)
-  switch (type) {
-    case 'accept':
-      return `同意你的${kindName}请求。我们会全力配合。`
-    case 'reject':
-      if (trustValue < 30) return `恕难答应${kindName}请求。考虑到我们的关系，这并非易事。`
-      return `这次${kindName}请求我们无法配合，请谅解。`
-    case 'flake':
-      return disobeying
-        ? `虽答应${kindName}请求，但前线抗命，未能如期履约。`
-        : `答应${kindName}请求，但后勤受阻，未能兑现承诺。`
-    default:
-      return ''
-  }
-}
-
 /** 格式化信封为人类可读（CommandTerminal 队列展示用） */
 export function formatEnvelope(env: ActionEnvelope): string {
   const INTENT_NAMES: Record<string, string> = {
@@ -624,12 +498,4 @@ export function formatEnvelope(env: ActionEnvelope): string {
   const intentName = INTENT_NAMES[env.intent] ?? env.intent
   const targetStr = target ? `(${target.col},${target.row})` : (targetUnit ?? node ?? '')
   return `${intentName}：${unit} → ${targetStr}`
-}
-
-// describeRequestKind/describeResponseType/responseColor 由 CommandTerminal 子组件直接
-// 从 diplomacy-request 引入复用（此处 re-export 仅保持 import 链一致）。
-export {
-  describeRequestKind,
-  describeResponseType,
-  responseColor,
 }

@@ -6651,3 +6651,287 @@ th {
   border-color: var(--warn);
   box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
 }
+
+/* ===========================================================================
+ * P. 推演即时弹窗（.resolution-progress-overlay*）— Bug A 修复
+ *    深空蓝半透明 + 青光描边 + 扫描线全屏 modal（resolution 阶段即时反馈）。
+ *    即便 LLM 慢、Agent 进度未到，玩家也看到弹窗在动（脉冲进度条），不会以为卡住。
+ * =========================================================================== */
+.resolution-progress-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 950; /* 低于 GameOverModal(1000)、高于 BattleResult/OpeningBriefing */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5, 8, 18, 0.85);
+  backdrop-filter: blur(4px);
+  /* 背景叠加扫描线 + 径向青光（与 opening-briefing 同款氛围） */
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(6, 182, 212, 0.05) 0px,
+      rgba(6, 182, 212, 0.05) 1px,
+      transparent 1px,
+      transparent 4px
+    ),
+    radial-gradient(ellipse at center, rgba(6, 182, 212, 0.12), transparent 60%);
+  animation: resolution-progress-overlay__fade-in 0.2s ease-out;
+}
+
+@keyframes resolution-progress-overlay__fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.resolution-progress-overlay__card {
+  position: relative;
+  width: min(680px, 96vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 28px 32px 24px;
+  background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-panel-2) 100%);
+  border: 1.5px solid var(--accent-cyan);
+  border-radius: 4px;
+  box-shadow:
+    0 0 28px rgba(6, 182, 212, 0.4),
+    inset 0 0 36px rgba(6, 182, 212, 0.08);
+  overflow: hidden;
+  animation: resolution-progress-overlay__slide-in 0.3s ease-out;
+}
+
+@keyframes resolution-progress-overlay__slide-in {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* 四角青光切角装饰（与 opening-briefing 一致） */
+.resolution-progress-overlay__card::before,
+.resolution-progress-overlay__card::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--accent-cyan);
+}
+.resolution-progress-overlay__card::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+.resolution-progress-overlay__card::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
+.resolution-progress-overlay__header {
+  text-align: center;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(6, 182, 212, 0.3);
+}
+
+.resolution-progress-overlay__title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  text-shadow: var(--glow-cyan);
+  letter-spacing: 0.04em;
+}
+
+/* 标题后省略号呼吸动画（「导演部推演中…」） */
+.resolution-progress-overlay__ellipsis {
+  display: inline-block;
+  animation: resolution-progress-overlay__ellipsis-blink 1.2s steps(4, end) infinite;
+}
+
+@keyframes resolution-progress-overlay__ellipsis-blink {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
+.resolution-progress-overlay__subtitle {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.resolution-progress-overlay__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* 进度条 */
+.resolution-progress-overlay__progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.resolution-progress-overlay__progress-bar {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.resolution-progress-overlay__progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan), #08d4e6);
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.6);
+  transition: width 0.3s ease-out;
+}
+
+/* 不确定态（无 Agent 数据）：脉冲光带横扫 */
+.resolution-progress-overlay__progress-bar--indeterminate {
+  background: rgba(6, 182, 212, 0.06);
+}
+
+.resolution-progress-overlay__progress-pulse {
+  position: absolute;
+  top: 0;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(6, 182, 212, 0.6),
+    transparent
+  );
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.5);
+  transition: left 0.08s linear;
+}
+
+.resolution-progress-overlay__progress-text {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Agent 列表 */
+.resolution-progress-overlay__agents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.resolution-progress-overlay__agent {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: rgba(6, 182, 212, 0.04);
+  border-left: 2px solid var(--text-dim);
+  font-size: 0.88rem;
+}
+
+.resolution-progress-overlay__agent--thinking,
+.resolution-progress-overlay__agent--running,
+.resolution-progress-overlay__agent--adjudicating {
+  border-left-color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.08);
+  animation: resolution-progress-overlay__agent-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes resolution-progress-overlay__agent-pulse {
+  0%, 100% { background: rgba(6, 182, 212, 0.06); }
+  50%      { background: rgba(6, 182, 212, 0.14); }
+}
+
+.resolution-progress-overlay__agent--done {
+  border-left-color: #10b981;
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.resolution-progress-overlay__agent--failed {
+  border-left-color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.resolution-progress-overlay__agent-role {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.resolution-progress-overlay__agent-status {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.resolution-progress-overlay__agent--done .resolution-progress-overlay__agent-status {
+  color: #10b981;
+}
+
+.resolution-progress-overlay__agent--failed .resolution-progress-overlay__agent-status {
+  color: var(--danger);
+}
+
+/* 流式战报 */
+.resolution-progress-overlay__report {
+  border-top: 1px solid rgba(6, 182, 212, 0.2);
+  padding-top: var(--space-3);
+}
+
+.resolution-progress-overlay__report-title {
+  margin: 0 0 var(--space-2);
+  font-size: 0.9rem;
+  color: var(--accent-cyan);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 直播红点（呼吸） */
+.resolution-progress-overlay__live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+  animation: resolution-progress-overlay__live-blink 1s ease-in-out infinite;
+}
+
+@keyframes resolution-progress-overlay__live-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+
+.resolution-progress-overlay__report-text {
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(6, 182, 212, 0.15);
+  border-radius: 2px;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 降级提示 */
+.resolution-progress-overlay__degraded {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: rgba(245, 158, 11, 0.08);
+  border-left: 2px solid var(--warn);
+  font-size: 0.82rem;
+  color: var(--warn);
+}

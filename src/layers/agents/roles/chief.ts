@@ -132,8 +132,22 @@ export interface ChiefRole {
 /**
  * 意图关键词表（中文 + 英文别名，用于规则匹配）。
  * 顺序：更具体的意图在前（capture_node 优先于 move，避免「占领 C3」误判为 move）。
+ *
+ * Bug C 修复（2026-06）：'surrender'（投降/降）放在最前——确保玩家说"投降"3 遍
+ * 也命中命令而非被 classifyInput 当 chat 处理。"投降"是最高优先级命令（一锤定音）。
  */
 const INTENT_KEYWORDS: ReadonlyArray<{ intent: CommandIntent; words: readonly string[] }> = [
+  // Bug C：投降最高优先级。词表覆盖"投降/降/缴械/认输/放弃抵抗/我们输了"等。
+  // 注意"降"是单字，会与"降落/下降"等冲突——故仅"投降/缴械/认输/放弃抵抗/投降吧"等
+  // 明确词命中；纯"降"字不放进关键词（避免误命中"降雨/降雪"等）。
+  {
+    intent: 'surrender',
+    words: [
+      '投降', '投降吧', '我们投降', '全军投降', '缴械', '缴械投降',
+      '认输', '我们认输', '放弃抵抗', '放弃战斗', '不打了', '我们输了',
+      'surrender', 'we surrender', 'give up', 'capitulate',
+    ],
+  },
   {
     intent: 'capture_node',
     words: ['占领', '夺取', '攻占', '夺占', '攻取', 'capture', 'seize', 'occupy'],
@@ -745,11 +759,12 @@ function parseCommandMock(
   }
 
   // 2. 识别目标单位（玩家可控）
-  //    recon 意图允许不指明单位：玩家常说「侦察杜奥蒙」而省略侦察单位，
-  //    此时在 case 'recon' 分支内自动选首个 recon 类型单位兜底（绝不伪造，从真实单位选）。
+  //    recon/surrender 意图允许不指明单位：
+  //    - recon：玩家常说「侦察杜奥蒙」而省略侦察单位，case 'recon' 内自动选首个 recon 类型兜底。
+  //    - surrender（Bug C）：全军投降是全局命令，不需要单位匹配——直接进 case 'surrender'。
   //    其他意图（move/attack/capture/hold）必须显式匹配单位，否则 clarify。
   const matchedUnits = matchUnits(trimmed, playerUnits)
-  if (matchedUnits.length === 0 && intent !== 'recon') {
+  if (matchedUnits.length === 0 && intent !== 'recon' && intent !== 'surrender') {
     return clarify(
       input,
       '未匹配到任何己方单位，请指明具体单位',
@@ -759,6 +774,22 @@ function parseCommandMock(
 
   // 3. 按意图提取并校验目标
   switch (intent) {
+    case 'surrender': {
+      // Bug C：全军投降。全局命令，不需要单位/坐标/节点。
+      // 直接产出 ParsedCommand{ intent:'surrender', summary:'全军投降' }。
+      // 物理层（resolveSurrenderOrder）会把玩家方所有单位 strength=0 + status='surrendered'，
+      // 产出 'surrender' 事件；编排器检测到后跳过导演部 adjudicate，直接判对方胜利。
+      // 确定性：无随机数。
+      const factionName = ctx.world.factions.find((f) => f.id === ctx.playerFactionId)?.name ?? ctx.playerFactionId
+      return {
+        kind: 'parsed',
+        intent: 'surrender',
+        targetUnitIds: [],
+        summary: `${factionName} 全军投降，放下武器`,
+        confidence: 1.0,
+      }
+    }
+
     case 'move': {
       const coord = matchCoord(trimmed, ctx.world.map.cols, ctx.world.map.rows)
       // Bug1 修复：无坐标时用真实数据兜底（节点名 → 节点坐标；敌方单位 → 其坐标）。

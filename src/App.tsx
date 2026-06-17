@@ -50,6 +50,7 @@ import InfoTabs from '@/layers/ui/InfoTabs'
 import BattleResultModal from '@/layers/ui/briefing/BattleResultModal'
 import OpeningBriefing from '@/layers/ui/briefing/OpeningBriefing'
 import GameOverModal from '@/layers/ui/briefing/GameOverModal'
+import ResolutionProgressDialog from '@/layers/ui/briefing/ResolutionProgressDialog'
 import NpcDiplomacyModal from '@/layers/ui/NpcDiplomacyModal'
 import { useGameStore } from '@/store/game-store'
 import { logger } from '@/utils/logger'
@@ -198,6 +199,10 @@ function GameScreen({
   // 第 6 批：胜负终局弹窗（advanceTurn 结算后若 victoryState !== 'ongoing' 则 true）。
   // 最高优先级，覆盖 BattleResultModal / OpeningBriefing。
   const showGameOver = useGameStore((s) => s.showGameOver)
+  // Bug A：推演即时弹窗（advance 进 resolution 时置 true）。
+  // 仅 phase==='resolution' 时渲染（避免 brief/decision/idle 阶段残留弹窗）。
+  const showResolutionProgress = useGameStore((s) => s.showResolutionProgress)
+  const setShowResolutionProgress = useGameStore((s) => s.setShowResolutionProgress)
 
   // 推算 Header 时间显示（manifest.startInGameDate + turnIndex × daysPerTurn）
   const scenarioId = context.game.world.scenarioId
@@ -216,6 +221,14 @@ function GameScreen({
     }
   }, [phase])
 
+  // Bug A：phase 离开 resolution 时清推演即时弹窗态（防御：advance 已清，此处兜底）。
+  // 避免因异常路径（如 advance 抛错前已 set true）导致弹窗残留到下一阶段。
+  useEffect(() => {
+    if (phase !== 'resolution' && showResolutionProgress) {
+      setShowResolutionProgress(false)
+    }
+  }, [phase, showResolutionProgress, setShowResolutionProgress])
+
   /** 退出游戏：清上下文回标题屏（context=null） */
   const handleExit = (): void => {
     logger.info('ui/exit', '玩家退出游戏回标题屏', {
@@ -226,12 +239,14 @@ function GameScreen({
     // Bug3 修复：退出时清空对话记忆（store reset），下次进游戏从空白开始
     // 第 5 批：同时关闭创建页 flag，确保退出回标题屏（非创建页）
     // 第 6 批：同时关闭胜负终局弹窗 flag（避免下一局开局残留）
+    // Bug A：同时关闭推演即时弹窗 flag（避免下一局开局残留）
     useGameStore.setState({
       context: null,
       saveId: null,
       selectedUnitId: null,
       creatorPageActive: false,
       showGameOver: false,
+      showResolutionProgress: false,
     })
     useGameStore.getState().clearDialogues()
     setConfirmExit(false)
@@ -301,6 +316,11 @@ function GameScreen({
 
       {/* 全屏沙盘弹窗 */}
       <SandboxOverlay open={sandboxOpen} onClose={() => setSandboxOpen(false)} />
+
+      {/* Bug A：推演即时弹窗（resolution 阶段全屏叠加，结算完成自动消失）。
+          仅在 showResolutionProgress && phase==='resolution' 时渲染。
+          放在 GameOver/BattleResult 之下（resolution 阶段不会同时显示战报/终局）。 */}
+      {showResolutionProgress && phase === 'resolution' && <ResolutionProgressDialog />}
 
       {/* 第 6 批：胜负终局弹窗优先级最高——已终局时覆盖其他弹窗。
           三弹窗不冲突的实现：showGameOver===true 时不渲染 BattleResultModal /

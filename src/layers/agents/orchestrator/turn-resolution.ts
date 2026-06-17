@@ -523,6 +523,27 @@ export async function orchestrateTurnResolution(
   }
 
   // -------------------------------------------------------------------------
+  // 步骤3.6：Bug C 投降检测——若物理结算产出 'surrender' 事件（玩家明示投降），
+  // 跳过导演部 adjudicate，直接用规则引擎兜底产出战报 + 落地事件。
+  // -------------------------------------------------------------------------
+  // 理由：投降是终局一锤定音的命令，不应让 LLM 导演部"覆写"或"润色"导致结果不确定。
+  // 规则引擎兜底（ruleEngineFallback）会直接采信物理结果（全军 strength=0 + annihilated），
+  // 随后 evaluateVictory 据此判对方胜利（确定性）。
+  // 检测条件：rawResults.events 含 kind==='surrender' && data.voluntary===true
+  // （T1-D 的被动投降 data 无 voluntary 字段，不触发跳过——仍走导演部叙事）。
+  const hasVoluntarySurrender = rawResults.events.some(
+    (e) => e.kind === 'surrender' && e.data?.voluntary === true,
+  )
+  if (hasVoluntarySurrender) {
+    logger.warn('orch/resolve/surrender_skip_director', '检测到主动投降，跳过导演部终裁（规则引擎兜底）', {
+      ...logCtx,
+      surrenderEvents: rawResults.events
+        .filter((e) => e.kind === 'surrender')
+        .map((e) => ({ factionId: String(e.data?.factionId ?? ''), count: Number(e.data?.surrenderCount ?? 0) })),
+    })
+  }
+
+  // -------------------------------------------------------------------------
   // 步骤4：批次4 导演部终裁（最后，串行）
   // -------------------------------------------------------------------------
   let directorResult:
@@ -533,53 +554,72 @@ export async function orchestrateTurnResolution(
   if (onProgress) {
     onProgress({ agentId: 'director', role: 'director', status: 'adjudicating' })
   }
-  try {
-    directorResult = await directorRole.adjudicate({
-      physicsResult: rawResults,
-      envelopes: allEnvelopes,
-      world: worldState,
-      scenarioSeed,
-      turn,
-      onReportChunk: params.onReportChunk,
-      randomEvents,
-      // 第 3 批：战役决策模板（导演部按 triggerCondition 判定是否触发本回合决策）
-      decisionTemplates: campaignRules?.decisions,
-    })
-    if (onProgress) {
-      onProgress({ agentId: 'director', role: 'director', status: 'done' })
-    }
-    logger.info('orch/resolve/director_done', '导演部终裁完成', {
-      ...logCtx,
-      overrides: isDirectorRealResult(directorResult)
-        ? (directorResult.appliedOverrides ?? []).length
-        : 0,
-      keyEvents: isDirectorRealResult(directorResult)
-        ? (directorResult.keyEvents ?? []).length
-        : 0,
-    })
-  } catch (err) {
-    // 导演部异常（非 LLM 类）：切规则引擎兜底（绝不卡死游戏）
-    if (onProgress) {
-      onProgress({
-        agentId: 'director',
-        role: 'director',
-        status: 'failed',
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
+  // Bug C：主动投降跳过导演部 adjudicate（直接规则引擎兜底，避免 LLM 覆写终局）。
+  if (hasVoluntarySurrender) {
     degraded = true
-    logger.warn('orch/resolve/director_fallback', '导演部异常，切规则引擎兜底', {
-      ...logCtx,
-      error: err instanceof Error ? err.message : String(err),
-    })
     directorResult = ruleEngineFallback({
       physicsResult: rawResults,
       envelopes: allEnvelopes,
       world: worldState,
       scenarioSeed,
       turn,
-      degradeReason: `导演部异常：${err instanceof Error ? err.message : String(err)}`,
+      degradeReason: '主动投降：跳过导演部终裁（规则引擎兜底，确定性终局）',
     })
+    if (onProgress) {
+      onProgress({ agentId: 'director', role: 'director', status: 'done' })
+    }
+    logger.info('orch/resolve/director_skipped_surrender', '主动投降：导演部跳过（规则引擎兜底）', {
+      ...logCtx,
+    })
+  } else {
+    try {
+      directorResult = await directorRole.adjudicate({
+        physicsResult: rawResults,
+        envelopes: allEnvelopes,
+        world: worldState,
+        scenarioSeed,
+        turn,
+        onReportChunk: params.onReportChunk,
+        randomEvents,
+        // 第 3 批：战役决策模板（导演部按 triggerCondition 判定是否触发本回合决策）
+        decisionTemplates: campaignRules?.decisions,
+      })
+      if (onProgress) {
+        onProgress({ agentId: 'director', role: 'director', status: 'done' })
+      }
+      logger.info('orch/resolve/director_done', '导演部终裁完成', {
+        ...logCtx,
+        overrides: isDirectorRealResult(directorResult)
+          ? (directorResult.appliedOverrides ?? []).length
+          : 0,
+        keyEvents: isDirectorRealResult(directorResult)
+          ? (directorResult.keyEvents ?? []).length
+          : 0,
+      })
+    } catch (err) {
+      // 导演部异常（非 LLM 类）：切规则引擎兜底（绝不卡死游戏）
+      if (onProgress) {
+        onProgress({
+          agentId: 'director',
+          role: 'director',
+          status: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+      degraded = true
+      logger.warn('orch/resolve/director_fallback', '导演部异常，切规则引擎兜底', {
+        ...logCtx,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      directorResult = ruleEngineFallback({
+        physicsResult: rawResults,
+        envelopes: allEnvelopes,
+        world: worldState,
+        scenarioSeed,
+        turn,
+        degradeReason: `导演部异常：${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
   }
 
   // 判断是否走规则引擎兜底：RuleEngineFallbackResult 无 appliedOverrides/keyEvents。

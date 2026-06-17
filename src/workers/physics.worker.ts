@@ -238,6 +238,10 @@ export function simulateTurn(
       case 'build_road':
         resolveBuildRoadOrder(worldState, envelope, events, stateChanges, turn)
         break
+      case 'surrender':
+        // Bug C：全军投降。全局命令，单位/坐标/节点均不需要。
+        resolveSurrenderOrder(worldState, envelope, events, stateChanges, turn)
+        break
       default:
         events.push({
           id: `evt:${envelope.sequence}:action_executed:0`,
@@ -396,8 +400,18 @@ function normalizeIntent(
 ): 'move' | 'attack' | 'capture' | 'resupply' | 'recon' | 'hold' | 'entrench'
   | 'ew_jam' | 'ew_support' | 'propaganda' | 'sabotage' | 'paradrop' | 'commando_raid'
   | 'build_bridge' | 'destroy_bridge' | 'build_road'
+  | 'surrender' // Bug C：全军投降
   | 'other' {
   const lower = intent.toLowerCase().trim()
+  // Bug C：投降最先判定（最高优先级命令），与 chief INTENT_KEYWORDS 顺序一致。
+  if (
+    lower === 'surrender' ||
+    lower === 'capitulate' ||
+    lower === 'give_up' ||
+    lower === 'give-up'
+  ) {
+    return 'surrender'
+  }
   if (lower === 'move' || lower === 'movement' || lower === 'march' || lower === 'advance') {
     return 'move'
   }
@@ -1277,6 +1291,86 @@ function resolveHoldOrder(
 const HOLD_MORALE_RECOVERY = 2
 /** 固守回合疲劳恢复量（比机动省力）。 */
 const HOLD_FATIGUE_RECOVERY = 3
+
+// =============================================================================
+// Bug C：surrender（全军投降）结算
+// =============================================================================
+
+/**
+ * Bug C：结算全军投降命令（surrender）。
+ *
+ * 语义（重写计划「第 1 批：投降机制」）：
+ * - 玩家明示「投降」时，**玩家方全部单位** strength=0 + status='surrendered'。
+ * - 产出 'surrender' ResolutionEvent（kind='surrender'，data 含 factionId + 投降单位列表）。
+ * - 编排器（turn-resolution）检测到 rawResults.events 含 surrender 事件 → 跳过导演部
+ *   adjudicate（直接用规则引擎结果）→ evaluateVictory 据玩家方全军 strength=0 判对方胜利。
+ *
+ * 投降方判定：用 envelope.faction（命令发起方 = 玩家方）。仅该方单位 strength=0，
+ * 不牵连其他阵营（敌方/盟方不动）。这保证胜利判定（evaluateVictory 按某方全军覆没判负）
+ * 精确指向投降方。
+ *
+ * 确定性：纯数值置零（strength=0/status='surrendered'），无随机数。
+ *
+ * @param worldState 只读世界状态
+ * @param envelope 投降命令信封（envelope.faction = 投降方 factionId）
+ * @param events 事件流（push 'surrender' 事件）
+ * @param stateChanges 状态变更（写 unitUpdates[factionUnits].strength=0/status='surrendered'）
+ * @param turn 回合索引
+ */
+function resolveSurrenderOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const surrenderFactionId = envelope.faction
+  // 该方所有尚存单位（strength>0）投降。已歼灭/已投降的不重复处理。
+  const surrenderUnits = worldState.units.filter(
+    (u) => u.factionId === surrenderFactionId && u.strength > 0,
+  )
+  const surrenderUnitIds: string[] = []
+  for (const u of surrenderUnits) {
+    const existing = stateChanges.unitUpdates[u.id] ?? {}
+    // status 追加 'surrendered'（若已有则不重复）
+    const newStatus = u.status.includes('surrendered')
+      ? u.status
+      : [...u.status, 'surrendered' as const]
+    stateChanges.unitUpdates[u.id] = {
+      ...existing,
+      strength: 0,
+      status: newStatus,
+    }
+    // 加入 annihilated（让 evaluateVictory 的"全军覆没"判定命中）
+    if (!stateChanges.annihilated.includes(u.id)) {
+      stateChanges.annihilated.push(u.id)
+    }
+    surrenderUnitIds.push(u.id)
+  }
+
+  // 取投降方名（用于事件描述；fallback factionId）
+  const faction = worldState.factions.find((f) => f.id === surrenderFactionId)
+  const factionName = faction?.name ?? surrenderFactionId
+
+  events.push({
+    id: `evt:${envelope.sequence}:surrender:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'surrender',
+    description: `${factionName}（${surrenderFactionId}）全军放下武器投降（${surrenderUnitIds.length} 个建制）`,
+    data: {
+      factionId: surrenderFactionId,
+      factionName,
+      surrenderUnitIds,
+      surrenderCount: surrenderUnitIds.length,
+      // 标记为"主动投降"（区别于 T1-D 的"弹尽粮绝被动投降"）。
+      // 编排器据此跳过导演部 adjudicate（直接规则引擎兜底，避免 LLM 误改终局）。
+      voluntary: true,
+    },
+  })
+}
 
 // =============================================================================
 // T1-A：entrench（构筑工事/战壕）结算

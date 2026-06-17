@@ -486,6 +486,20 @@ export interface GameStoreState {
   /** 关闭胜负终局弹窗（玩家点"查看沙盘"时调用；弹窗关闭但仍留游戏界面）。 */
   dismissGameOver: () => void
 
+  // —— Bug A：推演即时弹窗（ResolutionProgressDialog）——
+  // advance() 在等待 LLM 结算期间（phase==='resolution'）置 true，App.tsx 据此叠加
+  // 全屏 ResolutionProgressDialog（深空蓝半透明 + 青光 + 扫描线 + 各 Agent 进度 +
+  // 流式战报打字机）。结算完成 → phase 变 'briefing' → showResolutionProgress 自动清
+  // （App.tsx useEffect 监听 phase 离开 resolution 时清）。
+  // 瞬态 UI 路由态，不进 reducer/context（不持久化）。
+  /**
+   * 是否显示推演即时弹窗（ResolutionProgressDialog）。
+   * advance() 进入 resolution 阶段置 true；phase 离开 resolution 自动清。
+   */
+  showResolutionProgress: boolean
+  /** 设置推演即时弹窗激活态（advance 进 resolution 时 true；离开 resolution 时 false）。 */
+  setShowResolutionProgress: (v: boolean) => void
+
   // —— T3-A：NPC 主动外交响应（NpcDiplomacyModal）——
   // advanceTurn 结算后若 world.pendingNpcRequests 非空，App 渲染 NpcDiplomacyModal。
   // 玩家选择 接受/拒绝/谈判 后调 respondNpcDiplomacy：
@@ -716,6 +730,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     })
     // 流式战报开始（编排期间 director 增量写入 liveReport）
     set({ streamingReport: true })
+    // Bug A：进入 resolution 阶段立即显示推演即时弹窗。
+    // 即便 LLM 慢、Agent 进度未到，玩家也看到「导演部推演中...」弹窗（脉冲进度条），
+    // 不会以为画面卡住。结算完成 phase→briefing 后由 App.tsx useEffect 清 false。
+    set({ showResolutionProgress: true })
     try {
       // 多 Agent 结算器（带进度回调 + 流式战报；解锁时用 LLM 角色，否则 mock）
       const resolver = buildMultiAgentResolver(get)
@@ -730,6 +748,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
           busy: false,
           // 流式战报已完成（briefing 阶段已显示）；decision 阶段保持 streamingReport=false
           streamingReport: false,
+          // Bug A：结算完成（即便挂起 decision），关闭推演即时弹窗。
+          showResolutionProgress: false,
           cacheStats: llmService.getCacheStats(),
           degraded: result.context.lastResolution?.degraded ?? false,
           pendingDecisionHandle: result.decisionHandle,
@@ -750,6 +770,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         context: result.context,
         busy: false,
         streamingReport: false,
+        // Bug A：结算完成，关闭推演即时弹窗。
+        showResolutionProgress: false,
         cacheStats: llmService.getCacheStats(),
         degraded: result.context.lastResolution?.degraded ?? false,
         pendingDecisionHandle: null,
@@ -769,7 +791,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         set({ showGameOver: true })
       }
     } catch (err) {
-      set({ streamingReport: false })
+      set({ streamingReport: false, showResolutionProgress: false })
       // 四分类 LLM 错误：映射为横幅（绝不把 ApiKey 误报为网络）
       const banner = errorToBanner(err)
       set({ llmError: banner, cacheStats: llmService.getCacheStats() })
@@ -986,6 +1008,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       liveEnvelopes: [],
       degraded: false,
       agentLiveOutputs: {},
+      // Bug A：清推演即时弹窗态（防御：即便 advance 未清，新回合也复位）。
+      showResolutionProgress: false,
     })
   },
 
@@ -1037,6 +1061,15 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   showGameOver: false,
   dismissGameOver() {
     set({ showGameOver: false })
+  },
+
+  // Bug A：推演即时弹窗（瞬态 UI 路由态）。
+  // 初始 false。advance() 进入 resolution 阶段（streamingReport:true 时）置 true，
+  // 让 App.tsx 叠加 ResolutionProgressDialog（即便 LLM 慢、Agent 未回进度，玩家也看到弹窗）。
+  // phase 离开 resolution（→ briefing/decision/idle）后由 App.tsx useEffect 清 false。
+  showResolutionProgress: false,
+  setShowResolutionProgress(v) {
+    set({ showResolutionProgress: v })
   },
 
   // T3-A：响应 NPC 主动外交请求（NpcDiplomacyModal 玩家选择后调用）。

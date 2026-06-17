@@ -69,6 +69,7 @@ export type UnitStatusFlag =
   | 'low_supply' // 低补给
   | 'decoy' // 诱饵/欺骗单位
   | 'routed' // 溃退中（T1-D：morale<15 且 strength<30 触发，向己方补给源方向移一格）
+  | 'surrendered' // Bug C：已投降（玩家主动投降 / 弹尽粮绝被动投降，strength=0）
 
 /**
  * 单位接口。

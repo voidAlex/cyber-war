@@ -3,10 +3,15 @@
  *
  * 重构（第 1 批）：原 CommandTerminal 拆分为两部分——
  * - 中栏 DialogueStream：对话气泡流 + 主输入框（命令/对话统一入口）。
- * - 本组件（右栏）：候选命令卡 / 外交请求卡 / 待锁命令队列 / 锁定按钮。
+ * - 本组件（右栏）：候选命令卡 / 待锁命令队列 / 锁定按钮。
  *
  * 逻辑经 useCommandDialogue 与 DialogueStream 共享（同一份对话历史 + 命令候选），
- * 不重写对话逻辑。本组件聚焦「命令确认/锁定」与「外交请求」交互。
+ * 不重写对话逻辑。本组件聚焦「命令确认/锁定」交互。
+ *
+ * Bug D 修复（2026-06）：删除右栏独立外交请求框（draftDiplomatic/handleDiplomatic/
+ * DiplomaticCard），与「外交并入 diplomat tab」的对话路径冲突。
+ * 外交请求现统一走中栏 diplomat tab 对话（DialogueStream 已有 diplomat 路径 +
+ * NpcDiplomacyModal 处理 NPC 主动外交）。本组件不再渲染外交输入框/结果卡。
  *
  * 对应 TDD §3.2 命令握手协议：候选命令卡（意图+单位+目标）→ 确认入队 → 锁定结算。
  *
@@ -19,12 +24,6 @@ import type {
   ParsedCommand,
   ClarifyRequest,
 } from '@/types'
-import {
-  describeRequestKind,
-  describeResponseType,
-  responseColor,
-  type DiplomaticRequestResult,
-} from '@/layers/domain/diplomacy-request'
 
 /** 意图中文显示名 */
 const INTENT_NAMES: Record<string, string> = {
@@ -50,7 +49,8 @@ const PHASE_NAMES: Record<string, string> = {
 /**
  * 命令管理面板组件（右栏）。
  *
- * 渲染候选命令卡 / 外交请求 / 待锁队列；不渲染对话气泡与主输入框（已移至中栏 DialogueStream）。
+ * 渲染候选命令卡 / 待锁队列；不渲染对话气泡与主输入框（已移至中栏 DialogueStream）。
+ * Bug D：不再渲染外交请求框（已并入 diplomat tab）。
  */
 export default function CommandTerminal(): JSX.Element {
   const {
@@ -60,12 +60,6 @@ export default function CommandTerminal(): JSX.Element {
     candidate,
     handleConfirm,
     handleModify,
-    draftDiplomatic,
-    setDraftDiplomatic,
-    handleDiplomatic,
-    diplomatic,
-    setDiplomatic,
-    diplomaticPending,
     handleLock,
   } = useCommandDialogue()
 
@@ -94,36 +88,6 @@ export default function CommandTerminal(): JSX.Element {
       {candidate !== null && candidate.kind === 'parsed' && (
         <CandidateCard command={candidate} onConfirm={handleConfirm} onModify={handleModify} />
       )}
-
-      {/* 外交请求流程：独立 draft，不与主对话/命令框共用 */}
-      <div className="command-terminal__diplomacy">
-        <h3>外交请求</h3>
-        <div className="command-terminal__input-row">
-          <input
-            type="text"
-            className="command-terminal__input"
-            placeholder="如：请求盟友空中支援 / 增援 / 情报共享"
-            value={draftDiplomatic}
-            onChange={(e) => setDraftDiplomatic(e.target.value)}
-            disabled={diplomaticPending}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !diplomaticPending && draftDiplomatic.trim().length > 0) {
-                void handleDiplomatic()
-              }
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => void handleDiplomatic()}
-            disabled={diplomaticPending || draftDiplomatic.trim().length === 0 || context === null}
-          >
-            {diplomaticPending ? '请求中…' : '发起外交'}
-          </button>
-        </div>
-        {diplomatic !== null && (
-          <DiplomaticCard result={diplomatic} onDismiss={() => setDiplomatic(null)} />
-        )}
-      </div>
 
       {/* 已入队命令列表 + 锁定 */}
       {hasQueue && (
@@ -155,49 +119,8 @@ export default function CommandTerminal(): JSX.Element {
 }
 
 // ============================================================================
-// 子组件（与原 CommandTerminal 保持一致，逻辑未重写）
+// 子组件（Bug D：已删除 DiplomaticCard 外交结果卡——外交请求并入 diplomat tab）
 // ============================================================================
-
-/**
- * 外交请求结果卡片。
- */
-function DiplomaticCard({
-  result,
-  onDismiss,
-}: {
-  result: DiplomaticRequestResult
-  onDismiss: () => void
-}): JSX.Element {
-  const { response, trustAfter, delta, defectionRisk } = result
-  const color = responseColor(response.type)
-  const deltaText = delta > 0 ? `+${delta}` : `${delta}`
-  const kindName = describeRequestKind(response.request.kind)
-  return (
-    <div
-      className="command-terminal__diplomatic-card"
-      role="status"
-      style={{ borderColor: color }}
-    >
-      <div className="command-terminal__diplomatic-header">
-        <strong>{kindName}</strong>
-        <span style={{ color }}>{describeResponseType(response.type)}</span>
-      </div>
-      <p className="command-terminal__diplomatic-request">「{response.request.text}」</p>
-      <p className="command-terminal__diplomatic-message">{response.message}</p>
-      <div className="command-terminal__diplomatic-trust">
-        <span>信任度</span>
-        <strong style={{ color: delta > 0 ? 'var(--success)' : delta < 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
-          {deltaText}
-        </strong>
-        <span>→ {trustAfter.trust}</span>
-        {defectionRisk && (
-          <span className="command-terminal__diplomatic-warn">（倒戈风险）</span>
-        )}
-      </div>
-      <button type="button" onClick={onDismiss}>知道了</button>
-    </div>
-  )
-}
 
 /** 候选命令卡片（玩家确认/修改） */
 function CandidateCard({

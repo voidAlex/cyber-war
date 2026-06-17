@@ -346,7 +346,13 @@ async function adjudicateWithLlm(
     try {
       data = parseLLMJson<DirectorAgentOutput>(text, validate)
     } catch (err) {
-      // 校验失败：绝不伪造，重新抛 LlmJsonParseError（上层 isLlmCallError 不捕获 → 回退 mock）
+      // Bug B：校验失败时 console.error 带原始文本前 200 字符（便于诊断 LLM 输出脏字符）。
+      // 绝不伪造，重新抛 LlmJsonParseError（上层 isLlmCallError 不捕获 → 回退 mock）。
+      // eslint-disable-next-line no-console
+      console.error(
+        '[director] LLM 输出 JSON 解析失败（前 200 字符）:',
+        text.slice(0, 200),
+      )
       throw err instanceof LlmJsonParseError
         ? err
         : new LlmJsonParseError(

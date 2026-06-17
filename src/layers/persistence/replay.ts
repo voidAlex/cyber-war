@@ -470,13 +470,39 @@ function applyResolutionEvent(
       break
     }
     case 'surrender': {
-      // T1-D：投降。strength=0 + 加入 annihilated（与 casualty 流程一致，单位移出沙盘）。
-      const unitId = String(evt.data.unitId ?? '')
-      if (unitId) {
-        const existing = stateChanges.unitUpdates[unitId] ?? {}
-        stateChanges.unitUpdates[unitId] = { ...existing, strength: 0 }
-        if (!stateChanges.annihilated.includes(unitId)) {
-          stateChanges.annihilated.push(unitId)
+      // T1-D 被动投降 / Bug C 主动投降。两条路径都把 strength=0 + 加入 annihilated。
+      //
+      // T1-D 被动路径（单单位）：evt.data.unitId（弹尽粮绝被包围的单位）。
+      // Bug C 主动路径（全军）：evt.data.surrenderUnitIds（玩家方全部尚存单位），
+      //   每个单位 strength=0 + status 追加 'surrendered' + 加入 annihilated。
+      //   编排器检测到 data.voluntary===true 跳过导演部，故回放采信 log 不重算。
+      //
+      // 双路径兼容：优先处理 surrenderUnitIds（数组）；缺失则回退 unitId（单单位）。
+      const unitIds = (evt.data.surrenderUnitIds as string[] | undefined) ?? null
+      if (unitIds && unitIds.length > 0) {
+        // Bug C：主动投降路径（多单位）
+        for (const uid of unitIds) {
+          const existing = stateChanges.unitUpdates[uid] ?? {}
+          // status 追加 'surrendered'（采信 log，不重算）
+          const unit = world.units.find((u) => u.id === uid)
+          const curStatus = unit?.status ?? []
+          const newStatus = curStatus.includes('surrendered')
+            ? curStatus
+            : [...curStatus, 'surrendered' as const]
+          stateChanges.unitUpdates[uid] = { ...existing, strength: 0, status: newStatus }
+          if (!stateChanges.annihilated.includes(uid)) {
+            stateChanges.annihilated.push(uid)
+          }
+        }
+      } else {
+        // T1-D 被动投降路径（单单位）
+        const unitId = String(evt.data.unitId ?? '')
+        if (unitId) {
+          const existing = stateChanges.unitUpdates[unitId] ?? {}
+          stateChanges.unitUpdates[unitId] = { ...existing, strength: 0 }
+          if (!stateChanges.annihilated.includes(unitId)) {
+            stateChanges.annihilated.push(unitId)
+          }
         }
       }
       break

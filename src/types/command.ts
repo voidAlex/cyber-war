@@ -56,6 +56,11 @@ import type { GridCoord } from './unit'
  *   产出 'destroy' 事件。
  * - build_road：修路——在非水域 cell 修路（cell.road=true，movementCost 减半，min 1）。
  *   产出 'build' 事件。
+ *
+ * Bug C 修复（2026-06）：全军投降。
+ * - surrender：玩家明示「投降/降」时，全军 strength=0 + status='surrendered'，
+ *   产出 'surrender' 事件，直接判对方胜利（跳过导演部 adjudicate，走规则引擎兜底）。
+ *   无随机数（确定性）；不需要单位/坐标/节点（全局命令）。
  */
 export type CommandIntent =
   | 'move'
@@ -73,6 +78,7 @@ export type CommandIntent =
   | 'build_bridge' // T3-B：架桥（水域 cell.bridge=true）
   | 'destroy_bridge' // T3-B：炸桥（cell.bridge=false）
   | 'build_road' // T3-B：修路（cell.road=true，movementCost 减半）
+  | 'surrender' // Bug C：全军投降（玩家明示，全军 strength=0 + status='surrendered'）
 
 /**
  * 参谋长解析成功的结构化命令。

@@ -363,15 +363,198 @@ export function stripMarkdownFence(raw: string): string {
 }
 
 /**
+ * Bug B 修复：LLM 输出常见脏字符修复链（在 JSON.parse 前应用）。
+ *
+ * 处理 LLM 输出常见的非严格 JSON 问题（顺序：标点 → 逗号 → 截断）：
+ * 1. **中文标点 → 英文**：`，`→`,`、`：`→`:`、`"`/`"`/`「`/`」`→`"`。
+ *    LLM 在中文上下文里偶尔会把 JSON 字段分隔符写成中文全角标点，
+ *    导致 `JSON.parse` 报 "Expected ',' or '}'" 类错误。
+ * 2. **trailing comma**：`,}` → `}`、`,]` → `]`（LLM 常多打尾逗号）。
+ * 3. **截断补全**：若字符串以未闭合的 `{`/`[` 开头（缺末尾配对括号），
+ *    按括号深度尝试追加缺失的 `}`/`]`（仅当大括号/方括号不配对时）。
+ *
+ * 纯函数，不做 JSON.parse（仅字符串修复），失败回退原样（让 JSON.parse 报原始错）。
+ *
+ * @param stripped 已剥离 fence / 提取 JSON 块后的文本
+ * @returns 修复后的文本（若修复失败回退原文）
+ */
+export function repairLLMJson(stripped: string): string {
+  if (stripped.length === 0) return stripped
+  let s = stripped
+
+  // 1) 中文标点 → 英文（仅替换 JSON 结构相关的全角标点；
+  //    字符串内容里的中文标点不被触碰——见下方"字符串内不替换"守卫）。
+  //    为避免误改字符串内容（如 reportText 里的中文段落），仅在「不在双引号字符串内」时替换。
+  s = replaceOutsideStrings(s, [
+    [/，/g, ','],
+    [/：/g, ':'],
+    [/“/g, '"'],
+    [/”/g, '"'],
+    [/「/g, '"'],
+    [/」/g, '"'],
+  ])
+
+  // 2) trailing comma → 移除（仅结构层，逗号紧跟 } 或 ] 之前）
+  //    `,\s*}` → `}`、`,\s*]` → `]`。同样绕开字符串内容。
+  s = replaceOutsideStrings(s, [
+    [/,\s*}/g, '}'],
+    [/,\s*]/g, ']'],
+  ])
+
+  // 3) 截断补全：若以 { 或 [ 开头但括号不配对，追加缺失的右括号。
+  //    仅当首字符是 { 或 [ 时尝试（避免对纯文本误补全）。
+  const first = s.trim()[0]
+  if (first === '{' || first === '[') {
+    s = repairTruncated(s)
+  }
+
+  return s
+}
+
+/**
+ * 在「双引号字符串外」执行一组正则替换（字符串内的内容不被动）。
+ *
+ * 简化状态机：遍历字符，遇 `"` 切换 inString 状态（处理 `\"` 转义）。
+ * 仅在 inString===false 时记录字符并应用替换；字符串内的字符原样保留。
+ *
+ * 用于 repairLLMJson 的标点/trailing-comma 修复，避免误改 reportText 等中文段落。
+ *
+ * @param text 原始文本
+ * @param replacements 一组 [RegExp, replacement] 替换规则（全局正则）
+ * @returns 替换后的文本
+ */
+function replaceOutsideStrings(
+  text: string,
+  replacements: ReadonlyArray<[RegExp, string]>,
+): string {
+  // 把文本切成「字符串段」与「结构段」交替，仅对结构段做替换。
+  const segments: Array<{ text: string; inString: boolean }> = []
+  let cur = ''
+  let inString = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      cur += ch
+      // 处理转义：\" 不结束字符串
+      if (ch === '\\' && i + 1 < text.length) {
+        cur += text[i + 1]
+        i += 1
+        continue
+      }
+      if (ch === '"') {
+        // 结束当前字符串段
+        segments.push({ text: cur, inString: true })
+        cur = ''
+        inString = false
+      }
+      continue
+    }
+    // 结构段
+    if (ch === '"') {
+      // 把累积的结构段先 flush
+      if (cur.length > 0) {
+        segments.push({ text: cur, inString: false })
+        cur = ''
+      }
+      cur = '"'
+      inString = true
+      continue
+    }
+    cur += ch
+  }
+  // flush 末尾段
+  if (cur.length > 0) {
+    segments.push({ text: cur, inString })
+  }
+
+  // 仅对结构段（inString===false）应用替换
+  let out = ''
+  for (const seg of segments) {
+    if (seg.inString) {
+      out += seg.text
+    } else {
+      let t = seg.text
+      for (const [re, repl] of replacements) {
+        // 全局正则（带 g flag）可直接 replace；不带 g 的也安全（仅替换首个，不影响）。
+        t = t.replace(re, repl)
+      }
+      out += t
+    }
+  }
+  return out
+}
+
+/**
+ * 按括号深度补全截断的 JSON（缺末尾右括号时追加 `}`/`]`）。
+ *
+ * 扫描字符串（绕开字符串内容），统计 `{`/`[` 与 `}`/`]` 的深度栈。
+ * 结束时栈中残留的左括号按入栈逆序追加对应右括号。
+ *
+ * 仅处理「以 { 或 [ 开头」的文本（repairLLMJson 已守卫），且对已配对的 JSON 无副作用
+ * （栈空 → 追加 0 字符）。
+ *
+ * @param text 待补全的 JSON 文本
+ * @returns 补全右括号后的文本
+ */
+function repairTruncated(text: string): string {
+  const stack: Array<'{' | '['> = []
+  let inString = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (ch === '\\' && i + 1 < text.length) {
+        i += 1
+        continue
+      }
+      if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === '{' || ch === '[') {
+      stack.push(ch)
+    } else if (ch === '}') {
+      // 弹出到最近的 `{`（容忍轻微错位）
+      for (let j = stack.length - 1; j >= 0; j--) {
+        if (stack[j] === '{') {
+          stack.splice(j, 1)
+          break
+        }
+      }
+    } else if (ch === ']') {
+      for (let j = stack.length - 1; j >= 0; j--) {
+        if (stack[j] === '[') {
+          stack.splice(j, 1)
+          break
+        }
+      }
+    }
+  }
+  if (stack.length === 0) return text
+  // 按入栈逆序追加右括号（栈顶是最后入栈的，最先补）
+  let suffix = ''
+  for (let i = stack.length - 1; i >= 0; i--) {
+    suffix += stack[i] === '{' ? '}' : ']'
+  }
+  return text + suffix
+}
+
+/**
  * 解析 LLM 结构化 JSON 输出并严格校验。
  *
- * 流程：剥离 fence → JSON.parse → ajv 校验 → 返回强类型 T。
+ * 流程：剥离 fence → Bug B 修复链（标点/逗号/截断）→ JSON.parse → ajv 校验 → 返回强类型 T。
  * **任一步骤失败 throw（绝不伪造兜底）**——由上层规则引擎降级。
+ *
+ * Bug B 修复（2026-06）：LLM 输出常含中文标点 / trailing comma / 截断右括号，
+ * 导致 `JSON.parse` 失败 → 规则引擎兜底（无叙事润色）。修复链在 parse 前清洗文本，
+ * 尽量走真 LLM 路径；修复后仍解析失败则按原行为抛 LlmJsonParseError。
  *
  * @param text LLM 原始输出文本
  * @param validate ajv 校验函数（用 compileSchema 或自备）
  * @returns 解析并校验通过的对象（类型 T）
- * @throws LlmJsonParseError 解析或校验失败（含 ajv errors 详情）
+ * @throws LlmJsonParseError 解析或校验失败（含 ajv errors 详情 + 原始文本片段）
  */
 export function parseLLMJson<T>(
   text: string,
@@ -379,15 +562,34 @@ export function parseLLMJson<T>(
 ): T {
   const stripped = stripMarkdownFence(text)
 
+  // Bug B：修复链尝试。先尝试原文 JSON.parse（最快路径，绝大多数 LLM 输出本就合法）；
+  // 失败则应用 repairLLMJson 后重试。
   let parsed: unknown
+  let usedRepair = false
+  let parseErr: unknown = null
   try {
     parsed = JSON.parse(stripped)
   } catch (e) {
+    parseErr = e
+    // 应用修复链重试
+    const repaired = repairLLMJson(stripped)
+    if (repaired !== stripped) {
+      try {
+        parsed = JSON.parse(repaired)
+        usedRepair = true
+        parseErr = null
+      } catch (e2) {
+        parseErr = e2
+      }
+    }
+  }
+  if (parseErr !== null) {
     throw new LlmJsonParseError(
-      `LLM 输出 JSON.parse 失败: ${e instanceof Error ? e.message : String(e)}`,
+      `LLM 输出 JSON.parse 失败: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
       null,
     )
   }
+  void usedRepair // 仅供调试/日志用（避免 unused 警告）
 
   if (!validate(parsed)) {
     // 校验失败：绝不伪造，抛错让上层降级
