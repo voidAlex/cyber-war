@@ -1,10 +1,12 @@
 /**
  * 信息栏 tab 切换（InfoTabs.tsx）— UI 重构第 1 批「全对话为主」右栏中部。
  *
- * 三个 tab：情报 IntelligencePanel / 外交 DiplomacyPanel / 部队 ForcesPanel。
+ * 五个 tab：部队 ForcesPanel / 情报 IntelligencePanel / 外交 DiplomacyPanel /
+ *          后勤 SupplyPanel / 决策 DecisionHistoryPanel。
  * 默认显示「部队」（玩家最常用：点单位看详情）。
  *
- * 复用现有三个 Panel 组件（不重写），仅在外层包 tab 切换容器。
+ * 复用现有四个 Panel 组件（不重写）+ 新增 SupplyPanel/DecisionHistoryPanel，
+ * 仅在外层包 tab 切换容器。
  *
  * 不 import @tauri-apps/api（UI 层）。
  *
@@ -15,15 +17,19 @@ import { useState, type JSX } from 'react'
 import IntelligencePanel from './IntelligencePanel'
 import DiplomacyPanel from './DiplomacyPanel'
 import ForcesPanel from './ForcesPanel'
+import SupplyPanel from './SupplyPanel'
+import DecisionHistoryPanel from './DecisionHistoryPanel'
 
 /** tab id */
-type TabId = 'forces' | 'intel' | 'diplomacy'
+type TabId = 'forces' | 'intel' | 'diplomacy' | 'supply' | 'decisions'
 
-/** tab 配置 */
+/** tab 配置（顺序即显示顺序） */
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'forces', label: '部队' },
   { id: 'intel', label: '情报' },
   { id: 'diplomacy', label: '外交' },
+  { id: 'supply', label: '后勤' },
+  { id: 'decisions', label: '决策' },
 ]
 
 /**
@@ -54,6 +60,8 @@ export default function InfoTabs({ defaultTab = 'forces' }: { defaultTab?: TabId
         {active === 'forces' && <ForcesPanel />}
         {active === 'intel' && <IntelligencePanel />}
         {active === 'diplomacy' && <DiplomacyPanel />}
+        {active === 'supply' && <SupplyPanel />}
+        {active === 'decisions' && <DecisionHistoryPanel />}
       </div>
     </section>
   )

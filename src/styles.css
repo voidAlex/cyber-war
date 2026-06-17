@@ -4750,6 +4750,389 @@ th {
 }
 
 /* ============================================================
+ * SupplyPanel（后勤面板，赛博朋克数据表）
+ * ============================================================ */
+.supply-panel__empty,
+.supply-panel__muted {
+  margin: var(--space-1) 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.supply-panel__section {
+  margin-bottom: var(--space-2);
+}
+
+.supply-panel__section:last-child {
+  margin-bottom: 0;
+}
+
+.supply-panel__section-title {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-cyan);
+  padding-left: 8px;
+  border-left: 2px solid var(--accent-cyan);
+  text-shadow: 0 0 4px rgba(6, 182, 212, 0.3);
+}
+
+.supply-panel__lines,
+.supply-panel__low-list,
+.supply-panel__sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.supply-panel__faction-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 4px currentColor;
+}
+
+/* —— 补给线行 —— */
+.supply-panel__line {
+  padding: 5px 6px;
+  background: rgba(6, 182, 212, 0.04);
+  border-left: 2px solid var(--accent-cyan);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.supply-panel__line--severed {
+  background: rgba(239, 68, 68, 0.06);
+  border-left-color: var(--danger);
+}
+
+.supply-panel__line-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.supply-panel__line-id {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.supply-panel__line-type {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.supply-panel__line-status {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+
+.supply-panel__line-status--ok {
+  color: var(--success);
+  background: rgba(16, 185, 129, 0.12);
+  text-shadow: 0 0 4px rgba(16, 185, 129, 0.5);
+}
+
+.supply-panel__line-status--bad {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.12);
+  text-shadow: 0 0 4px rgba(239, 68, 68, 0.5);
+}
+
+.supply-panel__line-blocked {
+  opacity: 0.85;
+}
+
+.supply-panel__line-path {
+  margin-top: 3px;
+  padding-left: 14px;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* —— 低补给单位行 —— */
+.supply-panel__low-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: rgba(239, 68, 68, 0.05);
+  border-left: 2px solid var(--danger);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.supply-panel__low-id {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.supply-panel__low-type,
+.supply-panel__low-cell {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.supply-panel__low-tag {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+
+.supply-panel__low-tag--severed {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.supply-panel__low-tag--flagged {
+  color: var(--warn);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+/* —— 补给源行 —— */
+.supply-panel__source-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: rgba(6, 182, 212, 0.04);
+  border-left: 2px solid var(--accent-cyan);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.supply-panel__source-cell {
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+.supply-panel__source-faction {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* ============================================================
+ * DecisionHistoryPanel（战术决策面板，赛博朋克数据表）
+ * ============================================================ */
+.decisions-panel__empty,
+.decisions-panel__muted {
+  margin: var(--space-1) 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.decisions-panel__section {
+  margin-top: var(--space-2);
+}
+
+.decisions-panel__section-title {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-cyan);
+  padding-left: 8px;
+  border-left: 2px solid var(--accent-cyan);
+  text-shadow: 0 0 4px rgba(6, 182, 212, 0.3);
+}
+
+/* —— 当前待决策预览 —— */
+.decisions-panel__pending {
+  padding: 6px 8px;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-left: 2px solid var(--warn);
+  border-radius: 2px;
+}
+
+.decisions-panel__pending-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.decisions-panel__pending-turn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.decisions-panel__pending-badge {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warn);
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: rgba(245, 158, 11, 0.15);
+  text-shadow: 0 0 4px rgba(245, 158, 11, 0.5);
+  animation: decisions-pending-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes decisions-pending-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.decisions-panel__pending-label {
+  margin: 0 0 3px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.decisions-panel__pending-desc {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.decisions-panel__pending-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.decisions-panel__pending-option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px;
+  background: rgba(6, 182, 212, 0.04);
+  border-left: 2px solid var(--accent-cyan);
+  border-radius: 2px;
+}
+
+.decisions-panel__pending-option-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+.decisions-panel__pending-option-desc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.decisions-panel__pending-hint {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* —— 历史决策行 —— */
+.decisions-panel__history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.decisions-panel__history-row {
+  padding: 5px 6px;
+  background: rgba(6, 182, 212, 0.03);
+  border-left: 2px solid var(--border-strong);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.decisions-panel__history-row--tactical {
+  background: rgba(6, 182, 212, 0.07);
+  border-left-color: var(--accent-cyan);
+}
+
+.decisions-panel__history-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.decisions-panel__history-turn {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 0.05em;
+}
+
+.decisions-panel__history-field {
+  color: var(--text);
+  font-size: 10px;
+  word-break: break-all;
+}
+
+.decisions-panel__history-delta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 14px;
+  font-size: 11px;
+}
+
+.decisions-panel__history-before {
+  color: var(--text-muted);
+}
+
+.decisions-panel__history-arrow {
+  color: var(--accent-cyan);
+}
+
+.decisions-panel__history-after {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.decisions-panel__history-reason {
+  margin: 2px 0 0;
+  padding-left: 14px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+/* ============================================================
  * BattleResultModal（战果弹窗）
  * ============================================================ */
 .battle-result-overlay {

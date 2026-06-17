@@ -38,7 +38,8 @@
       "properties": {
         "sustainCostPerTurn": { "type": "number", "minimum": 0, "maximum": 50 },
         "lowSupplyThreshold": { "type": "number", "minimum": 0, "maximum": 100 },
-        "restockRate": { "type": "number", "minimum": 0, "maximum": 100 }
+        "restockRate": { "type": "number", "minimum": 0, "maximum": 100 },
+        "severedMultiplier": { "type": "number", "minimum": 0, "maximum": 10, "description": "补给被切断时的基线消耗倍率（第 4 批；与 TS CampaignSupplyRules.severedMultiplier 对齐）。缺省取运行时常量 SEVERED_SUPPLY_MULTIPLIER(=2.0)。" }
       },
       "additionalProperties": false
     },
