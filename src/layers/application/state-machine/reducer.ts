@@ -318,6 +318,17 @@ export function wegoReducer(
       return accepted(action.context, fromPhase)
     }
 
+    case 'SET_WORLD': {
+      // 第 6 批：胜负评估后注入新 world（累计统计 + victoryState/winnerFactionId）。
+      // 纯 world 替换，不改 phase。advanceTurn/resumeTurnAfterDecision 在
+      // FINISH_RESOLUTION 后调 evaluateVictory，产出的 world 经此 action 写入。
+      const next: StateMachineContext = {
+        ...ctx,
+        game: { ...ctx.game, world: action.world },
+      }
+      return accepted(next, fromPhase)
+    }
+
     default: {
       // 穷尽性检查
       const _exhaustive: never = action

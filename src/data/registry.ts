@@ -16,7 +16,7 @@
  * @module data/registry
  */
 
-import type { CampaignPayload, CampaignManifest, CampaignRules } from '@/types'
+import type { CampaignPayload, CampaignManifest, CampaignRules, CampaignVictory } from '@/types'
 import { verdunCampaign, verdunManifest, verdunRules } from './verdun-1916'
 import { guanduCampaign, guanduManifest, guanduRules } from './guandu-200'
 import { ukraineCampaign, ukraineManifest, ukraineRules } from './ukraine-2022'
@@ -138,6 +138,18 @@ export function getBuiltinRules(
   scenarioId: string,
 ): CampaignRules | undefined {
   return getBuiltinCampaign(scenarioId)?.payload.rules
+}
+
+/**
+ * 按 scenarioId 查内置战役胜负条件（第 6 批：供 evaluateVictory 判定）。
+ *
+ * @param scenarioId 剧本 id
+ * @returns 胜负条件或 undefined（未注册时 evaluateVictory 跳过判定）
+ */
+export function getBuiltinVictory(
+  scenarioId: string,
+): CampaignVictory | undefined {
+  return getBuiltinCampaign(scenarioId)?.payload.victory
 }
 
 /**

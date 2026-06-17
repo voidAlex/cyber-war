@@ -13,7 +13,8 @@
  * @module layers/domain/victory
  */
 
-import type { WorldState } from '@/types'
+import type { WorldState, CampaignVictory, CampaignVictoryCondition } from '@/types'
+import { getBuiltinVictory } from '@/data/registry'
 
 /**
  * 胜负判定结果。
@@ -221,4 +222,327 @@ function sumEnemyLoss(
     if (fid !== factionId) sum += loss
   }
   return sum
+}
+
+// =============================================================================
+// 第 6 批：evaluateVictory —— 编排器在每回合 FINISH_RESOLUTION 后调用的高层入口
+//
+// 职责：
+// 1. 从内置 registry 查当前 world.scenarioId 的 CampaignVictory（条件 + maxTurns）。
+//    未注册则跳过判定（返回 world 原样，victoryState 保持 ongoing）。
+// 2. 把 CampaignVictoryCondition（type/factionId/nodeId/casualtyThreshold/...）
+//    翻译为 domain VictoryCondition（kind/target）。
+// 3. 用本回合 lastResolution 折叠更新累计统计（accumulatedCasualties /
+//    casualtiesInflicted / controlledNodes / factionScores / objectivesHeldTurns）。
+// 4. 调 checkVictory 判定，写入 world.victoryState/winnerFactionId/victoryReason。
+//
+// 全纯函数（输入 world + 可选 victory，输出新 world；不读 store / 不调 LLM）。
+// 旧存档兼容：world 各累计字段缺失时按 0/空 起算（首回合）。
+// =============================================================================
+
+/**
+ * 玩家阵营视角的胜负终局状态（world.victoryState 的语义）。
+ *
+ * - 'ongoing'：未决。
+ * - 'won'：玩家阵营获胜（winnerFactionId === playerFactionId）。
+ * - 'lost'：玩家阵营失败（winnerFactionId 为敌方）。
+ * - 'draw'：平局（回合上限到达且势均力敌）。
+ */
+export type VictoryState = 'ongoing' | 'won' | 'lost' | 'draw'
+
+/**
+ * evaluateVictory 的可选注入参数（测试/mock 用）。
+ *
+ * 默认从 getBuiltinVictory(world.scenarioId) 取 CampaignVictory；
+ * 测试可显式传入以绕过 registry（如自定义胜利条件）。
+ */
+export interface EvaluateVictoryOptions {
+  /** 显式注入的胜负条件（覆盖 registry 查询） */
+  victory?: CampaignVictory
+}
+
+/**
+ * 把 CampaignVictoryCondition（剧本数据形态）翻译为 domain VictoryCondition。
+ *
+ * 字段映射：
+ * - type 'objective' → kind 'objective'，target = [nodeId]
+ * - type 'casualty' → kind 'casualty'，target = casualtyThreshold × 100
+ *   （Campaign casualtyThreshold 是 0..1 比例，domain 是绝对值；按各阵营初始
+ *   总 strength × 比例换算为绝对阈值）
+ * - type 'turn_limit' → kind 'turnLimit'，target = victory.maxTurns
+ * - type 'score' → kind 'score'，target = scoreThreshold
+ * - type 'cumulative' → kind 'cumulative'，target = cumulativeTarget + cumulativeMetric
+ *
+ * @param cond 剧本胜负条件
+ * @param victory 所属 CampaignVictory（提供 maxTurns 给 turn_limit）
+ * @param initialStrengthByFaction 各阵营初始总 strength（casualty 比例换算用）
+ */
+function translateCondition(
+  cond: CampaignVictoryCondition,
+  victory: CampaignVictory,
+  initialStrengthByFaction: Record<string, number>,
+): VictoryCondition | null {
+  switch (cond.type) {
+    case 'objective':
+      // 缺 nodeId 的 objective 视为无效（跳过）。
+      if (!cond.nodeId) return null
+      return {
+        factionId: cond.factionId,
+        kind: 'objective',
+        target: [cond.nodeId],
+      }
+    case 'casualty': {
+      // casualtyThreshold 是 0..1 比例（针对 targetFactionId 的初始 strength）。
+      const targetFaction = cond.targetFactionId ?? cond.factionId
+      const initial = initialStrengthByFaction[targetFaction] ?? 0
+      const threshold = Math.round(initial * (cond.casualtyThreshold ?? 1))
+      return {
+        // Campaign 语义：cond.factionId「使 targetFactionId 战损超阈值即胜」。
+        // domain casualty 语义：cond.factionId「使敌方累计战损超阈值即胜」
+        // （敌方 = 除自身外所有阵营累计承受的 strength 损失）。
+        factionId: cond.factionId,
+        kind: 'casualty',
+        target: threshold,
+      }
+    }
+    case 'turn_limit':
+      return {
+        factionId: cond.factionId,
+        kind: 'turnLimit',
+        target: victory.maxTurns,
+      }
+    case 'score':
+      return {
+        factionId: cond.factionId,
+        kind: 'score',
+        target: cond.scoreThreshold ?? Number.POSITIVE_INFINITY,
+      }
+    case 'cumulative':
+      return {
+        factionId: cond.factionId,
+        kind: 'cumulative',
+        target: cond.cumulativeTarget ?? Number.POSITIVE_INFINITY,
+        cumulativeMetric: cond.cumulativeMetric ?? 'casualties_inflicted',
+      }
+    default:
+      return null
+  }
+}
+
+/**
+ * 计算各阵营初始总 strength（按当前 world.units 的 maxPersonnel 近似）。
+ *
+ * casualty 比例阈值需要初始总 strength 作为分母。world.units 上的 personnel
+ * 会随战损下降，但 maxPersonnel 是编制上限（近似初始值），故用 maxPersonnel
+ * 之和作为初始总 strength 的代理。
+ *
+ * @param world 当前世界状态
+ * @returns factionId → 初始总 strength（maxPersonnel 之和）
+ */
+function computeInitialStrengthByFaction(world: WorldState): Record<string, number> {
+  const result: Record<string, number> = {}
+  for (const u of world.units) {
+    result[u.factionId] = (result[u.factionId] ?? 0) + (u.maxPersonnel ?? 0)
+  }
+  return result
+}
+
+/**
+ * 取玩家阵营 id（与 ui/sandbox/intel-visibility.getPlayerFactionId 同语义）。
+ *
+ * 优先 world.playerFactionId（v0.2.2+ 权威），否则 fallback side==='player'。
+ */
+function getPlayerFactionId(world: WorldState): string {
+  if (world.playerFactionId && world.playerFactionId.length > 0) {
+    return world.playerFactionId
+  }
+  return world.factions.find((f) => f.side === 'player')?.id ?? ''
+}
+
+/**
+ * 折叠更新累计统计：基于本回合 lastResolution，更新 world 上的累计字段。
+ *
+ * - accumulatedCasualties：累加本回合各阵营承受的 strength 损失。
+ * - casualtiesInflicted：累加本回合各阵营造成的敌方 personnel 损失
+ *   （粗粒度：某阵营造成的 = 除自身外其他阵营本回合承受的 personnel 损失之和）。
+ * - controlledNodes：按本回合 objectiveChanges 折叠（最新控制方覆盖）。
+ * - factionScores：占节点+100 / 歼敌+10 / 回合-5（仅当本回合有结算）。
+ * - objectivesHeldTurns：按当前 controlledNodes[factionId].length 累加。
+ *
+ * 全纯函数（不修改入参，返回新对象）。
+ *
+ * @param world 当前世界状态（含本回合 lastResolution）
+ * @returns 更新累计字段后的新 world（浅拷贝顶层 + 各累计字段）
+ */
+export function accumulateTurnStats(world: WorldState): WorldState {
+  const resolution = world.lastResolution
+  // 累计统计的浅拷贝（旧存档缺失字段按空对象起算）
+  const accumulatedCasualties: Record<string, number> = { ...(world.accumulatedCasualties ?? {}) }
+  const casualtiesInflicted: Record<string, number> = { ...(world.casualtiesInflicted ?? {}) }
+  const controlledNodes: Record<string, string[]> = {}
+  for (const [fid, nodes] of Object.entries(world.controlledNodes ?? {})) {
+    controlledNodes[fid] = [...nodes]
+  }
+  const factionScores: Record<string, number> = { ...(world.factionScores ?? {}) }
+  const objectivesHeldTurns: Record<string, number> = { ...(world.objectivesHeldTurns ?? {}) }
+
+  // 仅当本回合有结算结果时累加（首回合 / 恢复态可能无 lastResolution）。
+  if (resolution) {
+    // 1. accumulatedCasualties：累加本回合各阵营承受的 strength 损失。
+    const personnelByFaction: Record<string, number> = {}
+    for (const [fid, loss] of Object.entries(resolution.casualties)) {
+      accumulatedCasualties[fid] = (accumulatedCasualties[fid] ?? 0) + (loss.strength ?? 0)
+      personnelByFaction[fid] = (personnelByFaction[fid] ?? 0) + (loss.personnel ?? 0)
+    }
+
+    // 2. casualtiesInflicted：粗粒度——某阵营造成的敌方 personnel 损失 =
+    //    除自身外其他阵营本回合承受的 personnel 损失之和。
+    //    （假设本回合所有敌方损失都由我方造成；多阵营混战时会高估，可接受。）
+    const factionIds = new Set<string>()
+    for (const f of world.factions) factionIds.add(f.id)
+    const totalPersonnelLoss = Object.values(personnelByFaction).reduce((s, v) => s + v, 0)
+    for (const fid of factionIds) {
+      const myLoss = personnelByFaction[fid] ?? 0
+      const enemyLoss = totalPersonnelLoss - myLoss
+      if (enemyLoss > 0) {
+        casualtiesInflicted[fid] = (casualtiesInflicted[fid] ?? 0) + enemyLoss
+      }
+    }
+
+    // 3. controlledNodes：按本回合 objectiveChanges 折叠（最新控制方覆盖）。
+    for (const change of resolution.objectiveChanges) {
+      // 先从所有阵营的列表中移除该节点（避免重复归属）。
+      for (const fid of Object.keys(controlledNodes)) {
+        controlledNodes[fid] = controlledNodes[fid].filter((n) => n !== change.nodeId)
+      }
+      // 加入新控制方列表。
+      if (!controlledNodes[change.toFactionId]) {
+        controlledNodes[change.toFactionId] = []
+      }
+      controlledNodes[change.toFactionId].push(change.nodeId)
+    }
+
+    // 4. factionScores：占节点+100 / 歼敌+10 / 回合-5。
+    for (const change of resolution.objectiveChanges) {
+      factionScores[change.toFactionId] = (factionScores[change.toFactionId] ?? 0) + 100
+    }
+    for (const [fid, inflicted] of Object.entries(casualtiesInflicted)) {
+      // 用本回合增量（已在 casualtiesInflicted 累加，但 score 需按本回合 personnel 增量）。
+      const myPersonnelInflicted = (totalPersonnelLoss - (personnelByFaction[fid] ?? 0))
+      if (myPersonnelInflicted > 0) {
+        // 每 10 personnel +1 分（避免数值过大）。
+        factionScores[fid] = (factionScores[fid] ?? 0) + Math.floor(myPersonnelInflicted / 10)
+      }
+      // 触碰 inflicted 避免未使用警告（保留语义）。
+      void inflicted
+    }
+    for (const fid of factionIds) {
+      factionScores[fid] = (factionScores[fid] ?? 0) - 5
+    }
+  }
+
+  // 5. objectivesHeldTurns：按当前 controlledNodes[factionId].length 累加（每回合 +1 × 占领数）。
+  //    注意：仅在已完成结算的回合累加（lastResolution 存在时）。
+  if (resolution) {
+    for (const [fid, nodes] of Object.entries(controlledNodes)) {
+      if (nodes.length > 0) {
+        objectivesHeldTurns[fid] = (objectivesHeldTurns[fid] ?? 0) + nodes.length
+      }
+    }
+  }
+
+  return {
+    ...world,
+    accumulatedCasualties,
+    casualtiesInflicted,
+    controlledNodes,
+    factionScores,
+    objectivesHeldTurns,
+  }
+}
+
+/**
+ * 评估胜负并写入 world.victoryState（高层入口）。
+ *
+ * 调用时机：编排器 advanceTurn / resumeTurnAfterDecision 在 FINISH_RESOLUTION
+ * 之后调用。流程：
+ * 1. accumulateTurnStats：折叠累计统计。
+ * 2. 查 CampaignVictory（registry 或显式注入）。
+ * 3. 翻译条件 → 调 checkVictory。
+ * 4. 按玩家阵营视角写 victoryState（won/lost/draw/ongoing）。
+ *
+ * 已终局（victoryState !== 'ongoing'）时不再重复判定（幂等，返回原 world）。
+ *
+ * @param world 当前世界状态（应已含本回合 lastResolution）
+ * @param options 可选注入（测试用）
+ * @returns 更新累计统计 + victoryState 后的新 world
+ */
+export function evaluateVictory(
+  world: WorldState,
+  options?: EvaluateVictoryOptions,
+): WorldState {
+  // 幂等：已终局则不再判定。
+  if (world.victoryState && world.victoryState !== 'ongoing') {
+    return world
+  }
+
+  // 1. 折叠累计统计。
+  const worldWithStats = accumulateTurnStats(world)
+
+  // 2. 查 CampaignVictory。
+  const victory = options?.victory ?? getBuiltinVictory(world.scenarioId)
+  if (!victory) {
+    // 未注册胜利条件：仅更新累计统计，victoryState 保持 ongoing。
+    return { ...worldWithStats, victoryState: 'ongoing' }
+  }
+
+  // 3. 翻译条件。
+  const initialStrength = computeInitialStrengthByFaction(worldWithStats)
+  const conditions: VictoryCondition[] = []
+  for (const cond of victory.conditions) {
+    const translated = translateCondition(cond, victory, initialStrength)
+    if (translated) conditions.push(translated)
+  }
+
+  // 4. 调 checkVictory。
+  const result = checkVictory({
+    world: worldWithStats,
+    controlledNodes: worldWithStats.controlledNodes ?? {},
+    accumulatedCasualties: worldWithStats.accumulatedCasualties ?? {},
+    conditions,
+    scores: worldWithStats.factionScores,
+    casualtiesInflicted: worldWithStats.casualtiesInflicted,
+    objectivesHeldTurns: worldWithStats.objectivesHeldTurns,
+  })
+
+  // 5. 按玩家阵营视角写 victoryState。
+  const playerFactionId = getPlayerFactionId(worldWithStats)
+  let victoryState: VictoryState
+  if (!result.decided) {
+    // checkVictory 的 turnLimit 在到达上限但平局时返回 decided:false + reason（势均力敌）。
+    // 此处据 reason 判定是否为平局（reason 含「势均力敌」或回合上限到达）。
+    if (
+      result.reason &&
+      worldWithStats.turnIndex >= victory.maxTurns &&
+      result.reason.includes('势均力敌')
+    ) {
+      victoryState = 'draw'
+    } else {
+      victoryState = 'ongoing'
+    }
+  } else if (result.winnerFactionId === null) {
+    victoryState = 'draw'
+  } else if (result.winnerFactionId === playerFactionId) {
+    victoryState = 'won'
+  } else {
+    victoryState = 'lost'
+  }
+
+  return {
+    ...worldWithStats,
+    victoryState,
+    winnerFactionId: result.winnerFactionId,
+    victoryReason: result.reason,
+    victoryMaxTurns: victory.maxTurns,
+  }
 }

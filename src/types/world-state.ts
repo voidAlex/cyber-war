@@ -66,6 +66,76 @@ export interface WorldState {
   lastResolution: ResolutionSummary | null
   /** 上下文压缩摘要（每 5 回合产出，作为新的稳定 L2 前缀） */
   contextSummaries: Record<number, string>
+
+  // ===========================================================================
+  // 胜负状态 + 累计统计（第 6 批：GameOverModal 胜负弹窗）
+  //
+  // checkVictory 纯函数需要三类输入（controlledNodes / accumulatedCasualties /
+  // scores / casualtiesInflicted / objectivesHeldTurns），这些跨回合累计统计
+  // 持久化在 world 上（落盘 + 回放采信）。victoryState 是胜负终局标志位，
+  // orchestrator 每回合 FINISH_RESOLUTION 后调 evaluateVictory 判定并写入。
+  // ===========================================================================
+  /**
+   * 战役胜负终局状态。
+   *
+   * - 'ongoing'：战役进行中（默认）。
+   * - 'won'：玩家阵营获胜（winnerFactionId === playerFactionId）。
+   * - 'lost'：玩家阵营失败（winnerFactionId 为敌方）。
+   * - 'draw'：平局（回合上限到达且势均力敌）。
+   *
+   * 旧存档（无此字段）视为 'ongoing'（兼容回填）。
+   */
+  victoryState?: 'ongoing' | 'won' | 'lost' | 'draw'
+  /** 获胜阵营 id（未决为 null/undefined；'draw' 时为 null）。 */
+  winnerFactionId?: string | null
+  /** 胜负判定原因（checkVictory.reason，UI GameOverModal 展示）。 */
+  victoryReason?: string | null
+  /**
+   * 胜负判定的剧本回合上限（来自 victory.maxTurns）。evaluateVictory 注入，
+   * 用于 GameOverModal 展示「坚守至第 N 回合」。
+   */
+  victoryMaxTurns?: number
+
+  /**
+   * 累计战损统计（承受方视角）：key=factionId，value=该阵营累计损失的 strength 总和。
+   *
+   * 每回合 FINISH_RESOLUTION 后由 evaluateVictory 累加 lastResolution.casualties
+   * （factionId → { personnel, strength }），存 strength 累计（checkVictory casualty
+   * 条件消费此）。回放采信（落 event-log 的 world-state 副本）。
+   * 旧存档（无此字段）视为空（首回合起算）。
+   */
+  accumulatedCasualties?: Record<string, number>
+  /**
+   * 累计战损统计（造成方视角）：key=施加方 factionId，value=该阵营累计造成的
+   * 敌方 personnel 伤亡总和。与 accumulatedCasualties 互补（cumulative
+   * casualties_inflicted 条件消费此）。
+   *
+   * 计算方式：本回合某阵营造成的敌方 personnel 损失 = sum(除自身外其他阵营本回合
+   * 承受的 personnel 损失)（粗粒度，假设本回合所有敌方损失都由我方造成）。
+   * 旧存档（无此字段）视为空。
+   */
+  casualtiesInflicted?: Record<string, number>
+  /**
+   * 当前各阵营占领的高价值节点 id 列表（key=factionId）。
+   *
+   * 每回合按 lastResolution.objectiveChanges 折叠更新（最新控制方覆盖旧值），
+   * 作为 checkVictory 的 controlledNodes 输入。回放采信。
+   * 旧存档（无此字段）视为空。
+   */
+  controlledNodes?: Record<string, string[]>
+  /**
+   * 各阵营累计积分（key=factionId）。积分规则：占节点+100 / 歼敌+10 / 回合-5
+   * （由 evaluateVictory 每回合累加）。score 类型胜利条件消费此。
+   * 旧存档（无此字段）视为 0。
+   */
+  factionScores?: Record<string, number>
+  /**
+   * 各阵营累计占领高价值节点的回合数（key=factionId）。
+   * 每回合按当前 controlledNodes[factionId].length 累加（cumulative
+   * objectives_held_turns 条件消费此）。
+   * 旧存档（无此字段）视为 0。
+   */
+  objectivesHeldTurns?: Record<string, number>
 }
 
 /**

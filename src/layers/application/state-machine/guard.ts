@@ -139,6 +139,11 @@ export function guardAction(
     case 'LOAD_CONTEXT':
       return null
 
+    case 'SET_WORLD':
+      // 第 6 批：胜负评估后注入新 world（累计统计 + victoryState）。
+      // 任何阶段都允许（纯 world 替换，不改 phase）；编排器在 FINISH_RESOLUTION 后调用。
+      return null
+
     default: {
       // 穷尽性检查：未覆盖的动作判未知
       const _exhaustive: never = action

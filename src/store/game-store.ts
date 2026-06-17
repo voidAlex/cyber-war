@@ -472,6 +472,19 @@ export interface GameStoreState {
   markOpeningBriefing: () => void
   /** 关闭开场简报（玩家点击"开始指挥"时调用）。 */
   dismissOpeningBriefing: () => void
+
+  // —— 第 6 批：胜负终局弹窗（GameOverModal）——
+  // advanceTurn 结算后如 world.victoryState !== 'ongoing' → setShowGameOver(true)。
+  // App.tsx 据此叠加 GameOverModal（最高优先级，覆盖一切）。dismissGameOver 关闭弹窗
+  // （玩家点"查看沙盘"——仍留游戏界面看最终状态；"返回标题屏"另走 handleExit）。
+  // 瞬态 UI 路由态，不进 reducer/context（不持久化）。
+  /**
+   * 是否显示胜负终局弹窗（GameOverModal）。
+   * advance/resolveDecision 结算后如 victoryState !== 'ongoing' 则 true。
+   */
+  showGameOver: boolean
+  /** 关闭胜负终局弹窗（玩家点"查看沙盘"时调用；弹窗关闭但仍留游戏界面）。 */
+  dismissGameOver: () => void
 }
 
 // 存档过滤谓词（纯函数，从 save-filter 导入；拆分以避免测试 import store 时触发 Worker）
@@ -588,7 +601,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       const all = await persistenceService.listSaves()
       const saves = all.filter(isPlayerSaveId)
       // 第 5 批：新战役创建后标记显示开场参谋长简报弹窗。
-      set({ context: ctx, saveId, saves, busy: false, showOpeningBriefing: true })
+      // 第 6 批：新战役开局重置胜负弹窗标志（避免上一局终局弹窗残留）。
+      set({ context: ctx, saveId, saves, busy: false, showOpeningBriefing: true, showGameOver: false })
     } catch (err) {
       set({ busy: false, userError: `创建存档失败：${String(err)}` })
     }
@@ -629,7 +643,17 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         error: null,
       }
       // 第 5 批：载入旧存档不显示开场参谋长简报（仅新战役创建时弹）。
-      set({ context: ctx, saveId, busy: false, showOpeningBriefing: false })
+      // 第 6 批：若载入的存档已终局（victoryState !== 'ongoing'），弹出 GameOverModal
+      // （玩家可看到终局战报 / 返回标题屏）；否则重置 showGameOver=false。
+      const isGameOver =
+        !!world.victoryState && world.victoryState !== 'ongoing'
+      set({
+        context: ctx,
+        saveId,
+        busy: false,
+        showOpeningBriefing: false,
+        showGameOver: isGameOver,
+      })
     } catch (err) {
       set({ busy: false, userError: `载入存档失败：${String(err)}` })
     }
@@ -691,6 +715,15 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
           degraded: result.context.lastResolution?.degraded ?? false,
           pendingDecisionHandle: result.decisionHandle,
         })
+        // 第 6 批：即便挂起在 decision，FINISH_RESOLUTION 后已评估胜负。
+        // 若已终局，仍弹出 GameOverModal（覆盖 decision，因为战役已结束）。
+        const pausedWorld = result.context.game.world
+        if (
+          pausedWorld.victoryState &&
+          pausedWorld.victoryState !== 'ongoing'
+        ) {
+          set({ showGameOver: true })
+        }
         return
       }
       // 结算完成：回写缓存统计、降级标志、envelopes（供 Inspector）
@@ -709,6 +742,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       // 第 4 批：每 5 回合额外写 snapshot 副本（额外保险，加速崩溃回放）。
       // 已有 persist 落盘，snapshot 作为冗余锚点；best-effort，失败只 warn。
       void writePeriodicSnapshot(completedWorld)
+      // 第 6 批：结算后若战役终局（victoryState !== 'ongoing'）→ 弹出 GameOverModal。
+      if (
+        completedWorld.victoryState &&
+        completedWorld.victoryState !== 'ongoing'
+      ) {
+        set({ showGameOver: true })
+      }
     } catch (err) {
       set({ streamingReport: false })
       // 四分类 LLM 错误：映射为横幅（绝不把 ApiKey 误报为网络）
@@ -764,6 +804,14 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       const decidedWorld = result.context.game.world
       get().markSaved(decidedWorld.turnIndex)
       void writePeriodicSnapshot(decidedWorld)
+      // 第 6 批：若 advanceTurn 期间已判终局（FINISH_RESOLUTION 后 evaluateVictory），
+      // 决策解决完成后弹出 GameOverModal。
+      if (
+        decidedWorld.victoryState &&
+        decidedWorld.victoryState !== 'ongoing'
+      ) {
+        set({ showGameOver: true })
+      }
     } catch (err) {
       // 落盘失败等：上下文可能已被部分推进，从 error.context 恢复（若存在）
       const banner = errorToBanner(err)
@@ -962,6 +1010,14 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   },
   dismissOpeningBriefing() {
     set({ showOpeningBriefing: false })
+  },
+
+  // 第 6 批：胜负终局弹窗（瞬态 UI 路由态）。
+  // 初始 false。advance/resolveDecision 结算后若 world.victoryState !== 'ongoing' 则 true。
+  // dismissGameOver 由 GameOverModal「查看沙盘」按钮调用（关闭弹窗，仍留游戏界面）。
+  showGameOver: false,
+  dismissGameOver() {
+    set({ showGameOver: false })
   },
 
   // 第 3 批：沙盘 cell 悬浮 tooltip（SandboxRenderer move 模式回调驱动）

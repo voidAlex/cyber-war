@@ -55,8 +55,14 @@ export type {
 } from './combat'
 
 // 胜负判定
-export { checkVictory } from './victory'
-export type { VictoryResult, VictoryCondition, VictoryCheckInput } from './victory'
+export { checkVictory, evaluateVictory, accumulateTurnStats } from './victory'
+export type {
+  VictoryResult,
+  VictoryCondition,
+  VictoryCheckInput,
+  VictoryState,
+  EvaluateVictoryOptions,
+} from './victory'
 
 // 情报衰减
 export {

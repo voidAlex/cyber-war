@@ -6161,6 +6161,255 @@ th {
   cursor: not-allowed;
 }
 
+/* ============================================================
+ * GameOverModal（胜负终局弹窗）— 第 6 批
+ *
+ * 三变体：
+ * - --won：金色辉光（胜利）。
+ * - --lost：红色辉光（失败）。
+ * - --draw：灰色（平局）。
+ * ============================================================ */
+.game-over-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100; /* 高于 BattleResultModal(1000) / OpeningBriefing / SandboxOverlay */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(10, 14, 26, 0.92);
+  backdrop-filter: blur(6px);
+  animation: opening-briefing__fade-in 0.3s ease-out;
+}
+
+.game-over-overlay__bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(6, 182, 212, 0.08), transparent 60%),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0,
+      transparent 2px,
+      rgba(6, 182, 212, 0.025) 2px,
+      rgba(6, 182, 212, 0.025) 3px
+    );
+}
+
+.game-over-overlay__card {
+  position: relative;
+  width: min(720px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.98), rgba(17, 24, 39, 0.98));
+  border-radius: 4px;
+  box-shadow: 0 8px 48px rgba(0, 0, 0, 0.8);
+  clip-path: var(--chamfer);
+  overflow: hidden;
+  animation: overlay-card-in var(--dur-slow) ease;
+}
+
+/* —— 变体：边框 + 辉光色（won 金 / lost 红 / draw 灰）—— */
+.game-over-overlay--won .game-over-overlay__card {
+  border: 1px solid #fbbf24;
+  box-shadow: 0 0 32px rgba(251, 191, 36, 0.4), 0 8px 48px rgba(0, 0, 0, 0.8);
+}
+.game-over-overlay--lost .game-over-overlay__card {
+  border: 1px solid #ef4444;
+  box-shadow: 0 0 32px rgba(239, 68, 68, 0.4), 0 8px 48px rgba(0, 0, 0, 0.8);
+}
+.game-over-overlay--draw .game-over-overlay__card {
+  border: 1px solid #94a3b8;
+  box-shadow: 0 0 24px rgba(148, 163, 184, 0.3), 0 8px 48px rgba(0, 0, 0, 0.8);
+}
+
+.game-over-overlay__header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+}
+.game-over-overlay--won .game-over-overlay__header {
+  background: rgba(251, 191, 36, 0.08);
+}
+.game-over-overlay--lost .game-over-overlay__header {
+  background: rgba(239, 68, 68, 0.08);
+}
+.game-over-overlay--draw .game-over-overlay__header {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.game-over-overlay__tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+  margin-bottom: var(--space-1);
+}
+
+.game-over-overlay__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+}
+.game-over-overlay--won .game-over-overlay__title {
+  color: #fbbf24;
+  text-shadow: 0 0 16px rgba(251, 191, 36, 0.6), 0 0 32px rgba(251, 191, 36, 0.3);
+}
+.game-over-overlay--lost .game-over-overlay__title {
+  color: #ef4444;
+  text-shadow: 0 0 16px rgba(239, 68, 68, 0.6), 0 0 32px rgba(239, 68, 68, 0.3);
+}
+.game-over-overlay--draw .game-over-overlay__title {
+  color: #cbd5e1;
+  text-shadow: 0 0 12px rgba(203, 213, 225, 0.4);
+}
+
+.game-over-overlay__scenario {
+  margin: var(--space-1) 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.game-over-overlay__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.game-over-overlay__section {
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-item);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+}
+.game-over-overlay--won .game-over-overlay__section {
+  border-color: rgba(251, 191, 36, 0.25);
+}
+.game-over-overlay--lost .game-over-overlay__section {
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.game-over-overlay__section-label {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+}
+
+.game-over-overlay__reason {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+.game-over-overlay__winner {
+  margin: var(--space-1) 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.game-over-overlay__winner strong {
+  color: var(--text);
+}
+
+.game-over-overlay__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.game-over-overlay__table th,
+.game-over-overlay__table td {
+  padding: 4px var(--space-2);
+  text-align: left;
+  border-bottom: 1px solid var(--border-dim);
+}
+.game-over-overlay__table th {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.game-over-overlay__row--player td {
+  background: rgba(6, 182, 212, 0.06);
+  color: var(--accent-cyan);
+}
+
+.game-over-overlay__section--narrative {
+  background: var(--bg-void);
+}
+.game-over-overlay__narrative {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.game-over-overlay__footer {
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: rgba(6, 182, 212, 0.04);
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.game-over-overlay__btn {
+  min-width: 120px;
+  padding: var(--space-1) var(--space-3);
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--dur) ease, box-shadow var(--dur) ease;
+}
+.game-over-overlay__btn--secondary {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.game-over-overlay__btn--secondary:hover:not(:disabled) {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+.game-over-overlay__btn--primary {
+  background: var(--accent-cyan);
+  color: #04222a;
+  border: 1px solid var(--accent-cyan);
+  font-weight: 600;
+  box-shadow: var(--glow-cyan);
+}
+.game-over-overlay--won .game-over-overlay__btn--primary {
+  background: #fbbf24;
+  border-color: #fbbf24;
+  color: #2a1f04;
+  box-shadow: 0 0 16px rgba(251, 191, 36, 0.4);
+}
+.game-over-overlay--lost .game-over-overlay__btn--primary {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #2a0404;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.4);
+}
+.game-over-overlay__btn--primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
 /* ===========================================================================
  * P. 内置战役列表（.campaign-list*）— 第 5 批 CampaignPanel 战役选择
  * =========================================================================== */

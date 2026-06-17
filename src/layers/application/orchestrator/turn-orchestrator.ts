@@ -37,6 +37,7 @@ import type { PersistenceService } from '@/layers/application/services/persisten
 import type { PhysicsEngineClient } from '@/layers/application/services/worker-service'
 import type { ResolutionResult } from '@/layers/domain/combat'
 import { applyResolutionStateChanges } from '@/layers/domain/combat'
+import { evaluateVictory } from '@/layers/domain/victory'
 import type { DirectorRole, ContextCompressor } from '@/layers/agents/roles/director'
 import { SEQUENCE_DIRECTOR_DECISION_OVERRIDE_BASE } from '@/layers/agents/roles/director'
 import { shouldCompressContext } from '@/layers/agents/roles/context-compression'
@@ -257,6 +258,26 @@ export async function advanceTurn(
     eventsCount: events.length,
     degraded: resolution.degraded,
   })
+
+  // 第 6 批：FINISH_RESOLUTION 后调 evaluateVictory 判定胜负 + 折叠累计统计。
+  // evaluateVictory 是纯函数（读 cur.game.world + cur.lastResolution → 新 world，
+  // 含 victoryState/累计统计）。通过 SET_WORLD 写入 context（不改 phase，保持 briefing）。
+  // 已终局时幂等（返回原 world）。胜负判定不伪造——基于真实 world 数据 + 剧本 victory 条件。
+  const victoryWorld = evaluateVictory(cur.game.world)
+  if (victoryWorld !== cur.game.world) {
+    cur = step(cur, { type: 'SET_WORLD', world: victoryWorld }, signal)
+    actions.push({ type: 'SET_WORLD', world: victoryWorld })
+    if (victoryWorld.victoryState && victoryWorld.victoryState !== 'ongoing') {
+      logger.info('orch/turn/victory', `战役终局：${victoryWorld.victoryState}`, {
+        scope: 'save',
+        saveId,
+        turn: turn0,
+        victoryState: victoryWorld.victoryState,
+        winnerFactionId: victoryWorld.winnerFactionId ?? null,
+        reason: victoryWorld.victoryReason ?? null,
+      })
+    }
+  }
 
   // 第 3 批：战术决策挂起判定。
   // 导演部产出 pendingDecision 时，本回合在 briefing 后插入 decision 阶段：

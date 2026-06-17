@@ -49,6 +49,7 @@ import SandboxOverlay from '@/layers/ui/sandbox/SandboxOverlay'
 import InfoTabs from '@/layers/ui/InfoTabs'
 import BattleResultModal from '@/layers/ui/briefing/BattleResultModal'
 import OpeningBriefing from '@/layers/ui/briefing/OpeningBriefing'
+import GameOverModal from '@/layers/ui/briefing/GameOverModal'
 import { useGameStore } from '@/store/game-store'
 import { logger } from '@/utils/logger'
 import { formatHeaderDate, DEFAULT_DAYS_PER_TURN } from '@/utils/in-game-date'
@@ -193,6 +194,9 @@ function GameScreen({
   // 第 5 批：开场参谋长简报弹窗（新战役开局后 store 标记 true，玩家关闭后 false）
   const showOpeningBriefing = useGameStore((s) => s.showOpeningBriefing)
   const dismissOpeningBriefing = useGameStore((s) => s.dismissOpeningBriefing)
+  // 第 6 批：胜负终局弹窗（advanceTurn 结算后若 victoryState !== 'ongoing' 则 true）。
+  // 最高优先级，覆盖 BattleResultModal / OpeningBriefing。
+  const showGameOver = useGameStore((s) => s.showGameOver)
 
   // 推算 Header 时间显示（manifest.startInGameDate + turnIndex × daysPerTurn）
   const scenarioId = context.game.world.scenarioId
@@ -220,11 +224,13 @@ function GameScreen({
     })
     // Bug3 修复：退出时清空对话记忆（store reset），下次进游戏从空白开始
     // 第 5 批：同时关闭创建页 flag，确保退出回标题屏（非创建页）
+    // 第 6 批：同时关闭胜负终局弹窗 flag（避免下一局开局残留）
     useGameStore.setState({
       context: null,
       saveId: null,
       selectedUnitId: null,
       creatorPageActive: false,
+      showGameOver: false,
     })
     useGameStore.getState().clearDialogues()
     setConfirmExit(false)
@@ -295,14 +301,23 @@ function GameScreen({
       {/* 全屏沙盘弹窗 */}
       <SandboxOverlay open={sandboxOpen} onClose={() => setSandboxOpen(false)} />
 
-      {/* 战果弹窗（briefing 阶段，未 dismiss 时弹一次） */}
-      <BattleResultModal
-        open={showBriefing && !battleResultDismissed}
-        onClose={() => setBattleResultDismissed(true)}
-      />
+      {/* 第 6 批：胜负终局弹窗优先级最高——已终局时覆盖其他弹窗。
+          三弹窗不冲突的实现：showGameOver===true 时不渲染 BattleResultModal /
+          OpeningBriefing（GameScreen 内条件短路）。GameOverModal 内部自带 Esc 关闭。 */}
+      {showGameOver ? (
+        <GameOverModal />
+      ) : (
+        <>
+          {/* 战果弹窗（briefing 阶段，未 dismiss 时弹一次） */}
+          <BattleResultModal
+            open={showBriefing && !battleResultDismissed}
+            onClose={() => setBattleResultDismissed(true)}
+          />
 
-      {/* 第 5 批：开场参谋长简报弹窗（新战役开局叠加，玩家关闭后进入正常游戏） */}
-      {showOpeningBriefing && <OpeningBriefing onDismiss={dismissOpeningBriefing} />}
+          {/* 第 5 批：开场参谋长简报弹窗（新战役开局叠加，玩家关闭后进入正常游戏） */}
+          {showOpeningBriefing && <OpeningBriefing onDismiss={dismissOpeningBriefing} />}
+        </>
+      )}
 
       {/* 退出确认对话框 */}
       {confirmExit && (

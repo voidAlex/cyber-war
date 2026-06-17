@@ -141,6 +141,11 @@ export type StateMachineAction =
   | { type: 'RETRY'; reason: string } // 通用失败重试（回自身或上一阶段）
   // —— 恢复 ——
   | { type: 'LOAD_CONTEXT'; context: StateMachineContext } // 从存档恢复完整上下文
+  // —— 第 6 批：胜负评估后注入新 world（累计统计 + victoryState）——
+  // advanceTurn/resumeTurnAfterDecision 在 FINISH_RESOLUTION 后调 evaluateVictory，
+  // 产出的 world（含累计统计 + victoryState/winnerFactionId）经此 action 写入 context.game.world。
+  // 纯 world 替换，不改 phase（保持 briefing/decision/persist 等当前阶段）。
+  | { type: 'SET_WORLD'; world: WorldState }
 
 /**
  * 注入的时钟函数类型（保持 reducer 纯净，禁止直接调 Date.now）。
