@@ -60,6 +60,7 @@ import {
   resolveAirSuperiority,
   AIR_SUPERIORITY_LOSER_MORALE_PENALTY,
   AIR_SUPERIORITY_LOSER_STRENGTH_PENALTY,
+  AIR_SUPERIORITY_WINNER_RECON_BONUS,
 } from '@/layers/domain/air-combat'
 import type {
   ResolutionResult,
@@ -707,7 +708,148 @@ function resolveMoveOrder(
  * T2 第 5 批 A：当攻方 type='missile'（导弹部队）时，改走 resolveMissileAttack 路径
  * （含防空拦截判定）。拦截成功 → damage=0 + 产出 'intercepted' 事件；
  * 失败 → damage=MISSILE_BASE_DAMAGE（40）。其余类型走原有 resolveEngagement 流程。
+ *
+ * T3-C：空海专门规则分流——air vs air / carrier sortie / naval engagement
+ * 在通用 resolveEngagement 之前拦截分流。
  */
+function hasCarrierSupport(worldState: WorldState, airUnit: Unit): boolean {
+  // 检查该 air 单位所在 cell 或同阵营是否有 carrier（isCarrier 判定）。
+  return worldState.units.some(
+    (u) => u.factionId === airUnit.factionId && u.type === 'naval' && isCarrier(u),
+  )
+}
+
+/** T3-C worker 包装：air vs air 制空权争夺 → resolveAirSuperiority（domain 纯函数）。 */
+function resolveAirSuperiorityOrder(
+  _worldState: WorldState,
+  envelope: ActionEnvelope,
+  rng: DeterministicRandom,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+  attacker: Unit,
+  defender: Unit,
+): void {
+  const result = resolveAirSuperiority(attacker, defender, rng)
+  const loser = result.winner === attacker.id ? defender : attacker
+  const winner = result.winner === attacker.id ? attacker : defender
+  // 败方 morale/strength 损失
+  const loserExisting = stateChanges.unitUpdates[loser.id] ?? {}
+  stateChanges.unitUpdates[loser.id] = {
+    ...loserExisting,
+    morale: Math.max(0, loser.morale - AIR_SUPERIORITY_LOSER_MORALE_PENALTY),
+    strength: Math.max(0, loser.strength - AIR_SUPERIORITY_LOSER_STRENGTH_PENALTY),
+  }
+  // 胜方获 morale +2（recon bonus 需 intel 层，此处以 morale 代理）
+  const winnerExisting = stateChanges.unitUpdates[winner.id] ?? {}
+  stateChanges.unitUpdates[winner.id] = {
+    ...winnerExisting,
+    morale: Math.min(100, winner.morale + 2),
+  }
+  events.push({
+    id: `evt:${envelope.sequence}:air_superiority:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'air_superiority',
+    description: `制空权争夺：${winner.id} 获胜，${loser.id} 损失士气/兵力`,
+    data: { winner: result.winner, loser: loser.id, reconBonus: AIR_SUPERIORITY_WINNER_RECON_BONUS },
+  })
+}
+
+/** T3-C worker 包装：carrier 携 air 出击 → resolveAirSortie（domain 纯函数）。 */
+function resolveAirSortieOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  rng: DeterministicRandom,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+  attacker: Unit,
+  defender: Unit,
+): void {
+  const carrier = worldState.units.find(
+    (u) => u.factionId === attacker.factionId && u.type === 'naval' && isCarrier(u),
+  )
+  if (!carrier) {
+    events.push({
+      id: `evt:${envelope.sequence}:blockade:0`,
+      source: 'physics',
+      turn,
+      sequence: envelope.sequence,
+      agentId: envelope.agentId,
+      kind: 'blockade',
+      description: '舰载机出击失败：无可用航母',
+      data: { intent: 'attack', reason: 'no_carrier' },
+    })
+    return
+  }
+  const result = resolveAirSortie(attacker, carrier, defender.coord, [defender], rng)
+  // 目标损伤
+  const defExisting = stateChanges.unitUpdates[defender.id] ?? {}
+  stateChanges.unitUpdates[defender.id] = {
+    ...defExisting,
+    strength: Math.max(0, defender.strength - result.damage),
+  }
+  // 舰载机自身损耗
+  const atkExisting = stateChanges.unitUpdates[attacker.id] ?? {}
+  stateChanges.unitUpdates[attacker.id] = {
+    ...atkExisting,
+    strength: Math.max(0, attacker.strength - AIR_SORTIE_SELF_STRENGTH_COST),
+    ammo: Math.max(0, attacker.ammo - 10),
+  }
+  events.push({
+    id: `evt:${envelope.sequence}:air_sortie:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'air_sortie',
+    description: `${attacker.id} 从 ${carrier.id} 出击，对 ${defender.id} 造成 ${result.damage} 点伤害`,
+    data: { airUnit: attacker.id, carrier: carrier.id, target: defender.id, damage: result.damage },
+  })
+}
+
+/** T3-C worker 包装：naval 超视距交战 → resolveNavalEngagement（domain 纯函数）。 */
+function resolveNavalEngagementOrder(
+  _worldState: WorldState,
+  envelope: ActionEnvelope,
+  rng: DeterministicRandom,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+  attacker: Unit,
+  defender: Unit,
+): void {
+  const result = resolveNavalEngagement(attacker, defender, rng)
+  // 守方损伤 + 弹药消耗
+  const defExisting = stateChanges.unitUpdates[defender.id] ?? {}
+  stateChanges.unitUpdates[defender.id] = {
+    ...defExisting,
+    strength: Math.max(0, defender.strength - result.damage),
+    ammo: Math.max(0, defender.ammo - NAVAL_DEFENDER_AMMO_COST),
+  }
+  // 攻方反击损伤
+  if (result.counterDamage > 0) {
+    const atkExisting = stateChanges.unitUpdates[attacker.id] ?? {}
+    stateChanges.unitUpdates[attacker.id] = {
+      ...atkExisting,
+      strength: Math.max(0, attacker.strength - result.counterDamage),
+    }
+  }
+  events.push({
+    id: `evt:${envelope.sequence}:naval_engagement:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'naval_engagement',
+    description: `海上交战：${attacker.id} 对 ${defender.id} 造成 ${result.damage} 点伤害${result.counterDamage > 0 ? `，反击受到 ${result.counterDamage} 点` : ''}`,
+    data: { attacker: attacker.id, defender: defender.id, damage: result.damage, counterDamage: result.counterDamage },
+  })
+}
+
 function resolveAttackOrder(
   worldState: WorldState,
   envelope: ActionEnvelope,
