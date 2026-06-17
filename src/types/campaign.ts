@@ -242,6 +242,22 @@ export interface CampaignSupplyRules {
   severedMultiplier?: number
 }
 
+/**
+ * 天气规则（rules.json.weather，T1-B，可选）。
+ *
+ * rollWeather 据此约束新天气的类型池与持续时间：
+ * - possibleTypes：该战役可能出现的天气类型（如凡尔登无雪、乌克兰有雪）。
+ *   缺省全部 5 类（clear/rain/storm/fog/snow）。
+ * - baseDuration：新天气的基准持续回合（实际在 [baseDuration, baseDuration+2] 内随机）。
+ *   缺省 2（即 [2,4] 回合）。
+ */
+export interface CampaignWeatherRules {
+  /** 该战役可能出现的天气类型子集（缺省全部 5 类）。 */
+  possibleTypes?: Array<'clear' | 'rain' | 'storm' | 'fog' | 'snow'>
+  /** 新天气基准持续回合（缺省 2，实际 [baseDuration, baseDuration+2]）。 */
+  baseDuration?: number
+}
+
 // =============================================================================
 // 随机事件规则（rules.json.randomEvents，第 2 批）
 // =============================================================================
@@ -558,6 +574,21 @@ export interface CampaignRules {
    * 缺省时 orchestrator 按既有固定逻辑（每个 AI 阵营一套 chief/commander）兜底。
    */
   aiRoles?: AIRoleDef[]
+  /**
+   * 天气规则（T1-B，可选）。rollWeather 据此约束新天气类型池与持续时间。
+   * 缺省时全部 5 类天气可能出现，持续 [2,4] 回合。
+   */
+  weather?: CampaignWeatherRules
+  /**
+   * 溃退阈值（T1-D，可选）。checkRoutAndSurrender 据此判定单位是否溃退/投降。
+   * 缺省 { morale: 15, strength: 30 }。
+   */
+  routThreshold?: {
+    /** 士气低于此值 + strength 低于 strength 阈值 → 溃退。 */
+    morale?: number
+    /** strength 低于此值 + 士气低于 morale 阈值 → 溃退。 */
+    strength?: number
+  }
 }
 
 // =============================================================================

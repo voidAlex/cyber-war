@@ -143,6 +143,41 @@ describe('computeEffectiveDefense', () => {
     )
     expect(tired).toBeCloseTo(rested * HIGH_FATIGUE_DEFENSE_MULT, 5)
   })
+
+  // ===========================================================================
+  // T1-A：工事/战壕防御加成（unit.entrenchment + cell.fortificationLevel）
+  // ===========================================================================
+  it('T1-A：单位 entrenchment 每级 +0.15 防御', () => {
+    const cell = makeCell({ defenseBonus: 0, fortificationLevel: 0 })
+    const noTrench = makeUnit({ entrenchment: 0 })
+    const level3 = makeUnit({ entrenchment: 3 })
+    const base = computeEffectiveDefense(noTrench, cell)
+    const trenched = computeEffectiveDefense(level3, cell)
+    // 每级 +0.15 → 3 级应显著高于 0 级
+    expect(trenched).toBeGreaterThan(base)
+    // 量化：entrenchment 加成是 *(1 + 3*0.15) = *1.45
+    expect(trenched).toBeCloseTo(base * 1.45, 5)
+  })
+
+  it('T1-A：cell.fortificationLevel 每级 +0.1 防御', () => {
+    const plain = makeCell({ defenseBonus: 0, fortificationLevel: 0 })
+    const fortified = makeCell({ defenseBonus: 0, fortificationLevel: 3 })
+    const u = makeUnit({ entrenchment: 0 })
+    const base = computeEffectiveDefense(u, plain)
+    // cell.fortificationLevel 与 defenseBonus 叠加到同一个 (1+defBonus) 因子里，
+    // 但按计划设计应为独立加成：用 0 级 vs 3 级对比，3 级应更高。
+    expect(computeEffectiveDefense(u, fortified)).toBeGreaterThan(base)
+  })
+
+  it('T1-A：entrenchment 缺省（undefined）视为 0，不破坏旧存档', () => {
+    const cell = makeCell({ defenseBonus: 0 })
+    const uNoField = makeUnit() // 无 entrenchment 字段
+    const uExplicit0 = makeUnit({ entrenchment: 0 })
+    expect(computeEffectiveDefense(uNoField, cell)).toBeCloseTo(
+      computeEffectiveDefense(uExplicit0, cell),
+      5,
+    )
+  })
 })
 
 describe('resolveMovement', () => {

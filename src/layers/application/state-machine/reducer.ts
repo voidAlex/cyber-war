@@ -239,11 +239,15 @@ export function wegoReducer(
     case 'NEXT_TURN': {
       // idle → idle，turnIndex+1，清空本回合运行时；persistCompleted 守卫已过
       // 同时推进局内日期（ISO 日期 +1 天/回合；非 ISO 日期如 'D-0' 原样保留，不破坏旧存档）。
+      // T1-C：切换日夜循环（day→night→day），缺省视为 'day'（旧存档兼容）。
       const prevWorld = ctx.game.world
+      const prevTimeOfDay = prevWorld.timeOfDay ?? 'day'
+      const nextTimeOfDay = prevTimeOfDay === 'day' ? 'night' : 'day'
       const world: WorldState = {
         ...prevWorld,
         turnIndex: prevWorld.turnIndex + 1,
         inGameDate: advanceInGameDate(prevWorld.inGameDate),
+        timeOfDay: nextTimeOfDay,
       }
       const next: StateMachineContext = {
         ...ctx,

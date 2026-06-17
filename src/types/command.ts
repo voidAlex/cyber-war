@@ -28,8 +28,17 @@ import type { GridCoord } from './unit'
  * - hold：原地固守（不结算移动/交战）
  * - recon：主动侦察/间谍——对目标坐标或目标单位执行侦察，
  *   命中后刷新该方对其的情报等级（调 intelligence.refreshOnRecon）。
+ * - entrench：构筑工事/挖战壕（T1-A）——单位就地不动，entrenchment +1（封顶 3），
+ *   同步提升所在格 cell.fortificationLevel + morale +2（专注工事）；产出 'entrench' 事件。
+ *   每级 entrenchment 在战斗结算时给单位 +0.15 防御加成；cell.fortificationLevel 给 +0.1。
  */
-export type CommandIntent = 'move' | 'attack' | 'capture_node' | 'hold' | 'recon'
+export type CommandIntent =
+  | 'move'
+  | 'attack'
+  | 'capture_node'
+  | 'hold'
+  | 'recon'
+  | 'entrench'
 
 /**
  * 参谋长解析成功的结构化命令。

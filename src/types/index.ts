@@ -18,6 +18,10 @@ export type {
   WorldDiplomacyState,
   DirectorMemory,
   ResolutionSummary,
+  // T1-B：天气持续系统
+  WeatherType,
+  WeatherState,
+  WeatherModifiers,
 } from './world-state'
 
 // === 实体 ===

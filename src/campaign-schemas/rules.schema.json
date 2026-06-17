@@ -255,6 +255,46 @@
         "required": ["id", "triggerCondition", "label", "description", "options"],
         "additionalProperties": false
       }
+    },
+    "weather": {
+      "type": "object",
+      "description": "T1-B：天气规则。rollWeather 据此约束新天气类型池与持续时间。",
+      "properties": {
+        "possibleTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["clear", "rain", "storm", "fog", "snow"]
+          },
+          "minItems": 1
+        },
+        "baseDuration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "新天气基准持续回合（缺省 2，实际 [baseDuration, baseDuration+2]）。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "routThreshold": {
+      "type": "object",
+      "description": "T1-D：溃退判定阈值。checkRoutAndSurrender 据此判定单位是否溃退。",
+      "properties": {
+        "morale": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "士气低于此值 + strength 低于 strength 阈值 → 溃退。缺省 15。"
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "strength 低于此值 + 士气低于 morale 阈值 → 溃退。缺省 30。"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": ["intelDecay", "combat"],

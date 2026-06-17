@@ -28,6 +28,7 @@ import {
   resolveCapture,
   extractPayloadField,
   extractCoord,
+  checkRoutAndSurrender,
 } from '@/layers/domain/combat'
 import { refreshOnRecon } from '@/layers/domain/intelligence'
 import {
@@ -37,6 +38,7 @@ import {
   getCellAt,
   isAnnihilated,
   SEVERED_SUPPLY_MULTIPLIER,
+  NIGHT_MODIFIERS,
 } from '@/layers/domain/physics-rules'
 import {
   computeSupplyConnectivity,
@@ -179,6 +181,9 @@ export function simulateTurn(
       case 'hold':
         resolveHoldOrder(worldState, envelope, events, stateChanges, turn)
         break
+      case 'entrench':
+        resolveEntrenchOrder(worldState, envelope, events, stateChanges, turn)
+        break
       case 'recon':
         resolveReconOrder(worldState, envelope, rng, events, stateChanges, turn)
         break
@@ -198,15 +203,133 @@ export function simulateTurn(
 
   // 合并基线消耗到 stateChanges（不覆盖命令已产生的变更）
   for (const [unitId, baseline] of Object.entries(baselineUpdates)) {
+    // T1-A：cellUpdates 是单元格增量（非单位），单独合并到 stateChanges.cellUpdates。
+    if (unitId === 'cellUpdates') continue
     const existing = stateChanges.unitUpdates[unitId] ?? {}
     stateChanges.unitUpdates[unitId] = mergeBaseline(existing, baseline)
   }
+  // T1-A：合并 baseline 的 cellUpdates（废弃工事衰减）到 stateChanges.cellUpdates。
+  // 命令（entrench）已写入的 cell.fortificationLevel 优先（不被衰减覆盖）。
+  const baselineCellUpdates = baselineUpdates.cellUpdates
+  if (baselineCellUpdates) {
+    if (!stateChanges.cellUpdates) stateChanges.cellUpdates = {}
+    for (const [cellId, cellUpd] of Object.entries(baselineCellUpdates)) {
+      // 命令未触及该 cell 才写衰减；命令已写 fortificationLevel 则保留命令值
+      if (stateChanges.cellUpdates[cellId] === undefined) {
+        stateChanges.cellUpdates[cellId] = { ...cellUpd }
+      }
+    }
+  }
+
+  // T1-D：所有 intent 处理后，检查溃退/投降（基于结算后单位数值）。
+  // 构造一个"结算后视图"：worldState 的单位叠加 stateChanges 增量（ morale/strength/coord/status），
+  // 让 checkRoutAndSurrender 看到的是本回合战斗后的真实状态（如被攻击后 morale 跌破 15 → 溃退）。
+  // 歼灭单位（annihilated）已不在视图内（被过滤），不参与判定。
+  applyRoutAndSurrender(worldState, events, stateChanges, turn)
 
   return {
     turn,
     events,
     stateChanges,
     success: true,
+  }
+}
+
+/**
+ * T1-D：在 simulateTurn 末尾调用 checkRoutAndSurrender，产出 rout/surrender 事件并合并 stateChanges。
+ *
+ * 构造"结算后视图"：把 worldState.units 叠加 stateChanges.unitUpdates（数值字段），
+ * 过滤掉已歼灭单位，喂给 checkRoutAndSurrender。产出的 routs/surrenders：
+ * - routs：合并到 stateChanges.unitUpdates（coord/strength/status），push 'rout' 事件。
+ * - surrenders：合并到 stateChanges.unitUpdates（strength=0），加入 stateChanges.annihilated，
+ *   push 'surrender' 事件。
+ *
+ * 事件 sequence 段位 2600-2699（与 supply 2500-2998、director 3000+ 区分，保证 event id 唯一）。
+ */
+function applyRoutAndSurrender(
+  worldState: WorldState,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  // 构造结算后视图（叠加 stateChanges 增量 + 过滤歼灭单位）
+  const annihilatedSet = new Set(stateChanges.annihilated)
+  const postUnits: Unit[] = []
+  for (const unit of worldState.units) {
+    if (annihilatedSet.has(unit.id)) continue
+    const upd = stateChanges.unitUpdates[unit.id]
+    if (!upd) {
+      postUnits.push(unit)
+      continue
+    }
+    const merged: Unit = { ...unit }
+    if (upd.morale !== undefined) merged.morale = upd.morale
+    if (upd.strength !== undefined) merged.strength = upd.strength
+    if (upd.coord !== undefined) merged.coord = upd.coord
+    if (upd.status !== undefined) merged.status = upd.status
+    if (upd.fatigue !== undefined) merged.fatigue = upd.fatigue
+    if (upd.fuel !== undefined) merged.fuel = upd.fuel
+    if (upd.ammo !== undefined) merged.ammo = upd.ammo
+    postUnits.push(merged)
+  }
+  const postWorld: WorldState = { ...worldState, units: postUnits }
+
+  const result = checkRoutAndSurrender(postWorld)
+
+  // 溃退：合并到 stateChanges + push 'rout' 事件
+  let evtIndex = 0
+  for (const rout of result.routs) {
+    const existing = stateChanges.unitUpdates[rout.id] ?? {}
+    stateChanges.unitUpdates[rout.id] = {
+      ...existing,
+      coord: rout.coord,
+      strength: rout.strength,
+      status: rout.status,
+    }
+    const sequence = 2600 + evtIndex
+    evtIndex += 1
+    events.push({
+      id: `evt:${sequence}:rout:0`,
+      source: 'physics',
+      turn,
+      sequence,
+      kind: 'rout',
+      description: `${rout.id} 士气崩溃，向己方后方溃退`,
+      data: {
+        unitId: rout.id,
+        coord: rout.coord,
+        strengthAfter: rout.strength,
+        status: rout.status,
+      },
+    })
+  }
+
+  // 投降：合并到 stateChanges（strength=0）+ 加入 annihilated + push 'surrender' 事件
+  for (const sur of result.surrenders) {
+    const existing = stateChanges.unitUpdates[sur.id] ?? {}
+    stateChanges.unitUpdates[sur.id] = {
+      ...existing,
+      strength: 0,
+      status: sur.status,
+    }
+    if (!stateChanges.annihilated.includes(sur.id)) {
+      stateChanges.annihilated.push(sur.id)
+    }
+    const sequence = 2600 + evtIndex
+    evtIndex += 1
+    events.push({
+      id: `evt:${sequence}:surrender:0`,
+      source: 'physics',
+      turn,
+      sequence,
+      kind: 'surrender',
+      description: `${sur.id} 弹尽粮绝被包围，放下武器投降`,
+      data: {
+        unitId: sur.id,
+        strengthAfter: 0,
+        status: sur.status,
+      },
+    })
   }
 }
 
@@ -217,7 +340,9 @@ export function simulateTurn(
 /**
  * 归一化 intent 字符串到内部类别。
  */
-function normalizeIntent(intent: string): 'move' | 'attack' | 'capture' | 'resupply' | 'recon' | 'hold' | 'other' {
+function normalizeIntent(
+  intent: string,
+): 'move' | 'attack' | 'capture' | 'resupply' | 'recon' | 'hold' | 'entrench' | 'other' {
   const lower = intent.toLowerCase().trim()
   if (lower === 'move' || lower === 'movement' || lower === 'march' || lower === 'advance') {
     return 'move'
@@ -235,8 +360,23 @@ function normalizeIntent(intent: string): 'move' | 'attack' | 'capture' | 'resup
   if (lower === 'recon' || lower === 'reconnaissance' || lower === 'scout' || lower === 'spy' || lower === 'spot' || lower === 'probe') {
     return 'recon'
   }
+  // T1-A：entrench 单独归一（"构筑"/"挖战壕"/"设防"/"加固"/"entrench"/"dig in"/"fortify"）。
+  // 旧版 normalizeIntent 曾把 'entrench'/'dig_in' 误归到 hold；现拆出独立分支，
+  // 让 resolveEntrenchOrder 处理（entrenchment +1 + cell.fortificationLevel 提升）。
+  if (
+    lower === 'entrench' ||
+    lower === 'dig_in' ||
+    lower === 'dig-in' ||
+    lower === 'fortify' ||
+    lower === '构筑' ||
+    lower === '挖战壕' ||
+    lower === '设防' ||
+    lower === '加固'
+  ) {
+    return 'entrench'
+  }
   // Bug2 修复：hold/defend/stand/guard 等归一为 hold（原映射缺失，hold 命令落到 other → unsupported）。
-  if (lower === 'hold' || lower === 'defend' || lower === 'stand' || lower === 'guard' || lower === 'entrench' || lower === 'dig_in') {
+  if (lower === 'hold' || lower === 'defend' || lower === 'stand' || lower === 'guard') {
     return 'hold'
   }
   return 'other'
@@ -320,12 +460,23 @@ function resolveMoveOrder(
     rng,
   })
 
+  // T1-B/C：天气 + 日夜 modifier 放大燃料消耗。
+  // - weather.modifiers.movementCostMult（rain 1.5 / storm 2 / snow 2.5）。
+  // - timeOfDay==='night' 时再 ×NIGHT_MODIFIERS.fuelCostMult（1.2）。
+  // 仅放大成功/受阻的实际消耗（不变更 success 判定，避免天气让机动完全失败）。
+  const weatherMoveMult = worldState.weather?.modifiers?.movementCostMult ?? 1
+  const nightMoveMult =
+    worldState.timeOfDay === 'night' ? NIGHT_MODIFIERS.fuelCostMult : 1
+  const fuelCostMult = weatherMoveMult * nightMoveMult
+  const adjustedFuelCost =
+    fuelCostMult !== 1 ? Math.round(result.fuelCost * fuelCostMult) : result.fuelCost
+
   // 合并变更增量
   const existing = stateChanges.unitUpdates[unitId] ?? {}
   if (result.success) {
     stateChanges.unitUpdates[unitId] = {
       ...existing,
-      fuel: Math.max(0, unit.fuel - result.fuelCost),
+      fuel: Math.max(0, unit.fuel - adjustedFuelCost),
       fatigue: Math.min(100, unit.fatigue + result.fatigueGain),
       coord: targetCoord,
     }
@@ -342,22 +493,24 @@ function resolveMoveOrder(
         from: unit.coord,
         to: targetCoord,
         distance,
-        fuelCost: result.fuelCost,
+        fuelCost: adjustedFuelCost,
         fatigueGain: result.fatigueGain,
         terrain: targetCell.terrain,
+        weatherMoveMult,
+        nightMoveMult,
       },
     })
   } else {
-    // 受阻/燃料不足：仍扣部分燃料与疲劳
+    // 受阻/燃料不足：仍扣部分燃料与疲劳（按 modifier 放大）
     stateChanges.unitUpdates[unitId] = {
       ...existing,
-      fuel: Math.max(0, unit.fuel - result.fuelCost),
+      fuel: Math.max(0, unit.fuel - adjustedFuelCost),
       fatigue: Math.min(100, unit.fatigue + result.fatigueGain),
     }
     events.push(makeBlockadeEvent(envelope, turn, result.reason ?? '机动失败', {
       unitId,
       target: targetCoord,
-      fuelCost: result.fuelCost,
+      fuelCost: adjustedFuelCost,
       fatigueGain: result.fatigueGain,
     }))
   }
@@ -623,6 +776,97 @@ const HOLD_MORALE_RECOVERY = 2
 /** 固守回合疲劳恢复量（比机动省力）。 */
 const HOLD_FATIGUE_RECOVERY = 3
 
+// =============================================================================
+// T1-A：entrench（构筑工事/战壕）结算
+// =============================================================================
+
+/** 工事等级上限（entrenchment 与 cell.fortificationLevel 共用）。 */
+const ENTRENCHMENT_MAX_LEVEL = 3
+/** 构筑工事回合士气加成（专注工事、巩固防线）。 */
+const ENTRENCH_MORALE_GAIN = 2
+
+/**
+ * 结算构筑工事命令（entrench / dig_in / fortify / 构筑 / 挖战壕 / 设防 / 加固）。
+ *
+ * 语义（T1-A）：单位就地不动，专注构筑野战工事。
+ * - unit.entrenchment = min(3, current+1)（每回合 +1，封顶 3）。
+ * - cell.fortificationLevel = unit 新 entrenchment（同步提升该格工事等级，
+ *   单位离开后 cell 工事残留，applyBaselineToAll 末尾按无驻留衰减 -1）。
+ * - morale +2（专注工事、巩固防线，与 hold 的休整语义互补）。
+ * - 不写 coord（不移动）；不扣额外燃料/弹药（基线已扣）。
+ * - 产出 'entrench' 事件（kind='entrench'，记录前后 entrenchment/cell 工事等级）。
+ *
+ * 确定性：纯数值计算，无随机数。combat 结算时 computeEffectiveDefense 读取
+ * unit.entrenchment 与 cell.fortificationLevel 给防御加成（每级 +0.15/+0.1）。
+ */
+function resolveEntrenchOrder(
+  worldState: WorldState,
+  envelope: ActionEnvelope,
+  events: ResolutionEvent[],
+  stateChanges: CombatStateChanges,
+  turn: number,
+): void {
+  const unitId = extractPayloadField<string>(envelope, 'unitId')
+  if (!unitId) {
+    events.push(makeBlockadeEvent(envelope, turn, '缺少 unitId', {}))
+    return
+  }
+  const unit = getEffectiveUnit(worldState, stateChanges, unitId)
+  if (!unit) {
+    events.push(makeBlockadeEvent(envelope, turn, `单位 ${unitId} 不存在`, { unitId }))
+    return
+  }
+
+  // 取单位当前所在 cell（用于同步 cell.fortificationLevel）
+  const cell = getCellAt(worldState.map, unit.coord.col, unit.coord.row)
+
+  // entrenchment +1（封顶 3）；缺省视为 0
+  const beforeLevel = Math.max(0, unit.entrenchment ?? 0)
+  const afterLevel = Math.min(ENTRENCHMENT_MAX_LEVEL, beforeLevel + 1)
+
+  // morale +2（封顶 100）
+  const moraleAfter = Math.min(100, unit.morale + ENTRENCH_MORALE_GAIN)
+
+  // 合并单位变更（不写 coord —— 构筑工事不移动）
+  const existing = stateChanges.unitUpdates[unitId] ?? {}
+  stateChanges.unitUpdates[unitId] = {
+    ...existing,
+    entrenchment: afterLevel,
+    morale: moraleAfter,
+  }
+
+  // 同步 cell.fortificationLevel = 新 entrenchment（单位把工事留在该格）
+  if (cell) {
+    if (!stateChanges.cellUpdates) stateChanges.cellUpdates = {}
+    const existingCell = stateChanges.cellUpdates[cell.id] ?? {}
+    stateChanges.cellUpdates[cell.id] = {
+      ...existingCell,
+      fortificationLevel: afterLevel,
+    }
+  }
+
+  events.push({
+    id: `evt:${envelope.sequence}:entrench:0`,
+    source: 'physics',
+    turn,
+    sequence: envelope.sequence,
+    agentId: envelope.agentId,
+    kind: 'entrench',
+    description: `${unitId} 在 (${unit.coord.col},${unit.coord.row}) 构筑工事（等级 ${beforeLevel}→${afterLevel}）`,
+    data: {
+      unitId,
+      coord: { ...unit.coord },
+      entrenchmentBefore: beforeLevel,
+      entrenchmentAfter: afterLevel,
+      cellId: cell?.id ?? null,
+      fortificationLevel: afterLevel,
+      moraleBefore: unit.morale,
+      moraleAfter,
+      terrain: cell?.terrain ?? 'plain',
+    },
+  })
+}
+
 /**
  * 结算侦察命令（recon / scout）。
  *
@@ -728,8 +972,19 @@ function resolveReconOrder(
 
     // 获得的情报级别：recon 单位 +2，其他 +1，封顶 L3
     const gain = isProfessionalRecon ? 2 : 1
-    const gainedLevel = Math.min(3, curObs.level + gain) as IntelLevel
-    const refreshed = refreshOnRecon(curObs, turn, gainedLevel)
+    // T1-C：night 时 gainedLevel -1（夜间观测困难，最低 L0）。
+    // T1-B：天气 visibilityPenalty（负值）再降级 |penalty| level（fog -2 / storm -1 / snow -1）。
+    // 两者叠加，但 gainedLevel 下限为 max(0, curObs.level)（不降级到比当前更低，避免侦察反而降级情报）。
+    const nightPenalty = worldState.timeOfDay === 'night' ? NIGHT_MODIFIERS.reconLevelPenalty : 0
+    const weatherPenalty = Math.abs(worldState.weather?.modifiers?.visibilityPenalty ?? 0)
+    const totalPenalty = nightPenalty + weatherPenalty
+    const rawLevel = curObs.level + gain - totalPenalty
+    // 下限：不低于当前观测 level（侦察不应降级情报），且不低于 L0；上限封顶 L3
+    const finalLevel = Math.min(
+      3,
+      Math.max(curObs.level, Math.max(0, rawLevel)),
+    ) as IntelLevel
+    const refreshed = refreshOnRecon(curObs, turn, finalLevel)
 
     // 写入 stateChanges.unitUpdates[enemy.id].detection[observer]
     const existingUpd = stateChanges.unitUpdates[enemy.id] ?? {}
@@ -796,11 +1051,23 @@ function resolveReconOrder(
 const SEQUENCE_SUPPLY_BASE = 2500
 
 /**
- * applyBaselineToAll 返回结构（第 4 批扩展）。
+ * applyBaselineToAll 返回结构（第 4 批扩展 + T1-A 单元格增量）。
  */
 interface BaselineResult {
   /** 单位数值增量（fuel/ammo/fatigue/status/morale） */
-  updates: Record<string, Partial<{ fuel: number; ammo: number; fatigue: number; status: Unit['status']; morale: number }>>
+  updates: Record<
+    string,
+    Partial<{
+      fuel: number
+      ammo: number
+      fatigue: number
+      status: Unit['status']
+      morale: number
+    }>
+  > & {
+    /** T1-A：单元格增量（cellId → Partial<MapCell>，废弃工事衰减用）。 */
+    cellUpdates?: Record<string, Partial<import('@/types').MapCell>>
+  }
   /** 本回合产出的补给事件（supply_cut / supply_restored） */
   events: ResolutionEvent[]
 }
@@ -898,6 +1165,30 @@ function applyBaselineToAll(
         },
       })
     }
+  }
+
+  // T1-A：废弃工事衰减。遍历所有 cell，若 cell.fortificationLevel > 0 且该格无任何单位驻留
+  // → fortificationLevel -1（野战工事无人维护每回合衰减一级，最低 0）。
+  // 产出 cellUpdates 增量（不产事件——衰减是静默的基线效果，避免事件流噪音）。
+  // 注意：有单位驻留的格不衰减（单位在此格时工事被持续维护；单位离开后下一回合才衰减）。
+  const occupiedCells = new Set<string>()
+  for (const unit of worldState.units) {
+    if (isAnnihilated(unit)) continue
+    // 单位当前 coord 对应 cell.id（用 "col:row" 格式匹配 map.cells[].id 风格）
+    // map.cells 的 id 格式不统一（"col:row" 或 "cell-col-row"），用 col/row 直接匹配更稳：
+    occupiedCells.add(`${unit.coord.col}:${unit.coord.row}`)
+  }
+  for (const cell of worldState.map.cells) {
+    const level = Math.max(0, cell.fortificationLevel ?? 0)
+    if (level <= 0) continue
+    // 该格是否被任何单位占据（用 col/row 匹配，兼容多种 cell.id 格式）
+    const isOccupied = occupiedCells.has(`${cell.col}:${cell.row}`)
+    if (isOccupied) continue
+    // 无驻留 → 衰减 -1
+    if (!updates.cellUpdates) {
+      ;(updates as BaselineResult['updates']).cellUpdates = {}
+    }
+    updates.cellUpdates[cell.id] = { fortificationLevel: Math.max(0, level - 1) }
   }
 
   return { updates, events }

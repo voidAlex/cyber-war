@@ -433,8 +433,56 @@ function applyResolutionEvent(
       // （double-write 安全）；事件本身仅作叙事采信。
       break
     }
+    case 'entrench': {
+      // T1-A：构筑工事。从 event.data 重建 entrenchment/morale/cell.fortificationLevel 增量。
+      const unitId = String(evt.data.unitId ?? '')
+      const entrenchmentAfter = evt.data.entrenchmentAfter as number | undefined
+      const moraleAfter = evt.data.moraleAfter as number | undefined
+      const cellId = evt.data.cellId as string | null | undefined
+      const fortLevel = evt.data.fortificationLevel as number | undefined
+      if (unitId) {
+        const existing = stateChanges.unitUpdates[unitId] ?? {}
+        const upd: Record<string, unknown> = { ...existing }
+        if (entrenchmentAfter !== undefined) upd.entrenchment = entrenchmentAfter
+        if (moraleAfter !== undefined) upd.morale = moraleAfter
+        stateChanges.unitUpdates[unitId] = upd as typeof existing
+      }
+      if (cellId && fortLevel !== undefined) {
+        if (!stateChanges.cellUpdates) stateChanges.cellUpdates = {}
+        stateChanges.cellUpdates[cellId] = { fortificationLevel: fortLevel }
+      }
+      break
+    }
+    case 'rout': {
+      // T1-D：溃退。从 event.data 重建 coord/strength/status 增量。
+      const unitId = String(evt.data.unitId ?? '')
+      const coord = evt.data.coord as { col: number; row: number } | undefined
+      const strengthAfter = evt.data.strengthAfter as number | undefined
+      const status = evt.data.status as Unit['status'] | undefined
+      if (unitId) {
+        const existing = stateChanges.unitUpdates[unitId] ?? {}
+        const upd: Record<string, unknown> = { ...existing }
+        if (coord) upd.coord = coord
+        if (strengthAfter !== undefined) upd.strength = strengthAfter
+        if (status) upd.status = status
+        stateChanges.unitUpdates[unitId] = upd as typeof existing
+      }
+      break
+    }
+    case 'surrender': {
+      // T1-D：投降。strength=0 + 加入 annihilated（与 casualty 流程一致，单位移出沙盘）。
+      const unitId = String(evt.data.unitId ?? '')
+      if (unitId) {
+        const existing = stateChanges.unitUpdates[unitId] ?? {}
+        stateChanges.unitUpdates[unitId] = { ...existing, strength: 0 }
+        if (!stateChanges.annihilated.includes(unitId)) {
+          stateChanges.annihilated.push(unitId)
+        }
+      }
+      break
+    }
     default:
-      // casualty（衍生）/ blockade（失败占位）：不单独应用
+      // casualty（衍生）/ blockade（失败占位）/ hold（数值已在 data 采信，不单独应用）：不单独应用
       break
   }
 }

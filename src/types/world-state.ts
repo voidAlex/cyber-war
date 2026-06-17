@@ -136,6 +136,64 @@ export interface WorldState {
    * 旧存档（无此字段）视为 0。
    */
   objectivesHeldTurns?: Record<string, number>
+  /**
+   * 当前回合的天气状态（T1-B，可选）。
+   *
+   * turn-resolution 在物理结算前调 rollWeather 推进/变化天气，结果写入此字段。
+   * 物理引擎（physics.worker）读 weather.modifiers 影响机动/侦察/战斗。
+   * 旧存档（无此字段）视为 'clear'（晴天无 modifier），兼容回填。
+   */
+  weather?: WeatherState
+  /**
+   * 日夜循环（T1-C，缺省 'day'）。
+   *
+   * reducer NEXT_TURN 每回合切换 day→night→day。物理引擎读此字段：
+   * - night 时 recon 单位 gainedLevel -1（最低 L0），move fuelCost ×1.2，defender morale -5。
+   * - chief 解析"夜袭"时 night attack firepower +0.2（surpriseBonus）。
+   * 旧存档（无此字段）视为 'day'（兼容回填）。
+   */
+  timeOfDay?: 'day' | 'night'
+}
+
+/**
+ * 天气类型枚举（T1-B）。
+ *
+ * - clear：晴天（无 modifier）。
+ * - rain：雨（movementCostMult 1.5）。
+ * - storm：暴风雨（movementCostMult 2，visibilityPenalty -1，combatMod -0.1）。
+ * - fog：雾（visibilityPenalty -2，侦察范围骤降）。
+ * - snow：雪（movementCostMult 2.5，visibilityPenalty -1，combatMod -0.15）。
+ */
+export type WeatherType = 'clear' | 'rain' | 'storm' | 'fog' | 'snow'
+
+/**
+ * 天气对结算的 modifier 集合（T1-B）。
+ *
+ * - movementCostMult：机动消耗倍率（clear=1；rain=1.5；storm=2；snow=2.5）。
+ * - visibilityPenalty：可见度惩罚（负值，|penalty| 用于 intel level 降级，最低 L0）。
+ *   clear/rain=0；storm/snow=-1；fog=-2。
+ * - combatMod：火力倍率（clear=0=不变；storm=-0.1；snow=-0.15；其余 0）。
+ *   与现有 FIREPOWER_RATIO 叠加（按 (1+combatMod) 缩放）。
+ */
+export interface WeatherModifiers {
+  movementCostMult?: number
+  visibilityPenalty?: number
+  combatMod?: number
+}
+
+/**
+ * 当前天气状态（T1-B）。
+ *
+ * rollWeather 产出：remainingTurns>0 时延续当前 type；=0 时按 rng 随机新 type，持续 2-4 回合。
+ * modifiers 与 type 绑定（见 rollWeather 内的 WEATHER_MODIFIER_MAP）。
+ */
+export interface WeatherState {
+  /** 天气类型 */
+  type: WeatherType
+  /** 剩余持续回合数（>0 延续；=0 时下回合 rollWeather 切换） */
+  remainingTurns: number
+  /** 当前 type 对应的 modifier（与 type 绑定，避免各处重复映射） */
+  modifiers: WeatherModifiers
 }
 
 /**

@@ -54,6 +54,15 @@ export interface MapCell {
    * 不与 isObjective 互斥——既是补给源又是高价值节点完全可能（如凡尔登城）。
    */
   isSupplySource?: boolean
+  /**
+   * 单元格工事/野战工事等级（T1-A，0..3，缺省 0）。
+   *
+   * 由单位在此格执行 'entrench' 命令时提升（cell.fortificationLevel = unit.entrenchment）。
+   * 影响该格防御（computeEffectiveDefense：每级 +0.1）。
+   * 单位离开此格后，applyBaselineToAll 末尾若无单位驻留 → -1（废弃工事每回合衰减一级）。
+   * 旧存档缺省视为 0（兼容回填）。
+   */
+  fortificationLevel?: number
 }
 
 /**

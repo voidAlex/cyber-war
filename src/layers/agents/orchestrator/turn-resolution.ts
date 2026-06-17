@@ -50,6 +50,8 @@ import { generateTacticalDecision } from '@/layers/agents/roles/director'
 import { allocateSequences, SEQUENCE_BASE, makeSeed } from './sequence-allocator'
 import { ruleEngineFallback, type RuleEngineFallbackResult } from '@/layers/agents/director/rule-engine-fallback'
 import { rollRandomEvents } from '@/layers/domain/random-events'
+import { rollWeather } from '@/layers/domain/weather'
+import { DeterministicRandom } from '@/layers/domain/deterministic-random'
 import { logger } from '@/utils/logger'
 
 // =============================================================================
@@ -218,9 +220,30 @@ export async function orchestrateTurnResolution(
   const playerFactionId = params.playerFactionId ?? resolvePlayerFactionId(worldState)
   // 所有 envelope（最终按 sequence 升序输出）
   const allEnvelopes: ActionEnvelope[] = []
+  // 战役规则（提前声明，T1-B 天气推进与第 2 批随机事件共用）
+  const campaignRules = params.campaignRules
 
   // 存档级日志上下文（saveId/turn），便于排查特定存档/回合
   const logCtx = { scope: 'save' as const, saveId: worldState.saveId, turn }
+
+  // -------------------------------------------------------------------------
+  // 步骤0.5：T1-B 天气推进（物理结算前）
+  // -------------------------------------------------------------------------
+  // rollWeather 推进/变化当前天气，结果写入 worldState.weather，供物理引擎读 modifier。
+  // 确定性：用 DeterministicRandom.fromSequence(scenarioSeed, turn, 9998)（与随机事件 9999 错开）。
+  // 不伪造：新天气类型来自 rules.weather.possibleTypes 池（缺省全部 5 类）。
+  const weatherRng = DeterministicRandom.fromSequence(scenarioSeed, turn, 9998)
+  const prevWeather = worldState.weather
+  const newWeather = rollWeather(prevWeather, turn, weatherRng, campaignRules?.weather)
+  if (newWeather !== prevWeather) {
+    worldState = { ...worldState, weather: newWeather }
+    logger.info('orch/resolve/weather', '天气推进', {
+      ...logCtx,
+      prev: prevWeather?.type ?? null,
+      next: newWeather.type,
+      remainingTurns: newWeather.remainingTurns,
+    })
+  }
 
   // -------------------------------------------------------------------------
   // 步骤1：物理引擎先算 rawResults（确定性）
@@ -250,7 +273,6 @@ export async function orchestrateTurnResolution(
   // 确定性：rollRandomEvents 用 DeterministicRandom.fromSequence(scenarioSeed, turn, 9999)。
   // 不伪造：援军单位来自战役包 rules.randomEvents[].reinforcementUnits 定义。
   // 复用覆写链路：事件 effects 已是 DirectorOverride[]，由导演部在 adjudicate 中应用 + 叙事。
-  const campaignRules = params.campaignRules
   let randomEvents: import('@/types').RandomEvent[] = []
   if (campaignRules?.randomEvents && campaignRules.randomEvents.length > 0) {
     const roll = rollRandomEvents(worldState, turn, campaignRules, scenarioSeed)

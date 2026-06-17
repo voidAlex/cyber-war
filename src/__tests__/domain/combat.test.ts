@@ -8,7 +8,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { DeterministicRandom } from '@/layers/domain/deterministic-random'
-import { resolveEngagement, resolveCapture } from '@/layers/domain/combat'
+import {
+  resolveEngagement,
+  resolveCapture,
+  checkRoutAndSurrender,
+} from '@/layers/domain/combat'
 import { checkVictory } from '@/layers/domain/victory'
 import type { WorldState, Unit, MapCell } from '@/types'
 
@@ -273,5 +277,157 @@ describe('checkVictory', () => {
       conditions: [{ factionId: 'blue', kind: 'turnLimit', target: 30 }],
     })
     expect(result.decided).toBe(false)
+  })
+})
+
+// =============================================================================
+// T1-D：checkRoutAndSurrender（溃退/投降判定）
+// =============================================================================
+describe('checkRoutAndSurrender（T1-D）', () => {
+  /** 构造 3x3 地图，(0,0) 为蓝方补给源（溃退方向） */
+  function makeWorld3x3(units: Unit[]): WorldState {
+    const cells: MapCell[] = []
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 3; col++) {
+        cells.push(
+          makeCell({
+            id: `${col}:${row}`,
+            col,
+            row,
+            isSupplySource: col === 0 && row === 0,
+          }),
+        )
+      }
+    }
+    return {
+      saveId: 's',
+      playerFactionId: '',
+      scenarioId: 'sc',
+      scenarioSeed: 'sc:s',
+      turnIndex: 1,
+      inGameDate: 'D-1',
+      factions: [],
+      units,
+      map: {
+        gridType: 'square',
+        cols: 3,
+        rows: 3,
+        cells,
+        highValueNodes: [],
+      },
+      intel: { decayRule: { halfLifeTurns: 3, decayPerHalfLife: 1 }, reconHits: [] },
+      diplomacy: { events: [], pendingDefectionCheck: false },
+      directorMemory: { keyEvents: {}, overrides: [] },
+      pendingOrders: [],
+      lockedOrders: {},
+      lastResolution: null,
+      contextSummaries: {},
+    }
+  }
+
+  it('morale<15 且 strength<30 → 溃退：strength-10 + status routed + 向己方补给源移 1 格', () => {
+    // 蓝方单位在 (2,2)，蓝方补给源在 (0,0)。溃退应朝 (0,0) 移一步 → (1,2) 或 (2,1)
+    const world = makeWorld3x3([
+      makeUnit({
+        id: 'broken',
+        factionId: 'blue',
+        coord: { col: 2, row: 2 },
+        morale: 10,
+        strength: 20,
+      }),
+    ])
+    const result = checkRoutAndSurrender(world)
+    expect(result.routs).toHaveLength(1)
+    const rout = result.routs[0]
+    expect(rout.id).toBe('broken')
+    expect(rout.strength).toBe(10) // 20 - 10
+    expect(rout.status).toContain('routed')
+    // 新坐标朝 (0,0) 方向移一格（曼哈顿距离减少 1）
+    expect(rout.coord).toBeDefined()
+    const newCoord = rout.coord!
+    const oldDist = Math.abs(2 - 0) + Math.abs(2 - 0) // 4
+    const newDist = Math.abs(newCoord.col - 0) + Math.abs(newCoord.row - 0)
+    expect(newDist).toBe(oldDist - 1)
+    // 不应投降
+    expect(result.surrenders).toHaveLength(0)
+  })
+
+  it('morale≥15 或 strength≥30 → 不溃退', () => {
+    const world = makeWorld3x3([
+      makeUnit({
+        id: 'ok1',
+        factionId: 'blue',
+        coord: { col: 2, row: 2 },
+        morale: 20,
+        strength: 20, // morale 达标，不溃退
+      }),
+      makeUnit({
+        id: 'ok2',
+        factionId: 'blue',
+        coord: { col: 1, row: 1 },
+        morale: 10,
+        strength: 50, // strength 达标，不溃退
+      }),
+    ])
+    const result = checkRoutAndSurrender(world)
+    expect(result.routs).toHaveLength(0)
+    expect(result.surrenders).toHaveLength(0)
+  })
+
+  it('morale<5 且所有邻格被敌方包围 → 投降：strength=0 + status destroyed', () => {
+    // 蓝方单位在 (1,1) 被红方四邻格包围（(0,1)(2,1)(1,0)(1,2)）
+    const world = makeWorld3x3([
+      makeUnit({
+        id: 'doomed',
+        factionId: 'blue',
+        coord: { col: 1, row: 1 },
+        morale: 3,
+        strength: 20,
+      }),
+      makeUnit({ id: 'e1', factionId: 'red', coord: { col: 0, row: 1 } }),
+      makeUnit({ id: 'e2', factionId: 'red', coord: { col: 2, row: 1 } }),
+      makeUnit({ id: 'e3', factionId: 'red', coord: { col: 1, row: 0 } }),
+      makeUnit({ id: 'e4', factionId: 'red', coord: { col: 1, row: 2 } }),
+    ])
+    const result = checkRoutAndSurrender(world)
+    expect(result.surrenders).toHaveLength(1)
+    const sur = result.surrenders[0]
+    expect(sur.id).toBe('doomed')
+    expect(sur.strength).toBe(0)
+  })
+
+  it('morale<5 但有邻格无敌方 → 不投降（可溃退）', () => {
+    // 蓝方单位在 (1,1)，仅 2 个邻格有敌方（未完全包围）→ 不投降，但 morale<15+strength<30 → 溃退
+    const world = makeWorld3x3([
+      makeUnit({
+        id: 'partial',
+        factionId: 'blue',
+        coord: { col: 1, row: 1 },
+        morale: 3,
+        strength: 20,
+      }),
+      makeUnit({ id: 'e1', factionId: 'red', coord: { col: 0, row: 1 } }),
+      // (2,1)(1,0)(1,2) 无敌方 → 未完全包围
+    ])
+    const result = checkRoutAndSurrender(world)
+    expect(result.surrenders).toHaveLength(0)
+    // 溃退条件满足（morale<15 且 strength<30）→ 溃退
+    expect(result.routs).toHaveLength(1)
+  })
+
+  it('阈值可配：rules.routThreshold={morale:30,strength:50} 提高溃退门槛', () => {
+    const world = makeWorld3x3([
+      makeUnit({
+        id: 'u',
+        factionId: 'blue',
+        coord: { col: 2, row: 2 },
+        morale: 25,
+        strength: 40, // 默认阈值不溃退，但提高阈值后溃退
+      }),
+    ])
+    const result = checkRoutAndSurrender(world, {
+      routThreshold: { morale: 30, strength: 50 },
+    })
+    expect(result.routs).toHaveLength(1)
   })
 })

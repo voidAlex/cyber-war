@@ -82,7 +82,7 @@ export const CHIEF_OUTPUT_SCHEMA = {
           /** 命令意图（move/attack/capture_node/hold） */
           intent: {
             type: 'string',
-            enum: ['move', 'attack', 'capture_node', 'hold'],
+            enum: ['move', 'attack', 'capture_node', 'hold', 'recon', 'entrench'],
           },
           /** 执行单位 id（来自真实 WorldState.units，绝不伪造） */
           unitIds: {
@@ -115,7 +115,7 @@ export const CHIEF_OUTPUT_SCHEMA = {
 
 /** 参谋长输出 TS 类型（与 schema 对齐） */
 export interface ChiefCandidateCommand {
-  intent: 'move' | 'attack' | 'capture_node' | 'hold'
+  intent: 'move' | 'attack' | 'capture_node' | 'hold' | 'recon' | 'entrench'
   unitIds: string[]
   targetCoord?: { col: number; row: number }
   targetUnitId?: string
@@ -152,7 +152,7 @@ export const THEATER_OUTPUT_SCHEMA = {
           unitId: { type: 'string', minLength: 1 },
           intent: {
             type: 'string',
-            enum: ['move', 'attack', 'capture_node', 'hold'],
+            enum: ['move', 'attack', 'capture_node', 'hold', 'recon', 'entrench'],
           },
           targetCoord: { $ref: '#/$defs/coord' },
           targetUnitId: { type: 'string', minLength: 1 },
@@ -174,7 +174,7 @@ export const THEATER_OUTPUT_SCHEMA = {
 export interface TheaterUnitAction {
   sourceCandidateIndex?: number
   unitId: string
-  intent: 'move' | 'attack' | 'capture_node' | 'hold'
+  intent: 'move' | 'attack' | 'capture_node' | 'hold' | 'recon' | 'entrench'
   targetCoord?: { col: number; row: number }
   targetUnitId?: string
   nodeId?: string
@@ -205,7 +205,7 @@ export const COMMANDER_OUTPUT_SCHEMA = {
           unitId: { type: 'string', minLength: 1 },
           intent: {
             type: 'string',
-            enum: ['move', 'attack', 'capture_node', 'hold'],
+            enum: ['move', 'attack', 'capture_node', 'hold', 'recon', 'entrench'],
           },
           targetCoord: { $ref: '#/$defs/coord' },
           targetUnitId: { type: 'string', minLength: 1 },
@@ -228,7 +228,7 @@ export const COMMANDER_OUTPUT_SCHEMA = {
 /** 敌/盟统帅输出 TS 类型 */
 export interface CommanderDecision {
   unitId: string
-  intent: 'move' | 'attack' | 'capture_node' | 'hold'
+  intent: 'move' | 'attack' | 'capture_node' | 'hold' | 'recon' | 'entrench'
   targetCoord?: { col: number; row: number }
   targetUnitId?: string
   nodeId?: string

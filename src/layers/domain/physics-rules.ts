@@ -68,6 +68,70 @@ export const DEFENSE_MULT_BY_TYPE: Record<UnitType, number> = {
 export const FORTRESS_UNIT_DEFENSE_BONUS = 1.0
 
 // ============================================================================
+// T1-A：工事/战壕防御加成常量
+// ============================================================================
+
+/**
+ * 单位 entrenchment（战壕等级）每级防御加成（T1-A）。
+ *
+ * computeEffectiveDefense 把 unit.entrenchment * ENTRENCHMENT_DEFENSE_PER_LEVEL
+ * 作为独立乘法因子叠加（与地形 defenseBonus、要塞单位加成并列）。
+ * 缺省 0 级无加成（兼容旧存档）。
+ */
+export const ENTRENCHMENT_DEFENSE_PER_LEVEL = 0.15
+
+/**
+ * 单元格 fortificationLevel（野战工事等级）每级防御加成（T1-A）。
+ *
+ * 与单位自身 entrenchment 区分：cell.fortificationLevel 是单位离开后
+ * 仍残留在该格的工事（每回合 -1 衰减），任何单位进入此格都能吃到。
+ * computeEffectiveDefense 把 cell.fortificationLevel * FORTIFICATION_CELL_DEFENSE_PER_LEVEL
+ * 作为独立乘法因子叠加。
+ */
+export const FORTIFICATION_CELL_DEFENSE_PER_LEVEL = 0.1
+
+// ============================================================================
+// T1-C：日夜循环 modifier 常量（night 时生效）
+// ============================================================================
+
+/**
+ * 夜战 modifier（T1-C，world.timeOfDay === 'night' 时生效）。
+ *
+ * - reconLevelPenalty：侦察获得的 intel level -1（最低 L0），体现夜间观测困难。
+ * - fuelCostMult：机动燃料消耗倍率（夜行军困难，1.2）。
+ * - attackMoralePenalty：被攻击方士气惩罚（夜间防御心理压力大，-5）。
+ * - surpriseBonus：夜袭火力加成（chief 解析"夜袭"时，攻方 firepower +0.2 倍率）。
+ *
+ * physics.worker 在 resolveReconOrder/resolveMovementOrder/resolveAttackOrder 中
+ * 读 world.timeOfDay 应用对应 modifier。
+ */
+export const NIGHT_MODIFIERS = {
+  /** 侦察 intel level 降级（night 时 gainedLevel -1，最低 L0）。 */
+  reconLevelPenalty: 1,
+  /** 夜行军燃料消耗倍率。 */
+  fuelCostMult: 1.2,
+  /** 夜间被攻击方士气惩罚（负值，defender.morale + 此值）。 */
+  attackMoralePenalty: -5,
+  /** 夜袭火力加成倍率（攻方 firepower * (1 + surpriseBonus)）。 */
+  surpriseBonus: 0.2,
+} as const
+
+// ============================================================================
+// T1-D：溃退/投降默认阈值
+// ============================================================================
+
+/**
+ * 溃退判定默认阈值（T1-D，rules.routThreshold 可覆盖）。
+ *
+ * - morale < ROUT_DEFAULT_MORALE_THRESHOLD（15）且 strength < ROUT_DEFAULT_STRENGTH_THRESHOLD（30）
+ *   → 单位溃退（向己方补给源方向移 1 格 + status 'routed'）。
+ * - morale < SURRENDER_DEFAULT_MORALE_THRESHOLD（5）且所有邻格被敌方包围 → 投降。
+ */
+export const ROUT_DEFAULT_MORALE_THRESHOLD = 15
+export const ROUT_DEFAULT_STRENGTH_THRESHOLD = 30
+export const SURRENDER_DEFAULT_MORALE_THRESHOLD = 5
+
+// ============================================================================
 // 第 5 批：装备配置 + 陆海空导弹特殊结算常量
 // ============================================================================
 
@@ -398,6 +462,10 @@ export function computeEffectiveFirepower(unit: Unit): number {
  * 第 5 批：attackerType 参数——当攻方为 air（空军跨格打击）时，
  * 守方地形防御加成（cell.defenseBonus）被忽略（野战工事挡不住空袭）。
  *
+ * T1-A：单位 entrenchment（战壕）每级 +0.15 独立乘法因子；cell.fortificationLevel
+ * （野战工事）每级 +0.1 独立乘法因子。两者叠加（既挖战壕又驻守旧工事时双重加成）。
+ * 缺省（undefined）视为 0（兼容旧存档）。
+ *
  * @param unit 守方单位
  * @param cell 守方所在单元
  * @param attackerType 攻方单位类型（可选；air 时忽略地形防御）
@@ -416,6 +484,16 @@ export function computeEffectiveDefense(
   // 要塞类型单位额外加成
   if (unit.type === 'fortress') {
     def *= 1 + FORTRESS_UNIT_DEFENSE_BONUS
+  }
+  // T1-A：单位自身战壕等级（entrenchment）防御加成
+  const entrenchLevel = Math.max(0, unit.entrenchment ?? 0)
+  if (entrenchLevel > 0) {
+    def *= 1 + entrenchLevel * ENTRENCHMENT_DEFENSE_PER_LEVEL
+  }
+  // T1-A：单元格野战工事等级（fortificationLevel）防御加成（任何单位进入此格都吃到）
+  const fortLevel = Math.max(0, cell.fortificationLevel ?? 0)
+  if (fortLevel > 0) {
+    def *= 1 + fortLevel * FORTIFICATION_CELL_DEFENSE_PER_LEVEL
   }
   // 高疲劳削弱防御
   if (unit.fatigue > HIGH_FATIGUE_THRESHOLD) {

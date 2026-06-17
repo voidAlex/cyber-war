@@ -616,3 +616,255 @@ describe('simulateTurn Bug2：hold 物理结算', () => {
     expect(holdEvt?.source).toBe('physics')
   })
 })
+
+// =============================================================================
+// T1-A：entrench（构筑工事/战壕）物理结算
+// =============================================================================
+describe('simulateTurn T1-A：entrench 物理结算', () => {
+  it('entrench 命令产出 entrench 事件，单位 entrenchment +1（封顶 3），cell.fortificationLevel 提升', () => {
+    const world = makeWorld([
+      makeUnit({
+        id: 'engineer',
+        factionId: 'blue',
+        coord: { col: 0, row: 0 },
+        morale: 50,
+        fatigue: 10,
+        entrenchment: 0,
+      }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        intent: 'entrench',
+        payload: { unitId: 'engineer' },
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+
+    // 产出 entrench 事件
+    const entrenchEvt = result.events.find((e) => e.kind === 'entrench')
+    expect(entrenchEvt).toBeDefined()
+    expect(entrenchEvt?.source).toBe('physics')
+
+    // 单位 entrenchment 0 → 1，morale +2（专注工事）
+    const upd = result.stateChanges.unitUpdates['engineer']
+    expect(upd?.entrenchment).toBe(1)
+    expect(upd?.morale).toBe(52) // 50 + 2
+    // 单位不移动（coord 不写）
+    expect(upd?.coord).toBeUndefined()
+
+    // cell.fortificationLevel 提升到 entrenchment（1）
+    const cellUpd = result.stateChanges.cellUpdates?.['0:0']
+    expect(cellUpd?.fortificationLevel).toBe(1)
+  })
+
+  it('entrench 命令在 entrenchment=3 时封顶，不再 +1', () => {
+    const world = makeWorld([
+      makeUnit({
+        id: 'engineer',
+        factionId: 'blue',
+        coord: { col: 0, row: 0 },
+        morale: 50,
+        entrenchment: 3,
+      }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        intent: 'entrench',
+        payload: { unitId: 'engineer' },
+      }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+    const upd = result.stateChanges.unitUpdates['engineer']
+    expect(upd?.entrenchment).toBe(3) // 封顶
+    const cellUpd = result.stateChanges.cellUpdates?.['0:0']
+    expect(cellUpd?.fortificationLevel).toBe(3)
+  })
+
+  it('entrench 缺 unitId → blockade「缺少 unitId」', () => {
+    const world = makeWorld([])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({ sequence: 1001, intent: 'entrench', payload: {} }),
+    ]
+    const result = simulateTurn(world, orders, 's', 1)
+    const blockade = result.events.find((e) => e.kind === 'blockade')
+    expect(blockade).toBeDefined()
+    expect((blockade!.data as { reason: string }).reason).toBe('缺少 unitId')
+  })
+
+  it('applyBaselineToAll 末尾：cell.fortificationLevel>0 且无单位驻留 → -1 衰减', () => {
+    // 构造一个无人驻留但 fortificationLevel=2 的 cell，验证结算后衰减为 1
+    const world = makeWorld([
+      makeUnit({
+        id: 'lonewolf',
+        factionId: 'blue',
+        coord: { col: 1, row: 0 }, // 单位在 (1,0)
+      }),
+    ])
+    // (0,0) cell 有 fortificationLevel=2 但无人驻留 → 衰减为 1
+    world.map.cells[0] = makeCell({
+      id: '0:0',
+      col: 0,
+      row: 0,
+      movementCost: 1,
+      defenseBonus: 0,
+      fortificationLevel: 2,
+    })
+    const orders: ActionEnvelope[] = [] // 空命令，仅触发基线
+    const result = simulateTurn(world, orders, 's', 1)
+    const cellUpd = result.stateChanges.cellUpdates?.['0:0']
+    expect(cellUpd?.fortificationLevel).toBe(1) // 2 - 1
+  })
+
+  it('entrench 确定性：相同输入两次结算 → 相同 entrench 增量', () => {
+    const world = makeWorld([
+      makeUnit({ id: 'u', factionId: 'blue', coord: { col: 0, row: 0 }, entrenchment: 1 }),
+    ])
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        intent: 'entrench',
+        payload: { unitId: 'u' },
+      }),
+    ]
+    const r1 = simulateTurn(world, orders, 's', 1)
+    const r2 = simulateTurn(world, orders, 's', 1)
+    expect(r1).toEqual(r2)
+  })
+})
+
+// =============================================================================
+// T1-B/C：天气与日夜 modifier 接线（physics.worker 读 world.weather/timeOfDay）
+// =============================================================================
+describe('simulateTurn T1-B/C：天气/日夜 modifier', () => {
+  it('T1-B：rain 天气 movementCostMult 1.5 → 移动燃料消耗 ×1.5', () => {
+    const worldRain = makeWorld([
+      makeUnit({ id: 'mover', factionId: 'blue', coord: { col: 0, row: 0 }, fuel: 100 }),
+    ])
+    worldRain.weather = {
+      type: 'rain',
+      remainingTurns: 2,
+      modifiers: { movementCostMult: 1.5, visibilityPenalty: 0, combatMod: 0 },
+    }
+    const worldClear = makeWorld([
+      makeUnit({ id: 'mover', factionId: 'blue', coord: { col: 0, row: 0 }, fuel: 100 }),
+    ])
+    worldClear.weather = {
+      type: 'clear',
+      remainingTurns: 2,
+      modifiers: { movementCostMult: 1, visibilityPenalty: 0, combatMod: 0 },
+    }
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        intent: 'move',
+        payload: { unitId: 'mover', target: { col: 1, row: 0 } },
+      }),
+    ]
+    const rRain = simulateTurn(worldRain, orders, 's', 1)
+    const rClear = simulateTurn(worldClear, orders, 's', 1)
+    const rainFuelCost = (rRain.events.find((e) => e.kind === 'movement')?.data as {
+      fuelCost?: number
+    })?.fuelCost
+    const clearFuelCost = (rClear.events.find((e) => e.kind === 'movement')?.data as {
+      fuelCost?: number
+    })?.fuelCost
+    expect(rainFuelCost).toBeDefined()
+    expect(clearFuelCost).toBeDefined()
+    expect(rainFuelCost).toBeGreaterThan(clearFuelCost!)
+  })
+
+  it('T1-C：night 时 recon gainedLevel -1（最低 L0）', () => {
+    // 蓝方侦察单位在 (0,0)，红方单位在 (1,0)。night 时 recon 应降级。
+    const worldDay = makeWorld([
+      makeUnit({ id: 'scout', factionId: 'blue', type: 'recon', coord: { col: 0, row: 0 } }),
+      makeUnit({ id: 'enemy', factionId: 'red', coord: { col: 1, row: 0 } }),
+    ])
+    worldDay.timeOfDay = 'day'
+    const worldNight = makeWorld([
+      makeUnit({ id: 'scout', factionId: 'blue', type: 'recon', coord: { col: 0, row: 0 } }),
+      makeUnit({ id: 'enemy', factionId: 'red', coord: { col: 1, row: 0 } }),
+    ])
+    worldNight.timeOfDay = 'night'
+    const orders: ActionEnvelope[] = [
+      makeEnvelope({
+        sequence: 1001,
+        intent: 'recon',
+        payload: { unitId: 'scout', target: { col: 1, row: 0 } },
+      }),
+    ]
+    const rDay = simulateTurn(worldDay, orders, 's', 1)
+    const rNight = simulateTurn(worldNight, orders, 's', 1)
+    // day：recon 单位 gainedLevel = curObs(0) + 2 = 2（封顶 L3）
+    // night：gainedLevel -1 = 1
+    const dayEvt = rDay.events.find((e) => e.kind === 'recon')
+    const nightEvt = rNight.events.find((e) => e.kind === 'recon')
+    const dayLevels = (dayEvt?.data as { levelsGained?: Array<{ afterLevel: number }> })
+      ?.levelsGained
+    const nightLevels = (nightEvt?.data as { levelsGained?: Array<{ afterLevel: number }> })
+      ?.levelsGained
+    expect(dayLevels?.[0]?.afterLevel).toBe(2)
+    expect(nightLevels?.[0]?.afterLevel).toBe(1) // night -1
+  })
+})
+
+// =============================================================================
+// T1-D：checkRoutAndSurrender 接线（simulateTurn 末尾调用）
+// =============================================================================
+describe('simulateTurn T1-D：溃退/投降接线', () => {
+  it('低 morale 单位在 simulateTurn 末尾触发溃退事件', () => {
+    // 3x3 地图，蓝方单位在 (1,1) morale=10 strength=20，蓝方补给源在 (0,0)
+    const cells: MapCell[] = []
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 3; col++) {
+        cells.push(
+          makeCell({
+            id: `${col}:${row}`,
+            col,
+            row,
+            isSupplySource: col === 0 && row === 0,
+          }),
+        )
+      }
+    }
+    const world: WorldState = {
+      saveId: 's',
+      playerFactionId: '',
+      scenarioId: 'sc',
+      scenarioSeed: 'sc:s',
+      turnIndex: 1,
+      inGameDate: 'D-1',
+      factions: [],
+      units: [
+        makeUnit({
+          id: 'broken',
+          factionId: 'blue',
+          coord: { col: 1, row: 1 },
+          morale: 10,
+          strength: 20,
+        }),
+      ],
+      map: {
+        gridType: 'square',
+        cols: 3,
+        rows: 3,
+        cells,
+        highValueNodes: [],
+      },
+      intel: { decayRule: { halfLifeTurns: 3, decayPerHalfLife: 1 }, reconHits: [] },
+      diplomacy: { events: [], pendingDefectionCheck: false },
+      directorMemory: { keyEvents: {}, overrides: [] },
+      pendingOrders: [],
+      lockedOrders: {},
+      lastResolution: null,
+      contextSummaries: {},
+    }
+    const result = simulateTurn(world, [], 's', 1)
+    const routEvt = result.events.find((e) => e.kind === 'rout')
+    expect(routEvt).toBeDefined()
+    const routUpd = result.stateChanges.unitUpdates['broken']
+    expect(routUpd?.status).toContain('routed')
+    expect(routUpd?.strength).toBe(10) // 20 - 10
+  })
+})

@@ -21,12 +21,16 @@ import type {
   GridCoord,
   MapCell,
   IntelObservation,
+  CampaignRules,
 } from '@/types'
 import type { DeterministicRandom } from './deterministic-random'
 import {
   resolveDamage,
   getCellAt,
   computeMoraleLoss,
+  ROUT_DEFAULT_MORALE_THRESHOLD,
+  ROUT_DEFAULT_STRENGTH_THRESHOLD,
+  SURRENDER_DEFAULT_MORALE_THRESHOLD,
 } from './physics-rules'
 
 // ============================================================================
@@ -49,6 +53,9 @@ export type ResolutionEventKind =
   | 'supply_cut' // 第 4 批：单位补给本回合被切断（上回合连通→本回合切断）
   | 'supply_restored' // 第 4 批：单位补给本回合恢复（上回合切断→本回合连通）
   | 'supply_blocked' // 第 4 批：resupply 命令因不连通被拒绝（不 +25）
+  | 'entrench' // T1-A：单位构筑工事（entrenchment+1，cell.fortificationLevel 提升，morale+2）
+  | 'rout' // T1-D：单位溃退（morale<15 且 strength<30 → 向己方补给源方向移 1 格 + status 'routed'）
+  | 'surrender' // T1-D：单位投降（morale<5 且被敌方包围 → strength=0 + status 'destroyed'）
 
 /**
  * 物理层结算事件（event-log 一条目级产物）。
@@ -121,6 +128,15 @@ export interface CombatStateChanges {
    * 每条 = 一次（observerFactionId, unitId）侦察刷新，turn 由结算回合填充。
    */
   intelReconHits?: Array<{ observerFactionId: string; unitId: string }>
+  /**
+   * T1-A：单元格级增量更新（key=cellId，value=部分 MapCell 字段）。
+   *
+   * 用于 entrench 命令提升 cell.fortificationLevel，以及 applyBaselineToAll
+   * 末尾对无单位驻留格的废弃工事衰减（fortificationLevel -1）。
+   * applyResolutionStateChanges 把这些变更落到 world.map.cells 对应单元。
+   * 旧路径（无 cellUpdates）视为无单元格变更（兼容）。
+   */
+  cellUpdates?: Record<string, Partial<MapCell>>
 }
 
 // ============================================================================
@@ -514,9 +530,11 @@ export function applyResolutionStateChanges(
   const hasAnnihilated = stateChanges.annihilated.length > 0
   const reconHits = stateChanges.intelReconHits ?? []
   const hasReconHits = reconHits.length > 0
-
+  // T1-A：单元格级增量（entrench 提升工事 / 废弃工事衰减）
+  const cellUpdateIds = Object.keys(stateChanges.cellUpdates ?? {})
+  const hasCellUpdates = cellUpdateIds.length > 0
   // 无任何变更：直接返回原 world（避免无谓深拷贝）
-  if (!hasNumericChanges && !hasAnnihilated && !hasReconHits) {
+  if (!hasNumericChanges && !hasAnnihilated && !hasReconHits && !hasCellUpdates) {
     return world
   }
 
@@ -582,8 +600,8 @@ export function applyResolutionStateChanges(
     unitsChanged = true
   }
 
-  // 无实际单位变更且无 reconHits：返回原 world（数值/detection 增量可能为空对象）
-  if (!unitsChanged && !hasReconHits) {
+  // 无实际单位变更且无 reconHits 且无单元格变更：返回原 world（数值/detection 增量可能为空对象）
+  if (!unitsChanged && !hasReconHits && !hasCellUpdates) {
     return world
   }
 
@@ -594,12 +612,237 @@ export function applyResolutionStateChanges(
     unitId: h.unitId,
   }))
 
+  // 5. T1-A：单元格级增量（entrench 提升工事 / 废弃工事衰减）落到 world.map.cells
+  //    按 cellId 匹配（cell.id），把 Partial<MapCell> 合并到对应单元（不可变产出）。
+  let finalMap = world.map
+  if (hasCellUpdates) {
+    const cellUpdateMap = stateChanges.cellUpdates ?? {}
+    const updateSetById = new Set(cellUpdateIds)
+    let mapChanged = false
+    const newCells = world.map.cells.map((cell) => {
+      if (!updateSetById.has(cell.id)) return cell
+      const cellUpd = cellUpdateMap[cell.id]
+      if (!cellUpd) return cell
+      // 仅 fortificationLevel 等可选字段合并（防御性：不破坏必填字段）
+      const nextCell = { ...cell }
+      let cellChanged = false
+      if (cellUpd.fortificationLevel !== undefined) {
+        nextCell.fortificationLevel = cellUpd.fortificationLevel
+        cellChanged = true
+      }
+      if (cellChanged) mapChanged = true
+      return cellChanged ? nextCell : cell
+    })
+    if (mapChanged) {
+      finalMap = { ...world.map, cells: newCells }
+    }
+  }
+
   return {
     ...world,
     units: finalUnits,
+    map: finalMap,
     intel: {
       ...world.intel,
       reconHits: [...world.intel.reconHits, ...newReconHits],
     },
   }
+}
+
+// ============================================================================
+// T1-D：溃退/投降判定（combat 结算后检查，纯函数）
+// ============================================================================
+
+/**
+ * 溃退单位更新（checkRoutAndSurrender 产出，由 worker 应用到 stateChanges）。
+ */
+export interface RoutUpdate {
+  /** 单位 id */
+  id: string
+  /** 溃退后新坐标（向己方补给源方向移 1 格） */
+  coord: GridCoord
+  /** 溃退后 strength（原 -10，下限 0） */
+  strength: number
+  /** 新 status（含 'routed' 标记） */
+  status: Unit['status']
+}
+
+/**
+ * 投降单位更新（checkRoutAndSurrender 产出，由 worker 应用到 stateChanges + annihilated）。
+ */
+export interface SurrenderUpdate {
+  /** 单位 id */
+  id: string
+  /** 投降后 strength（恒 0） */
+  strength: number
+  /** 新 status */
+  status: Unit['status']
+}
+
+/**
+ * checkRoutAndSurrender 返回结构。
+ */
+export interface RoutSurrenderResult {
+  /** 本回合溃退的单位更新列表 */
+  routs: RoutUpdate[]
+  /** 本回合投降的单位更新列表（worker 应同时加入 annihilated） */
+  surrenders: SurrenderUpdate[]
+}
+
+/**
+ * 检查所有单位是否触发溃退/投降（T1-D，纯函数）。
+ *
+ * 触发条件（阈值可由 rules.routThreshold 覆盖）：
+ * - **溃退（rout）**：morale < moraleThreshold（默认 15）且 strength < strengthThreshold（默认 30）
+ *   → 单位向己方补给源方向移 1 格（曼哈顿距离 -1）+ strength -10 + status 加 'routed'。
+ *   己方补给源取 map.cells 中 isSupplySource=true 且属单位阵营可达的最近源（无源时退向地图边缘）。
+ * - **投降（surrender）**：morale < 5（默认）且所有邻格（4 邻接）都有敌方单位（被完全包围）
+ *   → strength=0 + 加入 annihilated（与 casualty 流程一致，移出沙盘）。
+ *
+ * 溃退与投降互斥：满足投降条件（被包围+极低士气）的单位优先投降，不溃退。
+ * 不伪造：单位/坐标/邻接全部基于真实 world 数据。
+ *
+ * 确定性：纯数值/几何计算，无随机数（溃退方向取曼哈顿距离最近源，确定）。
+ *
+ * @param world 当前世界状态（只读）
+ * @param rules 战役规则（消费 rules.routThreshold，可选）
+ * @returns { routs, surrenders }（空数组表示本回合无溃退/投降）
+ */
+export function checkRoutAndSurrender(
+  world: WorldState,
+  rules?: Pick<CampaignRules, 'routThreshold'>,
+): RoutSurrenderResult {
+  const routThreshold = rules?.routThreshold ?? {}
+  const moraleThreshold = routThreshold.morale ?? ROUT_DEFAULT_MORALE_THRESHOLD
+  const strengthThreshold =
+    routThreshold.strength ?? ROUT_DEFAULT_STRENGTH_THRESHOLD
+  const surrenderMoraleThreshold = SURRENDER_DEFAULT_MORALE_THRESHOLD
+
+  const routs: RoutUpdate[] = []
+  const surrenders: SurrenderUpdate[] = []
+
+  // 按阵营分组预计算补给源坐标（溃退方向用）
+  const factionSources = new Map<string, Array<{ col: number; row: number }>>()
+  for (const cell of world.map.cells) {
+    if (!cell.isSupplySource) continue
+    // 补给源 cell 不区分阵营（map 上 isSupplySource 是单阵营的，但 cell 本身无 factionId）；
+    // 简化：所有补给源都加入每个阵营的候选池（溃退单位会选最近的，敌方源距离通常更远）。
+    // 更精确的阵营归属由 supply.supplyNetwork.lines[].factionId 表达，此处用最近源近似。
+    for (const faction of world.factions) {
+      const list = factionSources.get(faction.id) ?? []
+      list.push({ col: cell.col, row: cell.row })
+      factionSources.set(faction.id, list)
+    }
+  }
+
+  for (const unit of world.units) {
+    if (unit.strength <= 0) continue // 已歼灭单位跳过
+
+    // 1. 投降判定（优先）：morale < 5 且所有邻格被敌方包围
+    if (unit.morale < surrenderMoraleThreshold) {
+      const surrounded = isSurroundedByEnemies(unit, world)
+      if (surrounded) {
+        surrenders.push({
+          id: unit.id,
+          strength: 0,
+          status: [...unit.status], // 投降单位走 annihilated 流程移除，status 保持
+        })
+        continue // 投降优先，不再判溃退
+      }
+    }
+
+    // 2. 溃退判定：morale < moraleThreshold 且 strength < strengthThreshold
+    if (unit.morale < moraleThreshold && unit.strength < strengthThreshold) {
+      const sources =
+        factionSources.get(unit.factionId) ??
+        // 无阵营匹配（测试场景 factions 为空）→ 用所有补给源
+        Array.from(factionSources.values()).flat()
+      const retreatCoord = computeRetreatCoord(unit.coord, sources, world.map)
+      const newStatus = unit.status.includes('routed')
+        ? unit.status
+        : [...unit.status, 'routed' as const]
+      routs.push({
+        id: unit.id,
+        coord: retreatCoord,
+        strength: Math.max(0, unit.strength - 10),
+        status: newStatus,
+      })
+    }
+  }
+
+  return { routs, surrenders }
+}
+
+/**
+ * 判断单位是否被敌方完全包围（4 邻接格全部有敌方单位，且无空格/己方格）。
+ *
+ * 邻接定义：曼哈顿距离 1（上下左右）。地图边缘外的"格"视为非包围（单位可从边缘撤退）。
+ * 不伪造：邻接判定全部基于真实 world.units。
+ */
+function isSurroundedByEnemies(unit: Unit, world: WorldState): boolean {
+  const neighbors = [
+    { col: unit.coord.col + 1, row: unit.coord.row },
+    { col: unit.coord.col - 1, row: unit.coord.row },
+    { col: unit.coord.col, row: unit.coord.row + 1 },
+    { col: unit.coord.col, row: unit.coord.row - 1 },
+  ]
+  for (const n of neighbors) {
+    // 邻格越界（地图外）→ 不算包围（可从边缘撤退）
+    const cell = getCellAt(world.map, n.col, n.row)
+    if (!cell) return false
+    // 邻格无任何敌方单位 → 未包围
+    const hasEnemy = world.units.some(
+      (u) =>
+        u.factionId !== unit.factionId &&
+        u.strength > 0 &&
+        u.coord.col === n.col &&
+        u.coord.row === n.row,
+    )
+    if (!hasEnemy) return false
+  }
+  return true
+}
+
+/**
+ * 计算溃退目标坐标：朝最近的己方补给源移 1 格（曼哈顿距离 -1）。
+ *
+ * 策略：在 4 邻接格中选距最近源曼哈顿距离最小的合法格（不越界）。
+ * 无补给源时退向地图左上角 (0,0)（默认退却方向）。
+ * 多个等距邻格取首个（确定性，按 +col/-col/+row/-row 顺序）。
+ */
+function computeRetreatCoord(
+  unitCoord: GridCoord,
+  sources: Array<{ col: number; row: number }>,
+  map: WorldState['map'],
+): GridCoord {
+  // 最近源（曼哈顿距离）
+  const target =
+    sources.length > 0
+      ? sources.reduce((best, s) => {
+          const distS = Math.abs(s.col - unitCoord.col) + Math.abs(s.row - unitCoord.row)
+          const distBest =
+            Math.abs(best.col - unitCoord.col) + Math.abs(best.row - unitCoord.row)
+          return distS < distBest ? s : best
+        })
+      : { col: 0, row: 0 } // 无源退向 (0,0)
+
+  // 4 邻接格中选距 target 最近的合法格（按固定顺序保证确定性）
+  const candidates = [
+    { col: unitCoord.col + 1, row: unitCoord.row },
+    { col: unitCoord.col - 1, row: unitCoord.row },
+    { col: unitCoord.col, row: unitCoord.row + 1 },
+    { col: unitCoord.col, row: unitCoord.row - 1 },
+  ]
+  let bestCoord: GridCoord = unitCoord
+  let bestDist = Infinity
+  for (const c of candidates) {
+    if (!getCellAt(map, c.col, c.row)) continue // 越界跳过
+    const dist = Math.abs(c.col - target.col) + Math.abs(c.row - target.row)
+    if (dist < bestDist) {
+      bestDist = dist
+      bestCoord = { col: c.col, row: c.row }
+    }
+  }
+  // 若所有邻格都越界（单位在孤立 1x1 格），原地不动（不应发生）
+  return bestCoord
 }

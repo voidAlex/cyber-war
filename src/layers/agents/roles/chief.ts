@@ -146,6 +146,15 @@ const INTENT_KEYWORDS: ReadonlyArray<{ intent: CommandIntent; words: readonly st
     intent: 'recon',
     words: ['侦察', '侦查', '探查', '探测', '刺探', '窥探', 'recon', 'reconnaissance', 'scout', 'spy', 'spot', 'probe'],
   },
+  // T1-A：构筑工事/战壕（比 hold 更具体——"挖战壕"不应归到 hold 的就地固守）。
+  // 放在 hold 之前确保"构筑工事"命中 entrench 而非 hold。
+  {
+    intent: 'entrench',
+    words: [
+      '构筑', '挖战壕', '战壕', '设防', '加固', '工事', '壕沟',
+      'entrench', 'dig in', 'dig_in', 'fortify', 'trench',
+    ],
+  },
   {
     intent: 'move',
     // 第 3 批：增援/支援语义等同于「移动到目标位置」——解析阶段直接归一为 move，
@@ -770,6 +779,14 @@ function parseCommandMock(
     case 'hold': {
       const summary = matchedUnits.map((u) => u.id).join('、') + ' 就地固守'
       return parsed('hold', matchedUnits.map((u) => u.id), { summary })
+    }
+
+    case 'entrench': {
+      // T1-A：构筑工事。单位就地不动，entrenchment +1 + cell.fortificationLevel 提升。
+      // 无需目标坐标/节点（单位在原地构筑）。
+      const summary =
+        matchedUnits.map((u) => u.id).join('、') + ' 构筑工事（战壕等级 +1）'
+      return parsed('entrench', matchedUnits.map((u) => u.id), { summary })
     }
 
     case 'recon': {

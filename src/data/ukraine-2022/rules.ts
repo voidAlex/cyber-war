@@ -29,6 +29,11 @@ export const ukraineRules: CampaignRules = {
     // 每半衰降级 1 级（Level 3 → 2 → 1）
     decayPerHalfLife: 1,
   },
+  // T1-B：天气规则（乌克兰春秋泥泞期 + 冬季严寒，多雨雾雪）
+  weather: {
+    possibleTypes: ['clear', 'rain', 'fog', 'snow'],
+    baseDuration: 2,
+  },
   combat: {
     // 现代战争消耗损耗率（精确打击 + 重炮轰击，损耗较高）
     attritionRate: 0.08,
@@ -249,6 +254,56 @@ export const ukraineRules: CampaignRules = {
               before: '__current__',
               after: '__add_10__',
               reason: '战略防御，HIMARS 远程消耗俄军后勤',
+            },
+          ],
+        },
+      ],
+    },
+    // === 第 10 回合：反攻时机（T1-E 补齐，战争中后期抉择） ===
+    {
+      id: 'ukraine-counteroffensive-timing',
+      // 确定性触发：第 10 回合（前线胶着，乌军需决断反攻时机）
+      triggerCondition: { kind: 'turn_in', turns: [10] },
+      label: '反攻时机',
+      description:
+        '战局进入第 10 回合，前线呈胶着态势。乌军总参谋部出现路线分歧：' +
+        '立即发动反攻（趁俄军立足未稳，但部队疲劳度高），或继续消耗等待更有利时机。请决断。',
+      options: [
+        {
+          id: 'immediate-counteroffensive',
+          label: '立即反攻',
+          description:
+            '趁俄军立足未稳立即发动反攻。部队战力提升、士气振奋，但长途奔袭疲劳剧增，' +
+            '反攻风险较高。',
+          overrides: [
+            // 乌军主力 strength +10（反攻集结），但 fatigue +15（长途奔袭疲劳）
+            {
+              field: 'units.ukr-mechanized-1.strength',
+              before: '__current__',
+              after: '__add_10__',
+              reason: '立即反攻集结兵力，战力提升',
+            },
+            {
+              field: 'units.ukr-mechanized-1.fatigue',
+              before: '__current__',
+              after: '__add_15__',
+              reason: '长途奔袭反攻，部队疲劳剧增',
+            },
+          ],
+        },
+        {
+          id: 'continued-attrition',
+          label: '继续消耗',
+          description:
+            '不急于反攻，继续以火力消耗俄军战争潜力，巩固防线等待更有利时机。' +
+            '部队士气提振、疲劳缓解，但本回合无进攻进展。',
+          overrides: [
+            // 乌军全军 morale +5（稳健提振士气），疲劳缓解
+            {
+              field: 'units.ukr-infantry-1.morale',
+              before: '__current__',
+              after: '__add_5__',
+              reason: '稳健消耗提振士气，前线部队轮换休整',
             },
           ],
         },

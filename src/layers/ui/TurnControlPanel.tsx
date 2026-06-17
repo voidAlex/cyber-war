@@ -31,6 +31,15 @@ const PHASE_NAMES: Record<string, string> = {
   persist: '持久化',
 }
 
+/** T1-B：天气类型中文显示名（与 WeatherType 对齐）。 */
+const WEATHER_TYPE_CN: Record<string, string> = {
+  clear: '晴',
+  rain: '雨',
+  storm: '暴雨',
+  fog: '雾',
+  snow: '雪',
+}
+
 /**
  * 回合控制面板组件。
  */
@@ -54,6 +63,13 @@ export default function TurnControlPanel(): JSX.Element {
 
   const phase = context.game.phase
   const turn = context.game.world.turnIndex
+  // T1-B/C：天气 + 日夜显示（旧存档无字段时兜底 '晴'/'白天'）
+  const weather = context.game.world.weather
+  const timeOfDay = context.game.world.timeOfDay ?? 'day'
+  const weatherLabel = weather
+    ? `${WEATHER_TYPE_CN[weather.type] ?? weather.type}（${weather.remainingTurns}回合）`
+    : '晴'
+  const timeOfDayLabel = timeOfDay === 'day' ? '☀️ 白天' : '🌙 夜间'
   const canStart = isActionAllowed(phase, 'START_TURN') && !busy
   // 推进按钮：
   // - planning 阶段：空转推演（advanceTurn 内部 ENTER_HANDSHAKE→LOCK→…）。
@@ -73,6 +89,14 @@ export default function TurnControlPanel(): JSX.Element {
         <div>
           <dt>回合</dt>
           <dd>第 {turn + 1} 天（turnIndex={turn}）</dd>
+        </div>
+        <div>
+          <dt>日夜</dt>
+          <dd>{timeOfDayLabel}</dd>
+        </div>
+        <div>
+          <dt>天气</dt>
+          <dd>{weatherLabel}</dd>
         </div>
         <div>
           <dt>持久化</dt>

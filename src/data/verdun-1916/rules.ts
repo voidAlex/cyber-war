@@ -20,6 +20,11 @@ export const verdunRules: CampaignRules = {
     // 每半衰降级 1 级（Level 3 → 2 → 1）
     decayPerHalfLife: 1,
   },
+  // T1-B：天气规则（凡尔登 1916 春，默兹河谷多雨雾，无雪）
+  weather: {
+    possibleTypes: ['clear', 'rain', 'storm', 'fog'],
+    baseDuration: 3,
+  },
   combat: {
     // 堑壕战消耗损耗率（每回合双方均承受持续损耗）
     attritionRate: 0.08,

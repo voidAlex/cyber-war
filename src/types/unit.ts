@@ -64,6 +64,7 @@ export type UnitStatusFlag =
   | 'retreating' // 撤退中
   | 'low_supply' // 低补给
   | 'decoy' // 诱饵/欺骗单位
+  | 'routed' // 溃退中（T1-D：morale<15 且 strength<30 触发，向己方补给源方向移一格）
 
 /**
  * 单位接口。
@@ -111,6 +112,15 @@ export interface Unit {
   equipment?: EquipmentSlot[]
   /** 是否为欺骗/诱饵单位（director 可用，影响情报与结算） */
   deception?: boolean
+  /**
+   * 工事/战壕等级（T1-A，0..3，缺省 0）。
+   *
+   * 由 'entrench' 命令提升（resolveEntrenchOrder：每回合 +1，封顶 3）。
+   * 影响战斗防御（computeEffectiveDefense：每级 +0.15）。
+   * 单位离开当前格时工事仍保留在 cell.fortificationLevel 上（一格后衰减 -1）。
+   * 旧存档缺省视为 0（兼容回填）。
+   */
+  entrenchment?: number
 }
 
 /**
