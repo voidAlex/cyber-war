@@ -251,13 +251,25 @@ export function toIntelSnapshot(
 }
 
 /**
- * 取玩家阵营 id（首个 side=player 的 faction）。
+ * 取玩家阵营 id（视角 bug 修复统一入口）。
  *
- * Sandbox/看板共用；无玩家阵营返回空串。
+ * 优先级：
+ * 1. 显式传入的 playerFactionId（v0.2.2+ 存档从 world.playerFactionId 注入，权威）。
+ * 2. fallback：factions 中首个 side==='player' 的阵营 id（旧存档/未注入时兜底）。
+ * 3. 都无 → 空串。
+ *
+ * Sandbox/看板/外交面板/情报面板/参谋长对话共用此入口，确保玩家视角全链路一致。
+ *
+ * @param factions 阵营列表
+ * @param playerFactionId 可选的权威玩家阵营 id（来自 world.playerFactionId）
  */
 export function getPlayerFactionId(
   factions: ReadonlyArray<Faction>,
+  playerFactionId?: string,
 ): string {
+  // 视角 bug 修复：优先用显式注入的 playerFactionId（v0.2.2+ 存档）。
+  if (playerFactionId && playerFactionId.length > 0) return playerFactionId
+  // 旧存档 fallback：查 side==='player' 的首个阵营。
   return factions.find((f) => f.side === 'player')?.id ?? ''
 }
 

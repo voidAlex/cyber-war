@@ -641,7 +641,11 @@ export interface MultiAgentResolverDeps {
   commanderRole: CommanderRole
   /** 导演部角色（mock 或 LLM） */
   directorRole: DirectorRole
-  /** 玩家阵营 id（可选，默认取 side==='player'） */
+  /**
+   * 玩家阵营 id（可选）。
+   * 视角 bug 修复：不传时由 orchestrateTurnResolution 内部从 world.playerFactionId
+   * （v0.2.2+ 权威）取，fallback side==='player'。多数调用方无需显式传入。
+   */
   playerFactionId?: string
   /** LLM 调用配置（mock 角色可省略；LLM 角色需注入） */
   llmConfig?: LlmCallConfig

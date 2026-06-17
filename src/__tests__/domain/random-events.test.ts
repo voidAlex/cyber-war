@@ -69,6 +69,7 @@ function makeUnit(overrides: Partial<Unit> = {}): Unit {
 function makeWorld(units: Unit[], scenarioSeed = 'sc:s'): WorldState {
   return {
     saveId: 's',
+    playerFactionId: '',
     scenarioId: 'sc',
     scenarioSeed,
     turnIndex: 1,

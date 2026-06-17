@@ -123,6 +123,8 @@ export const persistenceService: PersistenceService = {
 export function createEmptyWorldState(saveId: string, scenarioId: string): WorldState {
   return {
     saveId,
+    // M1 空存档无阵营，玩家阵营 id 为空串（WorldState 必需字段，避免类型缺失）。
+    playerFactionId: '',
     scenarioId,
     scenarioSeed: `${scenarioId}:${saveId}`,
     turnIndex: 0,

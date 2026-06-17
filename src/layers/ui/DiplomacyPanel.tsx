@@ -61,10 +61,11 @@ function trendName(trend: TrustTrend): string {
 export default function DiplomacyPanel(): JSX.Element {
   const context = useGameStore((s) => s.context)
   const playerFactionId = useMemo(() => {
-    // 第 5 批：复用 intel-visibility 的 getPlayerFactionId helper（动态取玩家阵营，
-    // 避免散落的 side==='player' 写死；helper 内部仍是 find(side==='player')，
-    // 但集中一处便于未来改用 manifest.playerFactionId 注入）。
-    return context ? getPlayerFactionId(context.game.world.factions) : ''
+    // 视角 bug 修复：优先读 world.playerFactionId（v0.2.2+ 权威字段），
+    // fallback factions 中 side==='player'（旧存档兼容）。
+    return context
+      ? getPlayerFactionId(context.game.world.factions, context.game.world.playerFactionId)
+      : ''
   }, [context])
 
   if (context === null) {

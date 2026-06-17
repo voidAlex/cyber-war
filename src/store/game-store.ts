@@ -534,6 +534,21 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         set({ busy: false, userError: `存档 ${saveId} 无 world-state，可能已损坏` })
         return
       }
+      // 视角 bug 修复：旧存档（v0.2.2 之前）world-state 无 playerFactionId 字段。
+      // 兼容回填：旧存档从未 side swap，剧本默认 player 方即为玩家所选（否则早有 bug），
+      // 故从 factions 中 side==='player' 的首个回填；回填后写回 world-state 持久化迁移。
+      // best-effort：回填/写回失败不阻断载入（内存 world 已正确，下次推进会带字段落盘）。
+      if (!world.playerFactionId || world.playerFactionId.length === 0) {
+        const fallback = world.factions.find((f) => f.side === 'player')?.id ?? ''
+        if (fallback.length > 0) {
+          world.playerFactionId = fallback
+          persistenceService.writeWorldState(saveId, world).catch((e) => {
+            logger.warn('store/loadSave/migrate_failed', `旧存档 playerFactionId 迁移写回失败: ${String(e)}`, {
+              scope: 'save', saveId,
+            })
+          })
+        }
+      }
       // 刷新恢复：从 world-state 重建 idle 上下文（持久化已完成，允许推进）
       const ctx: StateMachineContext = {
         game: { phase: 'idle', world },

@@ -40,11 +40,13 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
     for (const f of factions) m[f.id] = f.color
     return m
   }, [factions])
+  // 视角 bug 修复：玩家阵营 id——优先 world.playerFactionId（v0.2.2+ 权威），
+  // fallback factions 中 side==='player'（旧存档；side swap 后亦正确）。
+  const playerFactionId = world?.playerFactionId || factions.find((f) => f.side === 'player')?.id || ''
   // 阵营 id → 相对玩家阵营的关系分类（第 5 批多阵营支撑）。
   // 优先用 faction.relations[玩家阵营] 定性关系；缺失时回退 faction.side。
   // 分类：own（玩家阵营）/ enemy（交战/敌对）/ ally（结盟）/ neutral（中立/其他）。
   const factionSide = useMemo(() => {
-    const playerFactionId = factions.find((f) => f.side === 'player')?.id ?? ''
     const m: Record<string, 'own' | 'enemy' | 'ally' | 'neutral'> = {}
     for (const f of factions) {
       if (f.id === playerFactionId) {
@@ -72,7 +74,7 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
       }
     }
     return m
-  }, [factions])
+  }, [factions, playerFactionId])
 
   const cols = map?.cols ?? 0
   const rows = map?.rows ?? 0

@@ -41,7 +41,10 @@ export default function IntelligencePanel(): JSX.Element {
   const context = useGameStore((s) => s.context)
 
   const playerFactionId = useMemo(() => {
-    return context ? getPlayerFactionId(context.game.world.factions) : ''
+    // 视角 bug 修复：优先读 world.playerFactionId（权威），fallback side==='player'。
+    return context
+      ? getPlayerFactionId(context.game.world.factions, context.game.world.playerFactionId)
+      : ''
   }, [context])
 
   const currentTurn = context?.game.world.turnIndex ?? 0

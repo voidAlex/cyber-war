@@ -15,6 +15,8 @@ import type { GamePhase, WorldState } from '@/types'
 export function makeWorld(overrides: Partial<WorldState> = {}): WorldState {
   return {
     saveId: 'test-save',
+    // 视角 bug 修复：WorldState 必需字段，默认空串（测试无阵营场景）；可被 overrides 覆盖。
+    playerFactionId: '',
     scenarioId: 'test-scenario',
     scenarioSeed: 'test-scenario:test-save',
     turnIndex: 0,

@@ -53,7 +53,7 @@ export default function ForcesPanel(): JSX.Element {
   const ownUnits = useMemo((): Unit[] => {
     if (context === null) return []
     const world = context.game.world
-    const playerFactionId = getPlayerFactionId(world.factions)
+    const playerFactionId = getPlayerFactionId(world.factions, world.playerFactionId)
     if (playerFactionId.length === 0) return []
     return world.units
       .filter((u) => u.factionId === playerFactionId)

@@ -78,6 +78,7 @@ function makeWorld(): WorldState {
   ]
   return {
     saveId: 'replay-save',
+    playerFactionId: 'blue',
     scenarioId: 'verdun-1916',
     scenarioSeed: SCENARIO_SEED,
     turnIndex: 0,

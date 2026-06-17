@@ -80,6 +80,7 @@ function makeWorld(): WorldState {
   ]
   return {
     saveId: 'test-save',
+    playerFactionId: 'blue',
     scenarioId: 'test',
     scenarioSeed: 'test:test',
     turnIndex: 0,

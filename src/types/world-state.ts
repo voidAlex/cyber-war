@@ -25,6 +25,19 @@ import type { AgentAction } from './agent-action'
 export interface WorldState {
   /** 存档 id（与 manifest.saveId 一致） */
   saveId: string
+  /**
+   * 玩家所选阵营 id（v0.2.2+ 必需字段）。
+   *
+   * 视角 bug 修复（选德军开局但参谋长报法军位置）：旧版仅依赖 faction.side==='player'
+   * 推断玩家阵营，但剧本角色位 side 是硬编码的（如凡尔登 france=player/germany=enemy）。
+   * 选 germany 开局时若不 swap side，所有用 side 判断的代码（AI 编排/情报/外交/沙盘渲染/
+   * 参谋长视角）都会错误地把 france 当作玩家。
+   *
+   * 修复：WorldState 显式持有 playerFactionId（开局从 manifest.playerFactionId 注入），
+   * buildInitialWorldState 据此 swap faction.side 使剧本角色位与玩家选择一致；
+   * getPlayerFactionId 优先读本字段，旧存档（无此字段）fallback side==='player'。
+   */
+  playerFactionId: string
   /** 场景 id（如 verdun-1916） */
   scenarioId: string
   /** 场景固定种子（确定性随机 base：scenarioSeed:turn:sequence） */

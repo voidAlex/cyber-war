@@ -560,8 +560,14 @@ function extractNodeId(envelope: ActionEnvelope): string | undefined {
   return typeof raw === 'string' && raw.length > 0 ? raw : undefined
 }
 
-/** 取玩家阵营 id（side==='player' 的首个；无则取首个阵营）。 */
+/**
+ * 取玩家阵营 id（视角 bug 修复）。
+ *
+ * 优先读 world.playerFactionId（v0.2.2+ 权威字段），fallback factions 中 side==='player'
+ * 的首个（旧存档兼容；side swap 后亦正确），都无则取首个阵营。
+ */
 function resolvePlayerFactionId(world: WorldState): string {
+  if (world.playerFactionId && world.playerFactionId.length > 0) return world.playerFactionId
   const player = world.factions.find((f) => f.side === 'player')
   return player?.id ?? world.factions[0]?.id ?? ''
 }

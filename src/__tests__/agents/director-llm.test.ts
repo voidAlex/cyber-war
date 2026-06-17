@@ -47,6 +47,7 @@ function makePhysics(): ResolutionResult {
 function makeWorld(): WorldState {
   return {
     saveId: 's', scenarioId: 'sc', scenarioSeed: 'sc:s', turnIndex: 1, inGameDate: 'D-1',
+    playerFactionId: 'blue',
     factions: [
       { id: 'blue', name: '蓝', color: '#00F', side: 'player', commander: { id: 'cb', name: 'cb', personality: '', aggression: 0.5, obedience: 0.5, preferredTempo: 'balanced', doctrineTags: [] }, theaterCommanders: [], supply: { supplies: 0, ammunition: 0, fuel: 0 }, trust: {}, doctrineTags: [] },
     ],

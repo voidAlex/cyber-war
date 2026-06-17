@@ -340,6 +340,30 @@ describe('buildInitialWorldState（凡尔登投影）', () => {
       buildInitialWorldState(verdunCampaign, 'save-1', 'nonexistent'),
     ).toThrow(CampaignConsistencyError)
   })
+
+  // ===========================================================================
+  // 视角 bug 回归：选德军开局时 faction.side 正确 swap、playerFactionId 写入
+  // 根因：剧本角色位 france.side='player'/germany.side='enemy' 硬编码，
+  // 选 germany 不 swap → 所有用 side==='player' 判断的代码把 france 当玩家。
+  // ===========================================================================
+  it('选默认方（france）→ playerFactionId 写入，side 不变', () => {
+    const world = buildInitialWorldState(verdunCampaign, 'save-fr', 'france')
+    expect(world.playerFactionId).toBe('france')
+    expect(world.factions.find((f) => f.id === 'france')!.side).toBe('player')
+    expect(world.factions.find((f) => f.id === 'germany')!.side).toBe('enemy')
+  })
+
+  it('选德军（germany）→ side swap：germany=player，france=enemy；playerFactionId=germany', () => {
+    const world = buildInitialWorldState(verdunCampaign, 'save-de', 'germany')
+    // 显式字段写入（getPlayerFactionId 优先读此字段）
+    expect(world.playerFactionId).toBe('germany')
+    // side swap：选中方→player，原 player 方→enemy（凡尔登法-德 at_war）
+    expect(world.factions.find((f) => f.id === 'germany')!.side).toBe('player')
+    expect(world.factions.find((f) => f.id === 'france')!.side).toBe('enemy')
+    // 旧路径（fallback side==='player'）也返回 germany（side swap 保证一致）
+    const fallbackPlayer = world.factions.find((f) => f.side === 'player')
+    expect(fallbackPlayer?.id).toBe('germany')
+  })
 })
 
 describe('startCampaignFromPayload（凡尔登开局，gateway mock）', () => {

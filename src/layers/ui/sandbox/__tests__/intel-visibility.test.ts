@@ -274,6 +274,16 @@ describe('getPlayerFactionId', () => {
   it('无玩家阵营 → 空串', () => {
     expect(getPlayerFactionId([makeFaction('enemy')])).toBe('')
   })
+
+  // 视角 bug 修复：显式 playerFactionId 优先（v0.2.2+ 存档从 world.playerFactionId 注入）
+  it('传入 playerFactionId → 优先返回（即便 factions 里 side=player 是别的阵营）', () => {
+    // factions 里 side=player 的是 blue，但显式注入 red 为玩家 → 返回 red
+    expect(getPlayerFactionId([makeFaction('player'), makeFaction('enemy')], 'red')).toBe('red')
+  })
+
+  it('playerFactionId 为空串 → fallback side=player', () => {
+    expect(getPlayerFactionId([makeFaction('player')], '')).toBe('blue')
+  })
 })
 
 describe('shouldRefreshOnRecon', () => {

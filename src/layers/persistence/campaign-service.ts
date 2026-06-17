@@ -182,6 +182,32 @@ export function buildInitialWorldState(
     }
   })
 
+  // ===========================================================================
+  // 视角 bug 修复：若玩家所选阵营 ≠ 剧本默认 player 方，swap faction.side。
+  // 剧本角色位（如凡尔登 france.side='player'/germany.side='enemy'）是硬编码的，
+  // 选 germany 开局时必须把 germany 改为 'player'、原 player 方（france）改为敌方，
+  // 否则所有用 side==='player' 判断的代码（AI 编排/情报/外交/沙盘渲染/参谋长视角）
+  // 都会错误地把剧本默认 player 方当作玩家。
+  //
+  // 规则：
+  // - 选中阵营 → side='player'
+  // - 原 player 方（若 ≠ 选中方）→ 改为它与选中方的关系决定的立场：
+  //   at_war/hostile → 'enemy'；allied → 'ally'；neutral/缺失 → 'enemy'（默认敌对，符合凡尔登场景）
+  // - 其余阵营保持剧本 side 不变（ally/neutral/enemy）
+  // ===========================================================================
+  if (playerFactionId.length > 0) {
+    const defaultPlayer = factions.find((f) => f.side === 'player')
+    const selected = factions.find((f) => f.id === playerFactionId)
+    if (selected !== undefined && selected.id !== defaultPlayer?.id) {
+      // swap：原 player 方降级为敌方/盟友
+      if (defaultPlayer !== undefined) {
+        const relToSelected = defaultPlayer.relations?.[playerFactionId]
+        defaultPlayer.side = relToSelected === 'allied' ? 'ally' : 'enemy'
+      }
+      selected.side = 'player'
+    }
+  }
+
   const factionIds = new Set(factions.map((f) => f.id))
 
   // 单位投影：detection 初始化——己方 L3 全量透视，敌方 L0 盲区
@@ -224,6 +250,8 @@ export function buildInitialWorldState(
 
   return {
     saveId,
+    // 视角 bug 修复：显式持有玩家阵营 id（getPlayerFactionId 优先读此字段）。
+    playerFactionId,
     scenarioId: payload.manifest.scenarioId,
     scenarioSeed: payload.manifest.scenarioSeed,
     turnIndex: 0,

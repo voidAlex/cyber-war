@@ -122,11 +122,13 @@ export default function Sandbox(): JSX.Element {
       pendingOrders: ActionEnvelope[],
       currentTurn: number,
       halfLifeTurns: number,
+      playerFactionId: string,
     ): void => {
-      // Bug4 修复核查：observerFactionId 取玩家阵营（首个 side==='player'）。
+      // Bug4 修复 + 视角 bug 修复：observerFactionId 取玩家阵营。
+      // 视角 bug 修复：优先用 world.playerFactionId（v0.2.2+ 权威），fallback side==='player'。
       // 这是战争迷雾判定的观察方——敌方单位按此方对其的 IntelLevel 渲染。
       // 为空（无 player 阵营）时 SandboxRenderer 兜底全量渲染（不隐藏任何单位）。
-      const observerFactionId = getPlayerFactionId(factions)
+      const observerFactionId = getPlayerFactionId(factions, playerFactionId)
       if (observerFactionId.length === 0 && factions.length > 0) {
         // 防御日志：有阵营但无 player 标记，可能导致情报判定异常（便于诊断侦查不显示）
         logger.warn('sandbox/sync/no_observer', '未找到 side=player 阵营，observerFactionId 为空', {
@@ -307,6 +309,7 @@ export default function Sandbox(): JSX.Element {
           initialCtx?.pendingOrders ?? [],
           initialCtx?.game.world.turnIndex ?? 0,
           safeHalfLifeTurns(initialCtx),
+          initialCtx?.game.world.playerFactionId ?? '',
         )
         if (initialMap !== undefined) {
           resizeToContainer(initialMap.cols, initialMap.rows)
@@ -378,6 +381,7 @@ export default function Sandbox(): JSX.Element {
         world?.turnIndex ?? 0,
         // intel.decayRule 全程 optional chain，context 可能为 null
         safeHalfLifeTurns(ctx ?? null),
+        world?.playerFactionId ?? '',
       )
       // 网格尺寸可能变（换存档/换战役），重算 hitArea + 居中
       if (map !== undefined) {
@@ -429,6 +433,7 @@ export default function Sandbox(): JSX.Element {
             ctx?.pendingOrders ?? [],
             ctx?.game.world.turnIndex ?? 0,
             safeHalfLifeTurns(ctx ?? null),
+            ctx?.game.world.playerFactionId ?? '',
           )
         }
       })

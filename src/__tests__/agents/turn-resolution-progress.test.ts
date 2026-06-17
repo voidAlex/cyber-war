@@ -26,6 +26,7 @@ import type { WorldState } from '@/types'
 function makeWorld(): WorldState {
   return {
     saveId: 's', scenarioId: 'sc', scenarioSeed: 'sc:s', turnIndex: 0, inGameDate: 'D-0',
+    playerFactionId: 'blue',
     factions: [
       { id: 'blue', name: '蓝', color: '#00F', side: 'player', commander: { id: 'cb', name: 'cb', personality: '', aggression: 0.4, obedience: 0.8, preferredTempo: 'methodical', doctrineTags: [] }, theaterCommanders: [], supply: { supplies: 0, ammunition: 0, fuel: 0 }, trust: {}, doctrineTags: [] },
       { id: 'red', name: '红', color: '#F00', side: 'enemy', commander: { id: 'cr', name: 'cr', personality: '', aggression: 0.7, obedience: 0.6, preferredTempo: 'rapid', doctrineTags: [] }, theaterCommanders: [], supply: { supplies: 0, ammunition: 0, fuel: 0 }, trust: {}, doctrineTags: [] },

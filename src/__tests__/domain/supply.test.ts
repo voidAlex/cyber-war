@@ -74,6 +74,7 @@ function makeMapWithNetwork(network: SupplyNetwork): GameMap {
 function makeWorld(units: Unit[], map: GameMap): WorldState {
   return {
     saveId: 's',
+    playerFactionId: '',
     scenarioId: 'sc',
     scenarioSeed: 'sc:s',
     turnIndex: 1,

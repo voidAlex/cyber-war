@@ -199,6 +199,7 @@ function makeAcceptanceWorld(turnIndex = 0): WorldState {
   ]
   return {
     saveId: 'acc-save',
+    playerFactionId: 'blue',
     scenarioId: 'verdun-1916',
     scenarioSeed: SCENARIO_SEED,
     turnIndex,

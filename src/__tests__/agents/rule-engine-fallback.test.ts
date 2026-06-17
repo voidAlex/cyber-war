@@ -29,6 +29,7 @@ function makePhysicsResult(events: ResolutionEvent[]): ResolutionResult {
 function makeWorld(units: Unit[]): WorldState {
   return {
     saveId: 's',
+    playerFactionId: 'blue',
     scenarioId: 'sc',
     scenarioSeed: 'sc:s',
     turnIndex: 0,

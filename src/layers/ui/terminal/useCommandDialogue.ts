@@ -255,7 +255,11 @@ export function useCommandDialogue(): {
     const cur = useGameStore.getState().context
     if (cur === null) return
     const world = cur.game.world
-    const playerFaction = world.factions.find((f) => f.side === 'player')
+    // 视角 bug 修复：优先用 world.playerFactionId 定位玩家阵营对象，fallback side==='player'。
+    const playerFaction =
+      world.playerFactionId && world.playerFactionId.length > 0
+        ? world.factions.find((f) => f.id === world.playerFactionId)
+        : world.factions.find((f) => f.side === 'player')
     // 第 5 批多阵营支撑：优先用 faction.relations[playerFactionId]==='allied' 找盟友；
     // 缺失 relations 时回退 side==='ally'（旧存档兼容）。
     const allyFaction = playerFaction
@@ -340,8 +344,16 @@ export function useCommandDialogue(): {
 // 纯辅助函数（从 CommandTerminal 迁移，保持一致）
 // ============================================================================
 
-/** 获取玩家阵营 id */
-function getPlayerFactionId(world: { factions: Array<{ id: string; side: string }> }): string {
+/**
+ * 获取玩家阵营 id（视角 bug 修复）。
+ *
+ * 优先读 world.playerFactionId（v0.2.2+ 权威字段），fallback factions 中 side==='player'
+ * （旧存档/未注入时兜底；side swap 后此 fallback 亦正确）。
+ */
+function getPlayerFactionId(
+  world: { playerFactionId?: string; factions: Array<{ id: string; side: string }> },
+): string {
+  if (world.playerFactionId && world.playerFactionId.length > 0) return world.playerFactionId
   const player = world.factions.find((f) => f.side === 'player')
   return player?.id ?? ''
 }

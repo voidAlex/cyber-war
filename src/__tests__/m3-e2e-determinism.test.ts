@@ -99,6 +99,7 @@ function makeWorld(): WorldState {
   const cells = makeCells(5, 5)
   return {
     saveId: 'm3-e2e', scenarioId: 'm3', scenarioSeed: SCENARIO_SEED, turnIndex: 0, inGameDate: 'D-0',
+    playerFactionId: 'blue',
     factions: [
       { id: 'blue', name: '蓝', color: '#00F', side: 'player', commander: { id: 'cb', name: 'cb', personality: '', aggression: 0.5, obedience: 0.5, preferredTempo: 'balanced', doctrineTags: [] }, theaterCommanders: [], supply: { supplies: 80, ammunition: 80, fuel: 80 }, trust: {}, doctrineTags: [] },
       { id: 'red', name: '红', color: '#F00', side: 'enemy', commander: { id: 'cr', name: 'cr', personality: '', aggression: 0.7, obedience: 0.6, preferredTempo: 'rapid', doctrineTags: [] }, theaterCommanders: [], supply: { supplies: 70, ammunition: 70, fuel: 70 }, trust: {}, doctrineTags: [] },

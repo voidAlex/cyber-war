@@ -44,6 +44,7 @@ function makeWorld(overrides: Partial<WorldState> = {}): WorldState {
   ]
   return {
     saveId: 's1', scenarioId: 'verdun-1916', scenarioSeed: 'seed-1',
+    playerFactionId: 'blue',
     turnIndex: 5, inGameDate: 'D-5',
     factions, units,
     map: { gridType: 'square', cols: 3, rows: 3, cells, highValueNodes: [{ id: 'node-1', name: '堡', cellId: '1:1', controlThreshold: 1 }] },

@@ -89,6 +89,7 @@ function makeEnvelope(overrides: Partial<ActionEnvelope> = {}): ActionEnvelope {
 function makeWorld(units: Unit[], turnIndex = 1): WorldState {
   return {
     saveId: 's',
+    playerFactionId: '',
     scenarioId: 'verdun-1916',
     scenarioSeed: 'verdun-1916:s',
     turnIndex,
