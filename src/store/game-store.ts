@@ -80,6 +80,20 @@ function getCampaignRulesByScenario(scenarioId: string): CampaignRules | undefin
 }
 
 /**
+ * 第 2+3 批：按 scenarioId 查战役规则的**公共**入口（供 UI 层 DialogueStream
+ * 读 rules.aiRoles 渲染角色 tab）。
+ *
+ * 与编排器用的 getCampaignRulesByScenario 同源（同一内置注册表），保证 UI 与
+ * 编排器看到的 rules 一致。未注册返回 undefined（UI 据此退回默认 chief tab）。
+ *
+ * @param scenarioId 场景 id（如 'verdun-1916'）
+ * @returns 战役规则或 undefined
+ */
+export function getCampaignRulesForScenario(scenarioId: string): CampaignRules | undefined {
+  return getCampaignRulesByScenario(scenarioId)
+}
+
+/**
  * M3 多 Agent 结算器：物理引擎 + 多 Agent 编排（解锁时用 LLM 角色，否则 mock）。
  * buildMultiAgentResolver 构造具体实例（驱动进度条 + 流式战报），mock 角色保证离线可玩。
  */
@@ -143,11 +157,17 @@ function buildMultiAgentResolver(
  * 与 useCommandDialogue 的 DialogueEntry 结构一致（input + reply），但定义在 store 层
  * （不反向依赖 UI hook），使对话记忆可跨组件重挂载持久。reply.source 区分 mock/llm，
  * DialogueStream 据此显示"离线模板/LLM"标签。
+ *
+ * 第 2+3 批扩展：加 `role` 字段标识该条对话归属哪个角色 tab（chief/diplomat/
+ * commander-xxx），支持 `dialoguesByRole` 按角色分组历史。旧条目（无 role）按 'chief'
+ * 兜底（向后兼容）。
  */
 export interface DialogueEntry {
   /** 玩家原始问话/命令文本 */
   input: string
-  /** 参谋长回复（含 source: mock/llm） */
+  /** 角色 id（如 'chief'/'diplomat'/'commander-artillery'；旧条目缺省按 'chief'） */
+  role?: string
+  /** 该角色回复（含 source: mock/llm） */
   reply: { text: string; source: 'mock' | 'llm' }
 }
 
@@ -271,15 +291,44 @@ export interface GameStoreState {
   // 导致对话历史丢失，chief.chat 的多轮上下文也随之断裂。
   // 修复：dialogues 提升到 store，中右两栏共享同一份，跨回合/跨重挂载持久。
   // 退出游戏（handleExit）时清空（store reset）。
+  //
+  // 第 2+3 批「角色 tab 对话」：dialogues 改为按角色分组的 dialoguesByRole
+  // （Record<roleId, DialogueEntry[]>），每角色 tab 独立历史，切换 tab 不影响。
+  // dialogues 字段保留为 chief 角色的派生镜像（= dialoguesByRole['chief']），
+  // 向后兼容现有 useCommandDialogue 的 chief.chat 历史读取（chief 是默认 tab）。
   /**
-   * 参谋长对话历史（player 问话 + chief 回复）。
-   * 由 appendDialogue 追加（带上限 50 条），clearDialogues 清空。
-   * DialogueStream/CommandTerminal 经 useCommandDialogue 共享读写。
+   * 当前激活的角色 tab id（默认 'chief'；'diplomat'/'commander-xxx' 等）。
+   * DialogueStream 顶部 tab 栏 setActiveRole 切换；dialoguesByRole[activeRoleId]
+   * 即当前 tab 渲染的对话历史。
+   */
+  activeRoleId: string
+  /** 切换当前激活角色 tab（DialogueStream tab 点击时调用）。 */
+  setActiveRole: (roleId: string) => void
+  /**
+   * 按角色分组的对话历史（roleId → DialogueEntry[]）。
+   * 每角色 tab 独立，互不影响。各角色上限 DIALOGUE_LIMIT（超出裁剪最早）。
+   */
+  dialoguesByRole: Record<string, DialogueEntry[]>
+  /**
+   * 追加一条对话到指定角色 tab 历史（带上限 DIALOGUE_LIMIT，超出裁剪最早）。
+   * 自动给 entry 补 role 字段（与 roleId 一致）。
+   * 若 roleId === activeRoleId，同时刷新 dialogues 派生镜像。
+   */
+  appendDialogueByRole: (roleId: string, entry: DialogueEntry) => void
+  /**
+   * 参谋长对话历史（chief 角色镜像 = dialoguesByRole['chief']）。
+   *
+   * 第 2+3 批：保留为派生字段（appendDialogueByRole('chief', ...) 时同步更新），
+   * 向后兼容 useCommandDialogue 的 chief.chat 多轮上下文读取。其他角色的历史
+   * 不进此字段（仅经 dialoguesByRole 访问）。
    */
   dialogues: DialogueEntry[]
-  /** 追加一条对话（带上限 DIALOGUE_LIMIT，超出裁剪最早） */
+  /**
+   * 追加一条 chief 对话（带上限 DIALOGUE_LIMIT，超出裁剪最早）。
+   * 等价于 appendDialogueByRole('chief', entry)（兼容旧调用点）。
+   */
   appendDialogue: (entry: DialogueEntry) => void
-  /** 清空对话历史（退出游戏时调用） */
+  /** 清空所有角色对话历史（退出游戏时调用）。 */
   clearDialogues: () => void
 
   // —— 第 2 批：chief 对话打字机流式（liveChat）——
@@ -459,6 +508,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   hoveredCellId: null,
 
   // Bug3 修复：对话记忆初始为空（store 持有，跨组件重挂载持久）
+  // 第 2+3 批：dialoguesByRole 按角色分组；activeRoleId 默认 'chief'（首个 tab）。
+  activeRoleId: 'chief',
+  dialoguesByRole: {},
+  // dialogues 为 chief 角色镜像（初始空，appendDialogueByRole 时同步更新）
   dialogues: [],
 
   // 第 2 批：流式对话/Agent 实时输出初始为空
@@ -890,19 +943,45 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set({ hoveredCellId: cellId })
   },
 
-  // Bug3 修复：对话记忆 actions（store 持有，避免组件重挂载丢失）
-  appendDialogue(entry) {
+  // 第 2+3 批：切换当前激活角色 tab（DialogueStream tab 点击）。
+  // 切换时同步把 dialogues 派生镜像更新为新角色的历史（dialoguesByRole[roleId]），
+  // 否则 useCommandDialogue 读 dialogues 会拿到旧角色历史（串台 bug）。
+  setActiveRole(roleId) {
+    if (get().activeRoleId === roleId) return
+    set((s) => ({
+      activeRoleId: roleId,
+      dialogues: s.dialoguesByRole[roleId] ?? [],
+    }))
+  },
+
+  // 第 2+3 批：追加一条对话到指定角色 tab 历史。
+  // 自动补 entry.role 字段；若 roleId === activeRoleId（chief 默认激活），
+  // 同时刷新 dialogues 派生镜像（向后兼容 useCommandDialogue 的 chief 历史读取）。
+  appendDialogueByRole(roleId, entry) {
+    const role = entry.role ?? roleId
+    const enriched = { ...entry, role }
     set((s) => {
-      const next = [...s.dialogues, entry]
-      // 超上限裁剪最早条目（保留最近 DIALOGUE_LIMIT 条，保证多轮上下文连贯）
-      return {
-        dialogues: next.length > DIALOGUE_LIMIT ? next.slice(next.length - DIALOGUE_LIMIT) : next,
-      }
+      const cur = s.dialoguesByRole[roleId] ?? []
+      const next = [...cur, enriched]
+      const trimmed =
+        next.length > DIALOGUE_LIMIT ? next.slice(next.length - DIALOGUE_LIMIT) : next
+      const byRole = { ...s.dialoguesByRole, [roleId]: trimmed }
+      // dialogues 派生镜像：仅当当前激活 tab === roleId 时同步（chief 默认激活）。
+      // 这样 useCommandDialogue 读 dialogues 始终拿到当前 tab 的历史，
+      // 而 chief.chat 多轮上下文在切到 chief tab 时也正确。
+      const dialogues = s.activeRoleId === roleId ? trimmed : s.dialogues
+      return { dialoguesByRole: byRole, dialogues }
     })
   },
 
+  // Bug3 修复：对话记忆 actions（store 持有，避免组件重挂载丢失）。
+  // 第 2+3 批：appendDialogue 委托给 appendDialogueByRole('chief', ...)（兼容旧调用点）。
+  appendDialogue(entry) {
+    get().appendDialogueByRole('chief', entry)
+  },
+
   clearDialogues() {
-    set({ dialogues: [] })
+    set({ dialoguesByRole: {}, dialogues: [] })
   },
 
   // —— 第 2 批：流式对话/Agent 实时输出 actions ——

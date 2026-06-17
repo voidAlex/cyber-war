@@ -19,6 +19,7 @@
 import { useMemo, type JSX } from 'react'
 import { useGameStore } from '@/store/game-store'
 import type { Unit } from '@/types'
+import { computeIntelRender, type IntelRenderDecision } from './intel-visibility'
 
 /**
  * 缩略沙盘组件（右栏顶部）。
@@ -138,11 +139,24 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
     }
   }
 
-  // 单位按 cell 聚合（同格多单位取首个代表点；缩略图不展开堆叠）
-  const cellUnits: Record<string, Unit> = {}
+  // 第 3 批（C 修复）：单位按 cell 聚合 + 情报渲染决策。
+  // 与 SandboxRenderer 一致——敌方单位按观察方（玩家阵营）对其的 IntelLevel 渲染：
+  // - L0 盲区：不显示（玩家不知道该单位存在）。
+  // - L1 热力脉冲：半透明色块（模糊存在性，不显示类型）。
+  // - L2 编制确认：虚线描边色点（显示类型，无精确血量）。
+  // - L3 全量透视 / 己方：实心色点。
+  // 这样小地图与大地图内容一致（不再「小地图透视全图」）。
+  const currentTurn = world?.turnIndex ?? 0
+  const halfLifeTurns = world?.intel.decayRule.halfLifeTurns ?? 3
+  const cellUnitRender: Record<
+    string,
+    { unit: Unit; decision: IntelRenderDecision }
+  > = {}
   for (const u of units) {
     const key = `${u.coord.col},${u.coord.row}`
-    if (cellUnits[key] === undefined) cellUnits[key] = u
+    if (cellUnitRender[key] !== undefined) continue // 同格多单位取首个代表点
+    const decision = computeIntelRender(u, playerFactionId, currentTurn, halfLifeTurns)
+    cellUnitRender[key] = { unit: u, decision }
   }
 
   // 列字母（0→A），缩略图坐标标签用
@@ -177,7 +191,7 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
           {Array.from({ length: cols * rows }, (_, i) => {
             const col = i % cols
             const row = Math.floor(i / cols)
-            const u = cellUnits[`${col},${row}`]
+            const entry = cellUnitRender[`${col},${row}`]
             const meta = cellMetaByCoord[`${col},${row}`]
             const supplyColor = supplyCellColor[`${col},${row}`]
             // 简化 tooltip：坐标 + 地形 + 节点名 + 单位 id（原生 title）
@@ -186,9 +200,13 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
               tipParts.push(meta.terrain)
               if (meta.nodeName) tipParts.push(meta.nodeName)
             }
-            if (u) tipParts.push(u.id)
+            // L0 盲区：单位存在但玩家不可见 → tooltip 不暴露单位 id（仅坐标/地形/节点）
+            const u = entry?.unit
+            if (u && entry.decision.mode !== 'hidden') tipParts.push(u.id)
             const tip = tipParts.join(' · ')
-            if (u === undefined) {
+
+            // L0 盲区或无单位：仅画补给线小横条（不画单位色点）
+            if (entry === undefined || entry.decision.mode === 'hidden') {
               // 第 4 批：补给线上的空 cell 画阵营色小横条（简化版，不画切断标记）
               return (
                 <span key={i} className="mini-sandbox__cell" title={tip}>
@@ -205,6 +223,7 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
             const color = factionColor[u.factionId] ?? '#06b6d4'
             const side = factionSide[u.factionId] ?? 'neutral'
             const selected = u.id === selectedUnitId
+            const mode = entry.decision.mode
             return (
               <span key={i} className="mini-sandbox__cell" title={tip}>
                 {supplyColor !== undefined && (
@@ -214,16 +233,27 @@ export default function MiniSandbox({ onOpen }: { onOpen: () => void }): JSX.Ele
                     aria-hidden
                   />
                 )}
-                <span
-                  className={
-                    'mini-sandbox__dot' +
-                    (selected ? ' mini-sandbox__dot--selected' : '') +
-                    (side === 'enemy' ? ' mini-sandbox__dot--enemy' : '') +
-                    (side === 'ally' ? ' mini-sandbox__dot--ally' : '')
-                  }
-                  style={{ background: color, borderColor: color }}
-                  title={tip}
-                />
+                {mode === 'heat-pulse' ? (
+                  // L1 热力脉冲：半透明色块（模糊存在性，不显示类型/选中描边）
+                  <span
+                    className="mini-sandbox__dot mini-sandbox__dot--heat"
+                    style={{ background: color, borderColor: color }}
+                    title={tip}
+                  />
+                ) : (
+                  // L2 编制确认（虚线）/ L3 全量 / 己方（实心色点）
+                  <span
+                    className={
+                      'mini-sandbox__dot' +
+                      (mode === 'formation' ? ' mini-sandbox__dot--formation' : '') +
+                      (selected ? ' mini-sandbox__dot--selected' : '') +
+                      (side === 'enemy' ? ' mini-sandbox__dot--enemy' : '') +
+                      (side === 'ally' ? ' mini-sandbox__dot--ally' : '')
+                    }
+                    style={{ background: color, borderColor: color }}
+                    title={tip}
+                  />
+                )}
               </span>
             )
           })}

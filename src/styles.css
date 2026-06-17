@@ -4201,6 +4201,188 @@ th {
   51%, 100% { opacity: 0; }
 }
 
+/* ============================================================
+ * 第 2+3 批：角色 tab 栏 + 多角色对话气泡色标
+ * ============================================================ */
+/* 各角色色标变量（chief 青 / diplomat 蓝 / commander 橙 / director 紫 / player 白） */
+:root {
+  --role-chief: #06b6d4;      /* 参谋长·青（与 --accent-cyan 一致） */
+  --role-diplomat: #3b82f6;   /* 外交官·蓝（与 --accent-blue 一致） */
+  --role-commander: #f97316;  /* 指挥官·橙 */
+  --role-director: #a855f7;   /* 导演部·紫 */
+  --role-player: #e2e8f0;     /* 玩家·白 */
+}
+
+/* 角色 tab 栏：顶部水平排列，赛博朋克青光激活态 */
+.role-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-dim);
+  background: rgba(15, 23, 42, 0.5);
+  flex-shrink: 0;
+}
+
+/* 单个 tab 按钮 */
+.role-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px var(--space-2);
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color var(--dur) ease, color var(--dur) ease, box-shadow var(--dur) ease, background var(--dur) ease;
+  text-transform: none;
+}
+
+.role-tab:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+/* tab 图标（单字标识） */
+.role-tab__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  background: currentColor;
+  color: var(--bg-void) !important;
+  opacity: 0.7;
+}
+
+/* tab 激活态：按角色色标青光描边 + 高亮 */
+.role-tab--active {
+  color: var(--text);
+  font-weight: 600;
+}
+.role-tab--active .role-tab__icon {
+  opacity: 1;
+}
+
+/* 各角色 type 的色标（激活态边框 + 辉光） */
+.role-tab--chief.role-tab--active {
+  border-color: var(--role-chief);
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.5);
+}
+.role-tab--diplomat.role-tab--active {
+  border-color: var(--role-diplomat);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+}
+.role-tab--commander.role-tab--active {
+  border-color: var(--role-commander);
+  box-shadow: 0 0 8px rgba(249, 115, 22, 0.5);
+}
+.role-tab--director.role-tab--active {
+  border-color: var(--role-director);
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.5);
+}
+.role-tab--player.role-tab--active {
+  border-color: var(--role-player);
+  box-shadow: 0 0 8px rgba(226, 232, 240, 0.4);
+}
+
+/* tab label 文本 */
+.role-tab__label {
+  white-space: nowrap;
+}
+
+/* ============================================================
+ * 多角色对话气泡色标（第 2+3 批）
+ *
+ * 旧 .dialogue-stream__bubble--chief / --speaker--chief 保留兼容（chief 仍用青）。
+ * 新增 .dialogue-stream__bubble--role-{type} 按角色 type 着色：
+ * - chief：青（沿用 --role-chief，与旧 --chief 视觉一致）
+ * - diplomat：蓝
+ * - commander：橙
+ * - director：紫
+ * - player：白（玩家自己发言，右对齐）
+ * ============================================================ */
+
+/* 角色 reply 气泡通用（左对齐） */
+.dialogue-stream__bubble--role {
+  align-self: flex-start;
+  background: var(--bg-item);
+}
+
+/* 各角色 type 描边 + 辉光 */
+.dialogue-stream__bubble--role-chief {
+  border-color: var(--role-chief);
+  box-shadow: var(--glow-cyan);
+}
+.dialogue-stream__bubble--role-diplomat {
+  border-color: var(--role-diplomat);
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.25);
+}
+.dialogue-stream__bubble--role-commander {
+  border-color: var(--role-commander);
+  box-shadow: 0 0 6px rgba(249, 115, 22, 0.25);
+}
+.dialogue-stream__bubble--role-director {
+  border-color: var(--role-director);
+  box-shadow: 0 0 6px rgba(168, 85, 247, 0.25);
+}
+.dialogue-stream__bubble--role-player {
+  border-color: var(--role-player);
+}
+
+/* 角色 speaker 标签色（按 type） */
+.dialogue-stream__speaker--role {
+  font-family: var(--font-display);
+}
+.dialogue-stream__speaker--role-chief { color: var(--role-chief); }
+.dialogue-stream__speaker--role-diplomat { color: var(--role-diplomat); }
+.dialogue-stream__speaker--role-commander { color: var(--role-commander); }
+.dialogue-stream__speaker--role-director { color: var(--role-director); }
+.dialogue-stream__speaker--role-player { color: var(--role-player); }
+
+/* 打字机气泡辉光按角色 type 着色（覆盖原 typing pulse 的青光固定色） */
+.dialogue-stream__bubble--role-chief.dialogue-stream__bubble--typing {
+  border-color: var(--role-chief);
+  animation: dialogue-typing-pulse 1.1s ease-in-out infinite;
+}
+.dialogue-stream__bubble--role-diplomat.dialogue-stream__bubble--typing {
+  border-color: var(--role-diplomat);
+  animation: dialogue-typing-pulse-diplomat 1.1s ease-in-out infinite;
+}
+.dialogue-stream__bubble--role-commander.dialogue-stream__bubble--typing {
+  border-color: var(--role-commander);
+  animation: dialogue-typing-pulse-commander 1.1s ease-in-out infinite;
+}
+.dialogue-stream__bubble--role-director.dialogue-stream__bubble--typing {
+  border-color: var(--role-director);
+  animation: dialogue-typing-pulse-director 1.1s ease-in-out infinite;
+}
+
+@keyframes dialogue-typing-pulse-diplomat {
+  0%, 100% { box-shadow: 0 0 6px rgba(59, 130, 246, 0.25); }
+  50% { box-shadow: 0 0 14px rgba(59, 130, 246, 0.55); }
+}
+@keyframes dialogue-typing-pulse-commander {
+  0%, 100% { box-shadow: 0 0 6px rgba(249, 115, 22, 0.25); }
+  50% { box-shadow: 0 0 14px rgba(249, 115, 22, 0.55); }
+}
+@keyframes dialogue-typing-pulse-director {
+  0%, 100% { box-shadow: 0 0 6px rgba(168, 85, 247, 0.25); }
+  50% { box-shadow: 0 0 14px rgba(168, 85, 247, 0.55); }
+}
+
+/* 打字机光标按角色 type 着色（覆盖原固定青） */
+.dialogue-stream__bubble--role-diplomat .dialogue-stream__cursor { background: var(--role-diplomat); }
+.dialogue-stream__bubble--role-commander .dialogue-stream__cursor { background: var(--role-commander); }
+.dialogue-stream__bubble--role-director .dialogue-stream__cursor { background: var(--role-director); }
+
 /* 输入框行：固定底部 */
 .dialogue-stream__input-row {
   display: flex;
@@ -4374,6 +4556,25 @@ th {
 /* 敌方单位半透明 */
 .mini-sandbox__dot--enemy {
   opacity: 0.6;
+}
+
+/* 第 3 批（C 修复）：L1 热力脉冲（半透明色块，模糊存在性） */
+.mini-sandbox__dot--heat {
+  opacity: 0.35;
+  border-radius: 35%;
+  filter: blur(0.5px);
+  animation: mini-heat-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes mini-heat-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.9); }
+  50% { opacity: 0.5; transform: scale(1.05); }
+}
+
+/* 第 3 批（C 修复）：L2 编制确认（虚线描边色点，显示类型无血量） */
+.mini-sandbox__dot--formation {
+  background: transparent !important;
+  border: 1.5px dashed currentColor;
 }
 
 /* 盟友单位描边（空心） */

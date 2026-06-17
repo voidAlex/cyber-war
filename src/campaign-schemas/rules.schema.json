@@ -182,6 +182,7 @@
             "enum": ["chief", "diplomat", "commander", "director"]
           },
           "factionId": { "type": "string", "minLength": 1 },
+          "displayName": { "type": "string", "minLength": 1, "maxLength": 64 },
           "personality": { "type": "string", "minLength": 1, "maxLength": 2000 },
           "aggression": { "type": "number", "minimum": 0, "maximum": 1 },
           "obedience": { "type": "number", "minimum": 0, "maximum": 1 },

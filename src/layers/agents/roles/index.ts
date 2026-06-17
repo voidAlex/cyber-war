@@ -11,6 +11,30 @@
 
 export { chiefRole, createChiefRole, createLlmChiefRole } from './chief'
 export type { ChiefRole, ChiefParseContext, LlmChiefRole } from './chief'
+// 第 2+3 批：外交官（纯对话角色，不参与回合编排）
+export {
+  diplomatRole,
+  createDiplomatRole,
+  createLlmDiplomatRole,
+} from './diplomat'
+export type {
+  DiplomatRole,
+  DiplomatChatContext,
+  DiplomatChatResult,
+  LlmDiplomatRole,
+} from './diplomat'
+// 第 2+3 批：玩家方指挥官对话角色（tab「指挥官」NPC，不参与回合编排）
+export {
+  playerCommanderRole,
+  createPlayerCommanderRole,
+  createLlmPlayerCommanderRole,
+} from './player-commander'
+export type {
+  PlayerCommanderRole,
+  PlayerCommanderChatContext,
+  PlayerCommanderChatResult,
+  LlmPlayerCommanderRole,
+} from './player-commander'
 export {
   theaterRole,
   createTheaterRole,

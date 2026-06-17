@@ -1,18 +1,16 @@
 /**
- * 对话气泡流（DialogueStream.tsx）— UI 重构第 1 批「全对话为主」中栏主体。
+ * 对话气泡流（DialogueStream.tsx）— 中栏主体（UI 重构第 1 批 + 第 2+3 批角色 tab）。
  *
- * 职责：占据中栏，承载玩家与各角色的对话气泡流 + 底部固定输入框。
- * 对话气泡按角色色标：
- * - 参谋长（chief）：青
- * - 外交（盟友统帅）：蓝
- * - 指挥官（玩家）：橙
- * - 导演部（战报/终裁）：紫
- * - 玩家输入：白底
+ * 职责：占据中栏，承载玩家与各角色的对话气泡流 + 顶部角色 tab 栏 + 底部输入框。
  *
- * 逻辑复用：与 CommandTerminal 共享 useCommandDialogue hook（对话/命令/外交不重写）。
- * - 主输入框：classifyInput 路由「命令」/「对话」（与原 CommandTerminal 一致）。
- * - 对话历史（dialogues）由 hook 持有，中右两栏渲染同一份（参谋长回复一致）。
- * - 命令候选卡 / 外交卡 / 待锁队列：在 CommandTerminal 右栏呈现，DialogueStream 不重复。
+ * 第 2+3 批「角色 tab 对话」：
+ * - 顶部 tab 栏读 useCommandDialogue.playerRoles（campaign rules.aiRoles 过滤玩家侧）。
+ * - 切换 tab → setActiveRole → 气泡按 dialoguesByRole[activeRoleId] 过滤渲染。
+ * - 色标按 role type：chief=青、diplomat=蓝、commander=橙、director=紫、player=白。
+ * - 命令解析（parseCommand）仍走 chief，不受 tab 影响（classifyInput 命中 → handleParse）。
+ *
+ * 对话气泡历史（dialogues）由 useCommandDialogue hook 持有，按 activeRoleId 过滤。
+ * - 主输入框：classifyInput 路由「命令」/「对话」（命令走 chief 解析，对话走当前 tab 角色）。
  *
  * 不 import @tauri-apps/api（UI 层）。gateway 唯一。
  *
@@ -21,14 +19,13 @@
 
 import { useEffect, useRef, type JSX } from 'react'
 import { useGameStore } from '@/store/game-store'
-import { useCommandDialogue } from './useCommandDialogue'
-import type { ChiefChatResult } from '@/layers/agents/roles/chief'
+import { useCommandDialogue, type PlayerRoleTab } from './useCommandDialogue'
 
 /**
  * 对话气泡流组件（中栏主体）。
  *
- * 自身仅渲染气泡流 + 输入框；命令/外交交互在 CommandTerminal 右栏。
- * 通过 useCommandDialogue 与右栏共享对话历史（参谋长回复一致）。
+ * 自身仅渲染 tab 栏 + 气泡流 + 输入框；命令/外交交互在 CommandTerminal 右栏。
+ * 通过 useCommandDialogue 与右栏共享对话历史（各角色回复一致）。
  */
 export default function DialogueStream(): JSX.Element {
   const {
@@ -40,12 +37,15 @@ export default function DialogueStream(): JSX.Element {
     parsing,
     handleSubmit,
     dialogues,
+    activeRoleId,
+    setActiveRole,
+    playerRoles,
     userError,
     clearError,
     canSubmit,
   } = useCommandDialogue()
 
-  // 第 2 批：订阅 store liveChat（chief.chat 流式 partial），渲染「正在输入」打字机气泡。
+  // 第 2 批：订阅 store liveChat（角色对话流式 partial），渲染「正在输入」打字机气泡。
   const liveChat = useGameStore((s) => s.liveChat)
 
   // 对话流容器 ref：新消息/liveChat 增量时自动滚到底（玩家始终看到最新回复）。
@@ -68,24 +68,61 @@ export default function DialogueStream(): JSX.Element {
 
   const inputEnabled = canSubmit
   const phaseHint = PHASE_NAMES[phase] ?? phase
+  const activeTab = playerRoles.find((t) => t.roleId === activeRoleId) ?? playerRoles[0]
+  const activeType = activeTab?.type ?? 'chief'
 
   return (
     <section className="panel dialogue-stream" aria-label="对话流">
+      {/* 第 2+3 批：角色 tab 栏（玩家侧角色：参谋长/外交官/各指挥官） */}
+      {playerRoles.length > 0 && (
+        <div className="role-tabs" role="tablist" aria-label="角色对话切换">
+          {playerRoles.map((tab) => (
+            <button
+              key={tab.roleId}
+              type="button"
+              role="tab"
+              aria-selected={tab.roleId === activeRoleId}
+              className={
+                'role-tab role-tab--' + tab.type +
+                (tab.roleId === activeRoleId ? ' role-tab--active' : '')
+              }
+              onClick={() => setActiveRole(tab.roleId)}
+            >
+              <span className="role-tab__icon" aria-hidden>{ROLE_ICON[tab.type] ?? '◆'}</span>
+              <span className="role-tab__label">{tab.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* 对话气泡流（可滚动，撑满中栏剩余空间） */}
       <div className="dialogue-stream__stream" ref={streamRef}>
         {dialogues.length === 0 && (
           <p className="dialogue-stream__hint">
-            输入命令或与参谋长对话。例如：「第一装甲师移动到 C3」或「你好」。
+            {activeTab
+              ? `与${activeTab.label}对话，或输入命令（如「第一装甲师移动到 C3」）。`
+              : '输入命令或与参谋长对话。例如：「第一装甲师移动到 C3」或「你好」。'}
           </p>
         )}
 
         {dialogues.map((d, i) => (
-          <DialogueBubble key={i} input={d.input} reply={d.reply} />
+          <DialogueBubble
+            key={i}
+            input={d.input}
+            replyText={d.reply.text}
+            replySource={d.reply.source}
+            roleType={activeType}
+            roleLabel={activeTab?.label ?? '参谋长'}
+          />
         ))}
 
-        {/* 第 2 批：chief.chat 流式进行中 → 渲染「正在输入」打字机气泡（青光闪烁 + 逐字）。 */}
+        {/* 第 2 批：角色对话流式进行中 → 渲染「正在输入」打字机气泡（按角色色标）。 */}
         {liveChat !== null && (
-          <TypingBubble text={liveChat.text} role={liveChat.role} />
+          <TypingBubble
+            text={liveChat.text}
+            roleType={activeType}
+            roleLabel={activeTab?.label ?? '参谋长'}
+          />
         )}
       </div>
 
@@ -94,7 +131,7 @@ export default function DialogueStream(): JSX.Element {
         <input
           type="text"
           className="dialogue-stream__input"
-          placeholder={inputEnabled ? '命令或对话…（如 第一装甲师移动到 C3 / 你好）' : `阶段「${phaseHint}」——可对话，命令待规划阶段`}
+          placeholder={inputEnabled ? `命令或与${activeTab?.label ?? '参谋长'}对话…（如 第一装甲师移动到 C3 / 你好）` : `阶段「${phaseHint}」——可对话，命令待规划阶段`}
           value={draftCommand}
           onChange={(e) => setDraftCommand(e.target.value)}
           disabled={busy || parsing}
@@ -116,7 +153,7 @@ export default function DialogueStream(): JSX.Element {
 
       {!inputEnabled && !busy && (
         <p className="dialogue-stream__phase-hint">
-          当前阶段「{phaseHint}」——无法下达命令，但仍可与参谋长对话（问候/询问态势）。
+          当前阶段「{phaseHint}」——无法下达命令，但仍可对话（问候/询问态势）。
         </p>
       )}
 
@@ -142,17 +179,32 @@ const PHASE_NAMES: Record<string, string> = {
   decision: '战术决策',
 }
 
+/** 各角色 tab 图标（单字标识，色标由 CSS --role-{type} 变量驱动）。 */
+const ROLE_ICON: Record<PlayerRoleTab['type'], string> = {
+  chief: '参',
+  diplomat: '外',
+  commander: '指',
+  director: '导',
+  player: '我',
+}
+
 /**
- * 对话气泡（玩家问话 + 参谋长回复）。
+ * 对话气泡（玩家问话 + 角色回复）。
  *
- * 玩家问话右对齐白底（指挥官橙 speaker），参谋长回复左对齐青光。
+ * 玩家问话右对齐白底（指挥官橙 speaker），角色回复左对齐按 role type 色标。
  */
 function DialogueBubble({
   input,
-  reply,
+  replyText,
+  replySource,
+  roleType,
+  roleLabel,
 }: {
   input: string
-  reply: ChiefChatResult
+  replyText: string
+  replySource: 'mock' | 'llm'
+  roleType: PlayerRoleTab['type']
+  roleLabel: string
 }): JSX.Element {
   return (
     <div className="dialogue-stream__turn">
@@ -160,11 +212,11 @@ function DialogueBubble({
         <span className="dialogue-stream__speaker dialogue-stream__speaker--player">指挥官</span>
         <p className="dialogue-stream__text">{input}</p>
       </div>
-      <div className="dialogue-stream__bubble dialogue-stream__bubble--chief">
-        <span className="dialogue-stream__speaker dialogue-stream__speaker--chief">参谋长</span>
-        <p className="dialogue-stream__text">{reply.text}</p>
+      <div className={'dialogue-stream__bubble dialogue-stream__bubble--role dialogue-stream__bubble--role-' + roleType}>
+        <span className={'dialogue-stream__speaker dialogue-stream__speaker--role dialogue-stream__speaker--role-' + roleType}>{roleLabel}</span>
+        <p className="dialogue-stream__text">{replyText}</p>
         <span className="dialogue-stream__source">
-          {reply.source === 'llm' ? 'LLM' : '离线模板'}
+          {replySource === 'llm' ? 'LLM' : '离线模板'}
         </span>
       </div>
     </div>
@@ -172,20 +224,24 @@ function DialogueBubble({
 }
 
 /**
- * 「正在输入」打字机气泡（第 2 批流式）。
+ * 「正在输入」打字机气泡（第 2 批流式 + 第 2+3 批角色色标）。
  *
- * chief.chat 流式进行中显示：青光描边（闪烁动画）+ 已到达的 partial 文本 + 末尾光标。
+ * 角色对话流式进行中显示：按 role type 色标描边（闪烁动画）+ 已到达的 partial 文本 + 末尾光标。
  * 流式完成后 store clearLiveChat，此气泡消失，完整回复已入 dialogues 转正常气泡。
- *
- * @param text 已累积的 partial 文本（liveChat.text）
- * @param role 发声角色（当前仅 'chief'）
  */
-function TypingBubble({ text, role }: { text: string; role: string }): JSX.Element {
-  const speaker = role === 'chief' ? '参谋长' : role
+function TypingBubble({
+  text,
+  roleType,
+  roleLabel,
+}: {
+  text: string
+  roleType: PlayerRoleTab['type']
+  roleLabel: string
+}): JSX.Element {
   return (
     <div className="dialogue-stream__turn dialogue-stream__turn--typing">
-      <div className="dialogue-stream__bubble dialogue-stream__bubble--chief dialogue-stream__bubble--typing">
-        <span className="dialogue-stream__speaker dialogue-stream__speaker--chief">{speaker}</span>
+      <div className={'dialogue-stream__bubble dialogue-stream__bubble--role dialogue-stream__bubble--role-' + roleType + ' dialogue-stream__bubble--typing'}>
+        <span className={'dialogue-stream__speaker dialogue-stream__speaker--role dialogue-stream__speaker--role-' + roleType}>{roleLabel}</span>
         <p className="dialogue-stream__text">
           {text}
           {/* 末尾闪烁光标，模拟打字机「正在输出」 */}

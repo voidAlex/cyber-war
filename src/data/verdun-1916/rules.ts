@@ -286,38 +286,101 @@ export const verdunRules: CampaignRules = {
       ],
     },
   ],
-  // 第 5 批：自定义 AI 角色定义（rules.aiRoles）。
+  // 第 5 批 + 第 2+3 批：自定义 AI 角色定义（rules.aiRoles）。
   //
   // 凡尔登为 2 方战役（法/德），无第三方外交方；故 diplomat 角色不在此声明
-  // （缺省时 orchestrator 按既有逻辑兜底，玩家阵营角色由玩家操作不进 aiRoles）。
+  // （缺省时 orchestrator 按既有逻辑兜底；玩家阵营角色由玩家操作不进 aiRoles，
+  // 但第 2+3 批角色 tab 对话 UI 需要「玩家侧角色」定义来渲染 tab，故两军都声明
+  // chief + 各指挥官，运行时 usePlayerRoleTabs 按 playerFactionId 过滤玩家侧）。
   //
-  // - chief：参谋长（德军侧=法金汉，战役策划者与总参谋长）。
-  // - commander：战区司令（德军侧=皇太子第五集团军，东岸主攻实际指挥）。
-  // 人格数值与 commanders.json 对齐（commanders.ts 是数值基底，aiRoles 是角色绑定）。
+  // 第 2+3 批扩展（按玩家选阵营动态）：
+  // - 法军侧（playerFactionId='france'）：chief=贝当 + 炮兵司令 + 杜奥蒙守备指挥。
+  // - 德军侧（playerFactionId='germany'）：chief=法金汉 + 皇太子（步兵）+ 重炮指挥。
+  // 运行时 usePlayerRoleTabs 取 factionId===playerFactionId 的角色渲染 tab；
+  // 敌方 AI 角色由 orchestrator 按 factionId 实例化（既有逻辑）。
   aiRoles: [
+    // ============================================================
+    // 法军侧（france）
+    // ============================================================
+    // === 法军参谋长：贝当（稳健防御，神圣之路轮换） ===
+    {
+      id: 'ai-petain-chief',
+      type: 'chief',
+      factionId: 'france',
+      displayName: '贝当',
+      personality:
+        '法军总指挥，凡尔登守军的定海神针。稳健务实，首创「神圣之路」后勤轮换，' +
+        '坚信「火力+轮换」能消耗德军攻击动能。不冒进，重视部队休整与士气维系。',
+      aggression: 0.4,
+      obedience: 0.6,
+    },
+    // === 法军炮兵司令（火力至上，压制德军集结） ===
+    {
+      id: 'ai-france-artillery-commander',
+      type: 'commander',
+      factionId: 'france',
+      displayName: '法军炮兵司令',
+      personality:
+        '法军炮兵司令，信奉「炮兵征服，步兵占领」。以 75 野战炮与重榴弹炮实施弹幕射击，' +
+        '压制德军集结地域与进攻轴线。火力至上，主张以钢铁换人命。',
+      aggression: 0.6,
+      obedience: 0.7,
+      responsibleUnits: ['fr-artillery-1'],
+    },
+    // === 杜奥蒙守备指挥（坚守要塞，寸土不让） ===
+    {
+      id: 'ai-france-fortress-commander',
+      type: 'commander',
+      factionId: 'france',
+      displayName: '杜奥蒙守备',
+      personality:
+        '凡尔登要塞守备指挥，依托杜奥蒙/沃/苏维尔工事群死守。坚信要塞是法军的脊梁，' +
+        '宁可全员玉碎也不后退一步。顽强、固执，对放弃阵地的命令强烈抵触。',
+      aggression: 0.3,
+      obedience: 0.5,
+      responsibleUnits: ['fr-fortress-douaumont', 'fr-fortress-vaux', 'fr-fortress-souville'],
+    },
+    // ============================================================
+    // 德军侧（germany）
+    // ============================================================
     // === 德军参谋长：法金汉（消耗战略策划者） ===
     {
       id: 'ai-falkenhayn-chief',
       type: 'chief',
       factionId: 'germany',
+      displayName: '法金汉',
       personality:
         '德军总参谋长，凡尔登消耗战略的核心策划者。冷静精算，以重炮制造法军无法承受的伤亡交换比，' +
         '坚信消耗战能拖垮法国意志。methodical 不冒进。',
       aggression: 0.5,
       obedience: 0.55,
     },
-    // === 德军战区司令：皇太子（第五集团军，东岸主攻） ===
+    // === 德军第五集团军司令：皇太子（步兵主攻，东岸推进） ===
     {
       id: 'ai-crown-prince-commander',
       type: 'commander',
       factionId: 'germany',
+      displayName: '皇太子',
       personality:
-        '德国第五集团军司令，实际指挥东岸主攻。年轻尚武，较法金汉更激进，屡屡请求加大进攻力度。' +
-        '服从消耗战略大框架，但战术层面主张扩大战果。',
+        '德国第五集团军司令（皇太子威廉），实际指挥东岸主攻。年轻尚武，较法金汉更激进，' +
+        '屡屡请求加大进攻力度。服从消耗战略大框架，但战术层面主张扩大战果。',
       aggression: 0.7,
       obedience: 0.75,
-      // 负责德军东岸主攻单位
-      responsibleUnits: ['de-infantry-21', 'de-infantry-7', 'de-infantry-12', 'de-artillery-heavy'],
+      // 第 2+3 批拆分：皇太子仅负责步兵主攻；重炮归独立指挥官。
+      responsibleUnits: ['de-infantry-21', 'de-infantry-7', 'de-infantry-12'],
+    },
+    // === 德军重炮指挥（精确打击，大贝尔莎操作者） ===
+    {
+      id: 'ai-germany-artillery-commander',
+      type: 'commander',
+      factionId: 'germany',
+      displayName: '重炮指挥',
+      personality:
+        '德军重炮部队指挥，操作 420mm「大贝尔莎」与 210mm 榴弹炮。崇尚精确打击，' +
+        '主张以重炮逐个敲开法军要塞。冷静、技术至上，反对步兵无谓冲锋。',
+      aggression: 0.5,
+      obedience: 0.8,
+      responsibleUnits: ['de-artillery-heavy'],
     },
   ],
 }

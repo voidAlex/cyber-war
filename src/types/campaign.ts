@@ -511,6 +511,14 @@ export interface AIRoleDef {
   type: 'chief' | 'diplomat' | 'commander' | 'director'
   /** 所属阵营 id（引用 factions.json） */
   factionId: string
+  /**
+   * 角色显示名（第 2+3 批，可选）。
+   *
+   * 角色 tab 对话 UI 的 tab 标签用此字段（如「法金汉」「皇太子」「重炮指挥」）。
+   * 缺省时按 type 中文名兜底（参谋长/外交官/指挥官/导演部）。
+   * 与 personality 区别：personality 是喂 LLM 的完整人格文本，displayName 是 UI 短标签。
+   */
+  displayName?: string
   /** 自然语言人格描述（喂给对应角色的 system prompt） */
   personality: string
   /** 进攻性 0..1（影响决策倾向） */

@@ -251,6 +251,84 @@ export function getChiefChatPersonaPrompt(): string {
   return CHIEF_CHAT_PERSONA_PROMPT
 }
 
+// =============================================================================
+// 第 2+3 批：多角色对话 persona（chief / diplomat / commander）
+// =============================================================================
+//
+// 角色 tab 对话 UI（DialogueStream 顶部 tab 栏）需要每类玩家侧角色独立 L0
+// persona。此处集中维护三个对话人格常量，吃满缓存：
+// - chief：参谋长（既有，复用 CHIEF_CHAT_PERSONA_PROMPT）。
+// - diplomat：外交官（与盟友/中立阵营谈判，谨慎/礼貌/利益交换）。
+// - commander：具体单位指挥官（向总司令报告，聚焦负责单位子集）。
+//
+// 注意：此「对话角色类型」**不进 AgentRole 联合**（AgentRole 仅含回合编排四角色
+// chief/theater/commander/director，扩展会波及 event-log/replay/sequence 全链路）。
+// diplomat 是纯对话角色，不参与 turn-resolution，故用独立的对话专用联合。
+// commander 对话与回合编排的 commander（敌/盟统帅决策）职责不同——对话侧是
+// 「玩家方某指挥官向总司令报告」，编排侧是「AI 阵营统帅决策」，两者共用 AgentRole
+// 名但对话路径独立（对话不写 event-log）。
+
+/**
+ * 对话角色类型（角色 tab 用）。
+ *
+ * 与 AgentRole（回合编排四角色）的关系：
+ * - 'chief'：与 AgentRole.chief 同名，对话路径独立（chief.chat 走对话 persona）。
+ * - 'commander'：与 AgentRole.commander 同名，但对话侧语义为「玩家方某指挥官」，
+ *   不参与 AI 编排决策；仅作为玩家可对话的 NPC（如炮兵司令/要塞守备）。
+ * - 'diplomat'：纯对话角色，**不在 AgentRole 联合中**（不进 event-log/replay）。
+ */
+export type ChatRoleType = 'chief' | 'diplomat' | 'commander'
+
+/** 外交官对话人格 L0 system prompt（第 2+3 批，固定不变） */
+const DIPLOMAT_CHAT_PERSONA_PROMPT = [
+  '你是玩家的外交官（Diplomat），一位谨慎、礼貌、精于利益交换的谈判代表。',
+  '职责：与盟友/中立阵营进行外交谈判——请求支援、协调行动、争取信任、化解分歧。',
+  '口吻：称玩家为「总司令」，语气正式、克制、含蓄，善用利益交换与妥协措辞，',
+  '但维护本国核心立场。谈判失败时委婉表达，不轻易承诺无法兑现之事。',
+  '原则：',
+  '- 仅基于上下文提供的真实阵营关系与信任度回答，绝不虚构不存在的盟约/援助。',
+  '- 回复须体现当前信任度（trust）：高信任时更易应允，低信任时倾向婉拒或附加条件。',
+  '- 不主动发动军事行动；军事请求需玩家明确下令（移动/攻击等走参谋长命令路径）。',
+  '- 回复控制在 2-5 句，适合对话气泡展示。',
+  '直接输出自然语言回复，不要输出 JSON 或其他格式。',
+].join('\n')
+
+/** 指挥官（玩家方某单位指挥官）对话人格 L0 system prompt（第 2+3 批，固定不变） */
+const COMMANDER_CHAT_PERSONA_PROMPT = [
+  '你是玩家麾下某建制单位的指挥官（Commander），正在向总司令（玩家）报告。',
+  '职责：汇报所辖单位的战备状态、当面敌情、战术建议，回应总司令的询问。',
+  '口吻：称玩家为「总司令」，语气干练、服从、聚焦本职（炮兵/要塞/步兵等专长），',
+  '可表达对所辖单位战况的专业判断，但服从上级最终决策。',
+  '原则：',
+  '- 仅基于上下文提供的真实世界状态回答，绝不虚构不存在的单位/阵地/战况。',
+  '- 汇报聚焦所辖单位（responsibleUnits），可援引当面敌情与地形，不越权评论全局战略。',
+  '- 不主动下达命令；执行命令需总司令明确下令（走参谋长命令解析路径）。',
+  '- 回复控制在 2-5 句，适合对话气泡展示。',
+  '直接输出自然语言回复，不要输出 JSON 或其他格式。',
+].join('\n')
+
+/**
+ * 各对话角色 L0 persona 文本表（吃满缓存，固定不变）。
+ *
+ * - chief 复用 CHIEF_CHAT_PERSONA_PROMPT（与既有 chief.chat 镜像一致）。
+ * - diplomat / commander 为第 2+3 批新增。
+ */
+const CHAT_PERSONA_PROMPTS: Record<ChatRoleType, string> = {
+  chief: CHIEF_CHAT_PERSONA_PROMPT,
+  diplomat: DIPLOMAT_CHAT_PERSONA_PROMPT,
+  commander: COMMANDER_CHAT_PERSONA_PROMPT,
+}
+
+/**
+ * 取某对话角色的 L0 persona 文本（diplomat.ts 等角色复用，保证 L0 字节一致）。
+ *
+ * @param roleType 对话角色类型（chief/diplomat/commander）
+ * @returns 该角色的 L0 system prompt 文本（固定不变）
+ */
+export function getChatPersonaPrompt(roleType: ChatRoleType): string {
+  return CHAT_PERSONA_PROMPTS[roleType]
+}
+
 /** buildMessages 的角色名（重导出，避免与 AgentRole 冲突时清晰） */
 export type { AgentRole as ContextBuilderRole }
 
@@ -385,6 +463,61 @@ export function buildChatMessages(input: BuildChatMessagesInput): AgentMessage[]
 
   // L0：参谋长对话人格（固定不变）
   messages.push({ role: 'system', content: CHIEF_CHAT_PERSONA_PROMPT })
+
+  // L1：战役数据（开局冻结）
+  messages.push({
+    role: 'system',
+    content: `战役数据（本局冻结）：\n${serializeCampaignData(input.worldState)}`,
+  })
+
+  // L2：当前回合世界状态摘要 + 上下文压缩摘要（每回合变，同回合共享）
+  messages.push({
+    role: 'system',
+    content: `当前世界状态摘要（本回合）：\n${serializeWorldSummary(input.worldState)}`,
+  })
+
+  // 历史对话（append-only，多轮天然命中缓存）—— DialogueTurn → AgentMessage
+  if (input.history && input.history.length > 0) {
+    const historyMessages = dialogueTurnsToMessages(input.history)
+    for (const msg of historyMessages) {
+      messages.push(msg)
+    }
+  }
+
+  // L3：本轮玩家问话（自然语言，回合号属 L3 安全，system prompt 不含回合号）
+  messages.push({ role: 'user', content: input.task })
+
+  return messages
+}
+
+// =============================================================================
+// buildChatMessagesForRole：多角色对话专用（第 2+3 批角色 tab）
+// =============================================================================
+//
+// 与 buildChatMessages 的区别：L0 persona 按 roleType 切换（chief/diplomat/commander），
+// 而非固定 CHIEF_CHAT_PERSONA_PROMPT。L1/L2/history/L3 结构与 buildChatMessages 一致
+// （缓存前缀对齐，仅 L0 首条 persona 不同）。
+
+/**
+ * 按 L0-L3 缓存分层构造**多角色**对话 messages（角色 tab 用）。
+ *
+ * 分层与 {@link buildChatMessages} 一致，仅 L0 persona 按 roleType 切换：
+ * - chief：参谋长人格（CHIEF_CHAT_PERSONA_PROMPT，与 buildChatMessages 等价）。
+ * - diplomat：外交官人格（DIPLOMAT_CHAT_PERSONA_PROMPT）。
+ * - commander：指挥官人格（COMMANDER_CHAT_PERSONA_PROMPT）。
+ *
+ * @param roleType 对话角色类型（chief/diplomat/commander）
+ * @param input 对话上下文输入（worldState/task/history）
+ * @returns 分层 messages 数组（含历史）
+ */
+export function buildChatMessagesForRole(
+  roleType: ChatRoleType,
+  input: BuildChatMessagesInput,
+): AgentMessage[] {
+  const messages: AgentMessage[] = []
+
+  // L0：按角色切换的对话人格（固定不变）
+  messages.push({ role: 'system', content: CHAT_PERSONA_PROMPTS[roleType] })
 
   // L1：战役数据（开局冻结）
   messages.push({
